@@ -133,11 +133,45 @@ export OPENCHAMBER_OPENCODE_PATH="/Users/oleksii.honchar/bin/better-opencode"
 
 ### Keeping the Fork Updated
 
+**Important:** `-X theirs` auto-accepts upstream changes and **discards your local changes** on conflict. Only use it when you have no local changes yet.
+
+**Scenario A: Fresh sync (no local changes, just catching up)**
 ```bash
 cd ~/www/misc/better-opencode
-git fetch upstream
+
+# 1. Reset to upstream (wipes local changes)
 git checkout patched/dev
-git rebase upstream/dev --reapply-cherry-picks
+git reset --hard upstream/dev
+
+# 2. Rebase onto your fork's remote with auto-accept
+git fetch origin patched/dev --quiet
+git rebase -X theirs origin/patched/dev
+
+# 3. Push to your fork (origin), NOT upstream
+git push --no-verify origin patched/dev
+
+# 4. Build and install
+./build-and-install.sh --install --clean
+```
+
+**Scenario B: After adding patches (has local changes)**
+```bash
+cd ~/www/misc/better-opencode
+
+# 1. Rebase onto your fork's remote (manual conflict resolution)
+git checkout patched/dev
+git fetch origin patched/dev --quiet
+git rebase origin/patched/dev
+
+# 2. On conflict, resolve manually:
+#    Keep YOUR changes:    git checkout --ours <file> && git add <file>
+#    Keep UPSTREAM changes: git checkout --theirs <file> && git add <file>
+#    Then: git rebase --continue
+
+# 3. Push to your fork (origin), NOT upstream
+git push origin patched/dev
+
+# 4. Build and install
 ./build-and-install.sh --install --clean
 ```
 
