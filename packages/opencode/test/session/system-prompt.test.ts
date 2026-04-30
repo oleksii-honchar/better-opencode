@@ -10,8 +10,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { Effect, Layer } from "effect"
-import { Instance } from "../../src/project/instance"
+import { Effect } from "effect"
 import { SystemPrompt } from "../../src/session/system"
 import { provideInstance, tmpdir } from "../fixture/fixture"
 import { ModelID, ProviderID } from "../../src/provider/schema"
@@ -22,47 +21,43 @@ describe("session.system-prompt", () => {
       git: true,
     })
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const runEnv = Effect.gen(function* () {
-          const svc = yield* SystemPrompt.Service
-          return svc.environment(
-            {
-              id: ModelID.make("claude-sonnet-4-20250514"),
-              providerID: ProviderID.anthropic,
-              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
-              name: "Claude Sonnet 4",
-              family: undefined,
-              capabilities: {
-                temperature: true,
-                reasoning: false,
-                attachment: false,
-                toolcall: true,
-                input: { text: true, audio: false, image: false, video: false, pdf: false },
-                output: { text: true, audio: false, image: false, video: false, pdf: false },
-                interleaved: false,
-              },
-              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-              limit: { context: 0, input: 0, output: 0 },
-              status: "active" as const,
-              options: {},
-              headers: {},
-              release_date: "",
-              variants: undefined,
-            },
-            "ses_241c208c9ffeI6DgeZh6Qhu3sl",
-            undefined,
-          )
-        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+    const runEnv = Effect.gen(function* () {
+      const svc = yield* SystemPrompt.Service
+      const result = yield* svc.environment(
+        {
+          id: ModelID.make("claude-sonnet-4-20250514"),
+          providerID: ProviderID.anthropic,
+          api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+          name: "Claude Sonnet 4",
+          family: undefined,
+          capabilities: {
+            temperature: true,
+            reasoning: false,
+            attachment: false,
+            toolcall: true,
+            input: { text: true, audio: false, image: false, video: false, pdf: false },
+            output: { text: true, audio: false, image: false, video: false, pdf: false },
+            interleaved: false,
+          },
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          limit: { context: 0, input: 0, output: 0 },
+          status: "active" as const,
+          options: {},
+          headers: {},
+          release_date: "",
+          variants: undefined,
+        },
+        "ses_241c208c9ffeI6DgeZh6Qhu3sl",
+        undefined,
+      )
+      return result
+    }).pipe(provideInstance(tmp.path), Effect.provide(SystemPrompt.defaultLayer))
 
-        const result = await Effect.runPromise(runEnv)
-        const envBlock = result[0]
+    const result = await Effect.runPromise(runEnv)
+    const envBlock = result[0]
 
-        expect(envBlock).toContain("Session ID: ses_241c208c9ffeI6DgeZh6Qhu3sl")
-        expect(envBlock).not.toContain("Parent Session ID:")
-      },
-    })
+    expect(envBlock).toContain("Session ID: ses_241c208c9ffeI6DgeZh6Qhu3sl")
+    expect(envBlock).not.toContain("Parent Session ID:")
   })
 
   test("environment includes Parent Session ID when provided", async () => {
@@ -70,49 +65,43 @@ describe("session.system-prompt", () => {
       git: true,
     })
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const runEnv = Effect.gen(function* () {
-          const svc = yield* SystemPrompt.Service
-          return svc.environment(
-            {
-              id: ModelID.make("claude-sonnet-4-20250514"),
-              providerID: ProviderID.anthropic,
-              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
-              name: "Claude Sonnet 4",
-              family: undefined,
-              capabilities: {
-                temperature: true,
-                reasoning: false,
-                attachment: false,
-                toolcall: true,
-                input: { text: true, audio: false, image: false, video: false, pdf: false },
-                output: { text: true, audio: false, image: false, video: false, pdf: false },
-                interleaved: false,
-              },
-              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-              limit: { context: 0, input: 0, output: 0 },
-              status: "active" as const,
-              options: {},
-              headers: {},
-              release_date: "",
-              variants: undefined,
-            },
-            undefined,
-            "ses_parent123",
-          )
-        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+    const runEnv = Effect.gen(function* () {
+      const svc = yield* SystemPrompt.Service
+      const result = yield* svc.environment(
+        {
+          id: ModelID.make("claude-sonnet-4-20250514"),
+          providerID: ProviderID.anthropic,
+          api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+          name: "Claude Sonnet 4",
+          family: undefined,
+          capabilities: {
+            temperature: true,
+            reasoning: false,
+            attachment: false,
+            toolcall: true,
+            input: { text: true, audio: false, image: false, video: false, pdf: false },
+            output: { text: true, audio: false, image: false, video: false, pdf: false },
+            interleaved: false,
+          },
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          limit: { context: 0, input: 0, output: 0 },
+          status: "active" as const,
+          options: {},
+          headers: {},
+          release_date: "",
+          variants: undefined,
+        },
+        undefined,
+        "ses_parent123",
+      )
+      return result
+    }).pipe(provideInstance(tmp.path), Effect.provide(SystemPrompt.defaultLayer))
 
-        const result = await Effect.runPromise(runEnv)
-        const envBlock = result[0]
+    const result = await Effect.runPromise(runEnv)
+    const envBlock = result[0]
 
-        expect(envBlock).toContain("Parent Session ID: ses_parent123")
-        // When only parentSessionID is provided, Session ID should not be present
-        // Note: "Parent Session ID:" contains "Session ID:" as substring, so we check for the exact line
-        expect(envBlock).not.toMatch(/^[ ]*Session ID:.*$/m)
-      },
-    })
+    expect(envBlock).toContain("Parent Session ID: ses_parent123")
+    expect(envBlock).not.toMatch(/^[ ]*Session ID:.*$/m)
   })
 
   test("environment includes both Session ID and Parent Session ID when both provided", async () => {
@@ -120,47 +109,43 @@ describe("session.system-prompt", () => {
       git: true,
     })
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const runEnv = Effect.gen(function* () {
-          const svc = yield* SystemPrompt.Service
-          return svc.environment(
-            {
-              id: ModelID.make("claude-sonnet-4-20250514"),
-              providerID: ProviderID.anthropic,
-              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
-              name: "Claude Sonnet 4",
-              family: undefined,
-              capabilities: {
-                temperature: true,
-                reasoning: false,
-                attachment: false,
-                toolcall: true,
-                input: { text: true, audio: false, image: false, video: false, pdf: false },
-                output: { text: true, audio: false, image: false, video: false, pdf: false },
-                interleaved: false,
-              },
-              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-              limit: { context: 0, input: 0, output: 0 },
-              status: "active" as const,
-              options: {},
-              headers: {},
-              release_date: "",
-              variants: undefined,
-            },
-            "ses_child123",
-            "ses_parent456",
-          )
-        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+    const runEnv = Effect.gen(function* () {
+      const svc = yield* SystemPrompt.Service
+      const result = yield* svc.environment(
+        {
+          id: ModelID.make("claude-sonnet-4-20250514"),
+          providerID: ProviderID.anthropic,
+          api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+          name: "Claude Sonnet 4",
+          family: undefined,
+          capabilities: {
+            temperature: true,
+            reasoning: false,
+            attachment: false,
+            toolcall: true,
+            input: { text: true, audio: false, image: false, video: false, pdf: false },
+            output: { text: true, audio: false, image: false, video: false, pdf: false },
+            interleaved: false,
+          },
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          limit: { context: 0, input: 0, output: 0 },
+          status: "active" as const,
+          options: {},
+          headers: {},
+          release_date: "",
+          variants: undefined,
+        },
+        "ses_child123",
+        "ses_parent456",
+      )
+      return result
+    }).pipe(provideInstance(tmp.path), Effect.provide(SystemPrompt.defaultLayer))
 
-        const result = await Effect.runPromise(runEnv)
-        const envBlock = result[0]
+    const result = await Effect.runPromise(runEnv)
+    const envBlock = result[0]
 
-        expect(envBlock).toContain("Session ID: ses_child123")
-        expect(envBlock).toContain("Parent Session ID: ses_parent456")
-      },
-    })
+    expect(envBlock).toContain("Session ID: ses_child123")
+    expect(envBlock).toContain("Parent Session ID: ses_parent456")
   })
 
   test("environment is backward compatible without session parameters", async () => {
@@ -168,55 +153,49 @@ describe("session.system-prompt", () => {
       git: true,
     })
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const runEnv = Effect.gen(function* () {
-          const svc = yield* SystemPrompt.Service
-          return svc.environment(
-            {
-              id: ModelID.make("claude-sonnet-4-20250514"),
-              providerID: ProviderID.anthropic,
-              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
-              name: "Claude Sonnet 4",
-              family: undefined,
-              capabilities: {
-                temperature: true,
-                reasoning: false,
-                attachment: false,
-                toolcall: true,
-                input: { text: true, audio: false, image: false, video: false, pdf: false },
-                output: { text: true, audio: false, image: false, video: false, pdf: false },
-                interleaved: false,
-              },
-              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-              limit: { context: 0, input: 0, output: 0 },
-              status: "active" as const,
-              options: {},
-              headers: {},
-              release_date: "",
-              variants: undefined,
-            },
-          )
-        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+    const runEnv = Effect.gen(function* () {
+      const svc = yield* SystemPrompt.Service
+      const result = yield* svc.environment(
+        {
+          id: ModelID.make("claude-sonnet-4-20250514"),
+          providerID: ProviderID.anthropic,
+          api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+          name: "Claude Sonnet 4",
+          family: undefined,
+          capabilities: {
+            temperature: true,
+            reasoning: false,
+            attachment: false,
+            toolcall: true,
+            input: { text: true, audio: false, image: false, video: false, pdf: false },
+            output: { text: true, audio: false, image: false, video: false, pdf: false },
+            interleaved: false,
+          },
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          limit: { context: 0, input: 0, output: 0 },
+          status: "active" as const,
+          options: {},
+          headers: {},
+          release_date: "",
+          variants: undefined,
+        },
+      )
+      return result
+    }).pipe(provideInstance(tmp.path), Effect.provide(SystemPrompt.defaultLayer))
 
-        const result = await Effect.runPromise(runEnv)
-        const envBlock = result[0]
+    const result = await Effect.runPromise(runEnv)
+    const envBlock = result[0]
 
-        // Should still have all standard env fields
-        expect(envBlock).toContain("<env>")
-        expect(envBlock).toContain("</env>")
-        expect(envBlock).toContain("Working directory:")
-        expect(envBlock).toContain("Workspace root folder:")
-        expect(envBlock).toContain("Is directory a git repo:")
-        expect(envBlock).toContain("Platform:")
-        expect(envBlock).toContain("Today's date:")
+    expect(envBlock).toContain("<env>")
+    expect(envBlock).toContain("</env>")
+    expect(envBlock).toContain("Working directory:")
+    expect(envBlock).toContain("Workspace root folder:")
+    expect(envBlock).toContain("Is directory a git repo:")
+    expect(envBlock).toContain("Platform:")
+    expect(envBlock).toContain("Today's date:")
 
-        // Should NOT have session ID fields
-        expect(envBlock).not.toContain("Session ID:")
-        expect(envBlock).not.toContain("Parent Session ID:")
-      },
-    })
+    expect(envBlock).not.toContain("Session ID:")
+    expect(envBlock).not.toContain("Parent Session ID:")
   })
 
   test("environment maintains correct field order", async () => {
@@ -224,61 +203,54 @@ describe("session.system-prompt", () => {
       git: true,
     })
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const runEnv = Effect.gen(function* () {
-          const svc = yield* SystemPrompt.Service
-          return svc.environment(
-            {
-              id: ModelID.make("claude-sonnet-4-20250514"),
-              providerID: ProviderID.anthropic,
-              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
-              name: "Claude Sonnet 4",
-              family: undefined,
-              capabilities: {
-                temperature: true,
-                reasoning: false,
-                attachment: false,
-                toolcall: true,
-                input: { text: true, audio: false, image: false, video: false, pdf: false },
-                output: { text: true, audio: false, image: false, video: false, pdf: false },
-                interleaved: false,
-              },
-              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-              limit: { context: 0, input: 0, output: 0 },
-              status: "active" as const,
-              options: {},
-              headers: {},
-              release_date: "",
-              variants: undefined,
-            },
-            "ses_child",
-            "ses_parent",
-          )
-        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+    const runEnv = Effect.gen(function* () {
+      const svc = yield* SystemPrompt.Service
+      const result = yield* svc.environment(
+        {
+          id: ModelID.make("claude-sonnet-4-20250514"),
+          providerID: ProviderID.anthropic,
+          api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+          name: "Claude Sonnet 4",
+          family: undefined,
+          capabilities: {
+            temperature: true,
+            reasoning: false,
+            attachment: false,
+            toolcall: true,
+            input: { text: true, audio: false, image: false, video: false, pdf: false },
+            output: { text: true, audio: false, image: false, video: false, pdf: false },
+            interleaved: false,
+          },
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          limit: { context: 0, input: 0, output: 0 },
+          status: "active" as const,
+          options: {},
+          headers: {},
+          release_date: "",
+          variants: undefined,
+        },
+        "ses_child",
+        "ses_parent",
+      )
+      return result
+    }).pipe(provideInstance(tmp.path), Effect.provide(SystemPrompt.defaultLayer))
 
-        const result = await Effect.runPromise(runEnv)
-        const envBlock = result[0]
-        const lines = envBlock.split("\n")
+    const result = await Effect.runPromise(runEnv)
+    const envBlock = result[0]
+    const lines = envBlock.split("\n")
 
-        // The envBlock starts with model info, then the env block
-        // Find the <env> line index
-        const envStartIndex = lines.findIndex(line => line === "<env>")
-        expect(envStartIndex).toBeGreaterThanOrEqual(0)
+    const envStartIndex = lines.findIndex(line => line === "<env>")
+    expect(envStartIndex).toBeGreaterThanOrEqual(0)
 
-        // Verify order: <env>, working dir, workspace, git, platform, date, session ID, parent session ID, </env>
-        expect(lines[envStartIndex]).toBe("<env>")
-        expect(lines[envStartIndex + 1]).toContain("Working directory:")
-        expect(lines[envStartIndex + 2]).toContain("Workspace root folder:")
-        expect(lines[envStartIndex + 3]).toContain("Is directory a git repo:")
-        expect(lines[envStartIndex + 4]).toContain("Platform:")
-        expect(lines[envStartIndex + 5]).toContain("Today's date:")
-        expect(lines[envStartIndex + 6]).toContain("Session ID: ses_child")
-        expect(lines[envStartIndex + 7]).toContain("Parent Session ID: ses_parent")
-        expect(lines[envStartIndex + 8]).toBe("</env>")
-      },
-    })
+    expect(lines[envStartIndex]).toBe("<env>")
+    expect(lines[envStartIndex + 1]).toContain("Working directory:")
+    expect(lines[envStartIndex + 2]).toContain("Workspace root folder:")
+    expect(lines[envStartIndex + 3]).toContain("Is directory a git repo:")
+    expect(lines[envStartIndex + 4]).toContain("Platform:")
+    expect(lines[envStartIndex + 5]).toContain("Today's date:")
+    expect(lines[envStartIndex + 6]).toContain("Session ID: ses_child")
+    expect(lines[envStartIndex + 7]).toContain("Parent Session ID: ses_parent")
+    expect(lines[envStartIndex + 8]).toBe("</env>")
   })
 
   test("environment includes model information in first line", async () => {
@@ -286,45 +258,41 @@ describe("session.system-prompt", () => {
       git: true,
     })
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const runEnv = Effect.gen(function* () {
-          const svc = yield* SystemPrompt.Service
-          return svc.environment(
-            {
-              id: ModelID.make("claude-sonnet-4-20250514"),
-              providerID: ProviderID.anthropic,
-              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
-              name: "Claude Sonnet 4",
-              family: undefined,
-              capabilities: {
-                temperature: true,
-                reasoning: false,
-                attachment: false,
-                toolcall: true,
-                input: { text: true, audio: false, image: false, video: false, pdf: false },
-                output: { text: true, audio: false, image: false, video: false, pdf: false },
-                interleaved: false,
-              },
-              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-              limit: { context: 0, input: 0, output: 0 },
-              status: "active" as const,
-              options: {},
-              headers: {},
-              release_date: "",
-              variants: undefined,
-            },
-          )
-        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+    const runEnv = Effect.gen(function* () {
+      const svc = yield* SystemPrompt.Service
+      const result = yield* svc.environment(
+        {
+          id: ModelID.make("claude-sonnet-4-20250514"),
+          providerID: ProviderID.anthropic,
+          api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+          name: "Claude Sonnet 4",
+          family: undefined,
+          capabilities: {
+            temperature: true,
+            reasoning: false,
+            attachment: false,
+            toolcall: true,
+            input: { text: true, audio: false, image: false, video: false, pdf: false },
+            output: { text: true, audio: false, image: false, video: false, pdf: false },
+            interleaved: false,
+          },
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          limit: { context: 0, input: 0, output: 0 },
+          status: "active" as const,
+          options: {},
+          headers: {},
+          release_date: "",
+          variants: undefined,
+        },
+      )
+      return result
+    }).pipe(provideInstance(tmp.path), Effect.provide(SystemPrompt.defaultLayer))
 
-        const result = await Effect.runPromise(runEnv)
-        const firstLine = result[0].split("\n")[0]
+    const result = await Effect.runPromise(runEnv)
+    const firstLine = result[0].split("\n")[0]
 
-        expect(firstLine).toContain("claude-sonnet-4-20250514")
-        expect(firstLine).toContain("anthropic/claude-sonnet-4-20250514")
-      },
-    })
+    expect(firstLine).toContain("claude-sonnet-4-20250514")
+    expect(firstLine).toContain("anthropic/claude-sonnet-4-20250514")
   })
 
   test("interface accepts optional parameters without throwing", async () => {
@@ -332,49 +300,39 @@ describe("session.system-prompt", () => {
       git: true,
     })
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const runEnv = Effect.gen(function* () {
-          const svc = yield* SystemPrompt.Service
+    const runEnv = Effect.gen(function* () {
+      const svc = yield* SystemPrompt.Service
 
-          // Helper to create minimal model object
-          const makeModel = () => ({
-            id: ModelID.make("test"),
-            providerID: ProviderID.make("test"),
-            api: { id: "test", url: "", npm: "test" },
-            name: "Test",
-            family: undefined,
-            capabilities: {
-              temperature: true,
-              reasoning: false,
-              attachment: false,
-              toolcall: true,
-              input: { text: true, audio: false, image: false, video: false, pdf: false },
-              output: { text: true, audio: false, image: false, video: false, pdf: false },
-              interleaved: false,
-            },
-            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-            limit: { context: 0, input: 0, output: 0 },
-            status: "active" as const,
-            options: {},
-            headers: {},
-            release_date: "",
-            variants: undefined,
-          })
+      const makeModel = () => ({
+        id: ModelID.make("test"),
+        providerID: ProviderID.make("test"),
+        api: { id: "test", url: "", npm: "test" },
+        name: "Test",
+        family: undefined,
+        capabilities: {
+          temperature: true,
+          reasoning: false,
+          attachment: false,
+          toolcall: true,
+          input: { text: true, audio: false, image: false, video: false, pdf: false },
+          output: { text: true, audio: false, image: false, video: false, pdf: false },
+          interleaved: false,
+        },
+        cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+        limit: { context: 0, input: 0, output: 0 },
+        status: "active" as const,
+        options: {},
+        headers: {},
+        release_date: "",
+        variants: undefined,
+      })
 
-          // Should not throw with any combination of parameters
-          expect(() => svc.environment(makeModel())).not.toThrow()
+      yield* svc.environment(makeModel())
+      yield* svc.environment(makeModel(), "ses_test")
+      yield* svc.environment(makeModel(), undefined, "ses_parent")
+      yield* svc.environment(makeModel(), "ses_child", "ses_parent")
+    }).pipe(provideInstance(tmp.path), Effect.provide(SystemPrompt.defaultLayer))
 
-          expect(() => svc.environment(makeModel(), "ses_test")).not.toThrow()
-
-          expect(() => svc.environment(makeModel(), undefined, "ses_parent")).not.toThrow()
-
-          expect(() => svc.environment(makeModel(), "ses_child", "ses_parent")).not.toThrow()
-        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
-
-        await Effect.runPromise(runEnv)
-      },
-    })
+    await Effect.runPromise(runEnv)
   })
 })
