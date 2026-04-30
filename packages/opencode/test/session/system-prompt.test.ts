@@ -1,0 +1,274 @@
+/**
+ * Tests for Session ID in System Prompt feature (01-session-id-system-prompt.md)
+ *
+ * These tests verify that:
+ * 1. The environment() method accepts optional sessionID and parentSessionID parameters
+ * 2. Session ID appears in the <env> block when provided
+ * 3. Parent Session ID appears in the <env> block when provided
+ * 4. Backward compatibility - no session ID lines when parameters are omitted
+ * 5. The rest of the <env> block is unchanged
+ */
+
+import { describe, expect, test } from "bun:test"
+import path from "path"
+import { Effect, Layer } from "effect"
+import { Instance } from "../../src/project/instance"
+import { SystemPrompt } from "../../src/session/system"
+import { provideInstance, tmpdir } from "../fixture/fixture"
+import type { Provider } from "@/provider/provider"
+
+describe("session.system-prompt", () => {
+  test("environment includes Session ID when provided", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const runEnv = Effect.gen(function* () {
+          const svc = yield* SystemPrompt.Service
+          return svc.environment(
+            {
+              id: "claude-sonnet-4-20250514",
+              providerID: "anthropic",
+              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
+              variant: "",
+            },
+            "ses_241c208c9ffeI6DgeZh6Qhu3sl",
+            undefined,
+          )
+        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+
+        const result = await Effect.runPromise(runEnv)
+        const envBlock = result[0]
+
+        expect(envBlock).toContain("Session ID: ses_241c208c9ffeI6DgeZh6Qhu3sl")
+        expect(envBlock).not.toContain("Parent Session ID:")
+      },
+    })
+  })
+
+  test("environment includes Parent Session ID when provided", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const runEnv = Effect.gen(function* () {
+          const svc = yield* SystemPrompt.Service
+          return svc.environment(
+            {
+              id: "claude-sonnet-4-20250514",
+              providerID: "anthropic",
+              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
+              variant: "",
+            },
+            undefined,
+            "ses_parent123",
+          )
+        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+
+        const result = await Effect.runPromise(runEnv)
+        const envBlock = result[0]
+
+        expect(envBlock).toContain("Parent Session ID: ses_parent123")
+        // When only parentSessionID is provided, Session ID should not be present
+        // Note: "Parent Session ID:" contains "Session ID:" as substring, so we check for the exact line
+        expect(envBlock).not.toMatch(/^[ ]*Session ID:.*$/m)
+      },
+    })
+  })
+
+  test("environment includes both Session ID and Parent Session ID when both provided", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const runEnv = Effect.gen(function* () {
+          const svc = yield* SystemPrompt.Service
+          return svc.environment(
+            {
+              id: "claude-sonnet-4-20250514",
+              providerID: "anthropic",
+              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
+              variant: "",
+            },
+            "ses_child123",
+            "ses_parent456",
+          )
+        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+
+        const result = await Effect.runPromise(runEnv)
+        const envBlock = result[0]
+
+        expect(envBlock).toContain("Session ID: ses_child123")
+        expect(envBlock).toContain("Parent Session ID: ses_parent456")
+      },
+    })
+  })
+
+  test("environment is backward compatible without session parameters", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const runEnv = Effect.gen(function* () {
+          const svc = yield* SystemPrompt.Service
+          return svc.environment(
+            {
+              id: "claude-sonnet-4-20250514",
+              providerID: "anthropic",
+              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
+              variant: "",
+            },
+          )
+        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+
+        const result = await Effect.runPromise(runEnv)
+        const envBlock = result[0]
+
+        // Should still have all standard env fields
+        expect(envBlock).toContain("<env>")
+        expect(envBlock).toContain("</env>")
+        expect(envBlock).toContain("Working directory:")
+        expect(envBlock).toContain("Workspace root folder:")
+        expect(envBlock).toContain("Is directory a git repo:")
+        expect(envBlock).toContain("Platform:")
+        expect(envBlock).toContain("Today's date:")
+
+        // Should NOT have session ID fields
+        expect(envBlock).not.toContain("Session ID:")
+        expect(envBlock).not.toContain("Parent Session ID:")
+      },
+    })
+  })
+
+  test("environment maintains correct field order", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const runEnv = Effect.gen(function* () {
+          const svc = yield* SystemPrompt.Service
+          return svc.environment(
+            {
+              id: "claude-sonnet-4-20250514",
+              providerID: "anthropic",
+              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
+              variant: "",
+            },
+            "ses_child",
+            "ses_parent",
+          )
+        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+
+        const result = await Effect.runPromise(runEnv)
+        const envBlock = result[0]
+        const lines = envBlock.split("\n")
+
+        // The envBlock starts with model info, then the env block
+        // Find the <env> line index
+        const envStartIndex = lines.findIndex(line => line === "<env>")
+        expect(envStartIndex).toBeGreaterThanOrEqual(0)
+
+        // Verify order: <env>, working dir, workspace, git, platform, date, session ID, parent session ID, </env>
+        expect(lines[envStartIndex]).toBe("<env>")
+        expect(lines[envStartIndex + 1]).toContain("Working directory:")
+        expect(lines[envStartIndex + 2]).toContain("Workspace root folder:")
+        expect(lines[envStartIndex + 3]).toContain("Is directory a git repo:")
+        expect(lines[envStartIndex + 4]).toContain("Platform:")
+        expect(lines[envStartIndex + 5]).toContain("Today's date:")
+        expect(lines[envStartIndex + 6]).toContain("Session ID: ses_child")
+        expect(lines[envStartIndex + 7]).toContain("Parent Session ID: ses_parent")
+        expect(lines[envStartIndex + 8]).toBe("</env>")
+      },
+    })
+  })
+
+  test("environment includes model information in first line", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const runEnv = Effect.gen(function* () {
+          const svc = yield* SystemPrompt.Service
+          return svc.environment(
+            {
+              id: "claude-sonnet-4-20250514",
+              providerID: "anthropic",
+              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
+              variant: "",
+            },
+          )
+        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+
+        const result = await Effect.runPromise(runEnv)
+        const firstLine = result[0].split("\n")[0]
+
+        expect(firstLine).toContain("claude-sonnet-4-20250514")
+        expect(firstLine).toContain("anthropic/claude-sonnet-4-20250514")
+      },
+    })
+  })
+
+  test("interface accepts optional parameters without throwing", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const runEnv = Effect.gen(function* () {
+          const svc = yield* SystemPrompt.Service
+
+          // Should not throw with any combination of parameters
+          expect(() => svc.environment({
+            id: "test",
+            providerID: "test",
+            api: { id: "test", name: "Test", provider: "test" },
+            variant: "",
+          })).not.toThrow()
+
+          expect(() => svc.environment({
+            id: "test",
+            providerID: "test",
+            api: { id: "test", name: "Test", provider: "test" },
+            variant: "",
+          }, "ses_test")).not.toThrow()
+
+          expect(() => svc.environment({
+            id: "test",
+            providerID: "test",
+            api: { id: "test", name: "Test", provider: "test" },
+            variant: "",
+          }, undefined, "ses_parent")).not.toThrow()
+
+          expect(() => svc.environment({
+            id: "test",
+            providerID: "test",
+            api: { id: "test", name: "Test", provider: "test" },
+            variant: "",
+          }, "ses_child", "ses_parent")).not.toThrow()
+        }).pipe(Effect.provide(SystemPrompt.defaultLayer))
+
+        await Effect.runPromise(runEnv)
+      },
+    })
+  })
+})

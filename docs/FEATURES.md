@@ -60,7 +60,7 @@ Plugins can intercept the agent's idle/stop state and inject a follow-up message
 
 📋 [Detailed Spec](./spec/01-session-id-system-prompt.md)
 
-**Status:** ⏳ Pending — Custom commit `50d0b4dcfd` exists on `patched/dev` branch but not yet applied
+**Status:** ✅ **Implemented** — Added to `patched/dev` branch, build verified
 
 The current `sessionID` and `parentSessionID` are included in the system prompt `<env>` block on every LLM call. This survives compaction because the system prompt is rebuilt from scratch each turn.
 

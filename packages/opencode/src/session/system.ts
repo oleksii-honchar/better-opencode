@@ -33,7 +33,7 @@ export function provider(model: Provider.Model) {
 }
 
 export interface Interface {
-  readonly environment: (model: Provider.Model) => string[]
+  readonly environment: (model: Provider.Model, sessionID?: string, parentSessionID?: string) => string[]
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
 }
 
@@ -45,7 +45,7 @@ export const layer = Layer.effect(
     const skill = yield* Skill.Service
 
     return Service.of({
-      environment(model) {
+      environment(model, sessionID, parentSessionID) {
         const project = Instance.project
         return [
           [
@@ -57,6 +57,8 @@ export const layer = Layer.effect(
             `  Is directory a git repo: ${project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,
+            ...(sessionID ? [`  Session ID: ${sessionID}`] : []),
+            ...(parentSessionID ? [`  Parent Session ID: ${parentSessionID}`] : []),
             `</env>`,
           ].join("\n"),
         ]

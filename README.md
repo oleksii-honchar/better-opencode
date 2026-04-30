@@ -116,6 +116,42 @@ Learn more about [agents](https://opencode.ai/docs/agents).
 
 For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
 
+### Development Setup (openchamber Integration)
+
+If you're using the [openchamber](https://github.com/anomalyco/openchamber) VSCode extension with this fork, there's a convenience script to start the dev server and connect openchamber to it.
+
+```bash
+# Start dev server + VSCode (one command)
+./start-dev.sh
+
+# Start with VSCodeVodium (default is VSCode)
+./start-dev.sh --vscodium
+
+# Or just start the dev server
+OPENCODE_PORT=4096 OPENCODE_SERVER_PASSWORD=opencode_dev bun run --cwd packages/opencode --conditions=browser src/index.ts
+
+# Stop the dev server
+./start-dev.sh --stop
+```
+
+**Options:**
+```bash
+./start-dev.sh --port 5000           # Use custom port
+./start-dev.sh --password secret     # Use custom password
+./start-dev.sh --vscodium            # Use VSCodeVodium instead of VSCode
+./start-dev.sh --stop                # Stop the dev server
+```
+
+**Environment variables:**
+```bash
+BETTER_OPENCODE_DIR  # Path to better-opencode (default: ~/www/misc/better-opencode)
+OPENCODE_PORT        # Port for dev server (default: 4096)
+OPENCODE_PASSWORD    # Password for dev server (default: opencode_dev)
+VSCODE_APP           # VSCode variant: 'code' (VSCode) or 'codium' (VSCodeVodium)
+```
+
+The script automatically configures the openchamber extension to connect to the running dev server using external mode (`OPENCODE_SKIP_START=true`).
+
 ### Contributing
 
 If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.

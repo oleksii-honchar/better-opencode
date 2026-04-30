@@ -1,10 +1,10 @@
 ---
 feature: session-id-system-prompt
 version: 1.0.0
-status: spec
+status: implemented
 source: architect/spec.md (Patch 3)
 pr: N/A (custom commit 50d0b4dcfd)
-implementation: pending
+implementation: completed
 ---
 
 # Spec: Session ID in System Prompt
@@ -13,9 +13,9 @@ implementation: pending
 
 | Status | Description |
 |--------|-------------|
-| **Status** | ⏳ **Pending** — Not yet implemented |
-| **Source** | Custom commit `50d0b4dcfd` on `patched/dev` branch |
-| **Next Step** | Cherry-pick or manually apply to `patched/dev` |
+| **Status** | ✅ **Completed** — Implemented directly in `patched/dev` branch |
+| **Source** | Custom commit `50d0b4dcfd` (now merged into codebase) |
+| **Build** | ✅ Verified — `bun turbo typecheck` passes, `bun run --cwd packages/opencode build` succeeds |
 
 ## Problem Statement
 

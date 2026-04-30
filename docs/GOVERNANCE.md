@@ -163,6 +163,94 @@ git push origin patched/dev --force-with-lease
 
 ---
 
+## OpenChamber Integration
+
+### How openchamber Consumes better-opencode
+
+OpenChamber has two consumption paths:
+
+**1. SDK Packages (npm registry)**
+- `@opencode-ai/sdk` — API client for opencode server
+- Consumed via npm registry (published packages)
+- Path: `packages/sdk/js/` in better-opencode
+- Current version in openchamber: `^1.4.25`
+
+**2. CLI Binary (local path)**
+- The opencode CLI binary used by openchamber desktop/web
+- Configured in openchamber's `settings.json`:
+  ```json
+  {
+    "opencodeBinary": "/Users/oleksii.honchar/bin/better-opencode"
+  }
+  ```
+- Binary built by `build-and-install.sh --install`
+- Installed to: `~/bin/better-opencode`
+
+### Dev Setup: Using Local better-opencode in openchamber
+
+For development, you may want openchamber to use local better-opencode packages instead of published npm packages.
+
+**Option A: file: Path Reference (Recommended for Dev)**
+
+Edit `/Users/oleksii.honchar/www/misc/openchamber/package.json`:
+
+```json
+{
+  "dependencies": {
+    "@opencode-ai/sdk": "file:../better-opencode/packages/sdk/js"
+  }
+}
+```
+
+Then install and dev:
+```bash
+cd /Users/oleksii.honchar/www/misc/openchamber
+bun install
+bun run dev:web
+```
+
+**Option B: bun link**
+
+```bash
+# In better-opencode
+cd /Users/oleksii.honchar/www/misc/better-opencode/packages/sdk/js
+bun link
+
+# In openchamber
+cd /Users/oleksii.honchar/www/misc/openchamber
+bun unlink @opencode-ai/sdk 2>/dev/null || true
+bun link @opencode-ai/sdk
+```
+
+**Verify the link:**
+```bash
+cd /Users/oleksii.honchar/www/misc/openchamber
+bun pm list @opencode-ai/sdk
+```
+
+### OpenChamber Configuration
+
+The complete openchamber configuration for using better-opencode:
+
+```bash
+# 1. Build and install better-opencode binary
+cd /Users/oleksii.honchar/www/misc/better-opencode
+./build-and-install.sh --install --clean
+
+# 2. Configure openchamber settings (already done in ~/.config/openchamber/settings.json)
+# "opencodeBinary": "/Users/oleksii.honchar/bin/better-opencode"
+
+# 3. (Optional) Set CLI env var for desktop scripts
+echo 'export OPENCHAMBER_OPENCODE_PATH="/Users/oleksii.honchar/bin/better-opencode"' >> ~/.zshrc
+source ~/.zshrc
+
+# 4. Start openchamber dev
+cd /Users/oleksii.honchar/www/misc/openchamber
+bun run dev:web
+```
+
+---
+
 ## Verification Commands
 
 ```bash
@@ -178,4 +266,10 @@ git branch --show-current
 # Verify divergence
 git log --oneline origin/patched/dev..patched/dev | wc -l  # commits ahead
 git log --oneline patched/dev..origin/patched/dev | wc -l  # commits behind
+
+# Verify openchamber binary configuration
+cat ~/.config/openchamber/settings.json | grep opencodeBinary
+
+# Verify better-opencode binary
+~/bin/better-opencode --version
 ```
