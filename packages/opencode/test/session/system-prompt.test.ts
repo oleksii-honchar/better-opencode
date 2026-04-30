@@ -10,12 +10,11 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import path from "path"
 import { Effect, Layer } from "effect"
 import { Instance } from "../../src/project/instance"
 import { SystemPrompt } from "../../src/session/system"
 import { provideInstance, tmpdir } from "../fixture/fixture"
-import type { Provider } from "@/provider/provider"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 
 describe("session.system-prompt", () => {
   test("environment includes Session ID when provided", async () => {
@@ -30,10 +29,27 @@ describe("session.system-prompt", () => {
           const svc = yield* SystemPrompt.Service
           return svc.environment(
             {
-              id: "claude-sonnet-4-20250514",
-              providerID: "anthropic",
-              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
-              variant: "",
+              id: ModelID.make("claude-sonnet-4-20250514"),
+              providerID: ProviderID.anthropic,
+              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+              name: "Claude Sonnet 4",
+              family: undefined,
+              capabilities: {
+                temperature: true,
+                reasoning: false,
+                attachment: false,
+                toolcall: true,
+                input: { text: true, audio: false, image: false, video: false, pdf: false },
+                output: { text: true, audio: false, image: false, video: false, pdf: false },
+                interleaved: false,
+              },
+              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+              limit: { context: 0, input: 0, output: 0 },
+              status: "active" as const,
+              options: {},
+              headers: {},
+              release_date: "",
+              variants: undefined,
             },
             "ses_241c208c9ffeI6DgeZh6Qhu3sl",
             undefined,
@@ -61,10 +77,27 @@ describe("session.system-prompt", () => {
           const svc = yield* SystemPrompt.Service
           return svc.environment(
             {
-              id: "claude-sonnet-4-20250514",
-              providerID: "anthropic",
-              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
-              variant: "",
+              id: ModelID.make("claude-sonnet-4-20250514"),
+              providerID: ProviderID.anthropic,
+              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+              name: "Claude Sonnet 4",
+              family: undefined,
+              capabilities: {
+                temperature: true,
+                reasoning: false,
+                attachment: false,
+                toolcall: true,
+                input: { text: true, audio: false, image: false, video: false, pdf: false },
+                output: { text: true, audio: false, image: false, video: false, pdf: false },
+                interleaved: false,
+              },
+              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+              limit: { context: 0, input: 0, output: 0 },
+              status: "active" as const,
+              options: {},
+              headers: {},
+              release_date: "",
+              variants: undefined,
             },
             undefined,
             "ses_parent123",
@@ -94,10 +127,27 @@ describe("session.system-prompt", () => {
           const svc = yield* SystemPrompt.Service
           return svc.environment(
             {
-              id: "claude-sonnet-4-20250514",
-              providerID: "anthropic",
-              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
-              variant: "",
+              id: ModelID.make("claude-sonnet-4-20250514"),
+              providerID: ProviderID.anthropic,
+              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+              name: "Claude Sonnet 4",
+              family: undefined,
+              capabilities: {
+                temperature: true,
+                reasoning: false,
+                attachment: false,
+                toolcall: true,
+                input: { text: true, audio: false, image: false, video: false, pdf: false },
+                output: { text: true, audio: false, image: false, video: false, pdf: false },
+                interleaved: false,
+              },
+              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+              limit: { context: 0, input: 0, output: 0 },
+              status: "active" as const,
+              options: {},
+              headers: {},
+              release_date: "",
+              variants: undefined,
             },
             "ses_child123",
             "ses_parent456",
@@ -125,10 +175,27 @@ describe("session.system-prompt", () => {
           const svc = yield* SystemPrompt.Service
           return svc.environment(
             {
-              id: "claude-sonnet-4-20250514",
-              providerID: "anthropic",
-              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
-              variant: "",
+              id: ModelID.make("claude-sonnet-4-20250514"),
+              providerID: ProviderID.anthropic,
+              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+              name: "Claude Sonnet 4",
+              family: undefined,
+              capabilities: {
+                temperature: true,
+                reasoning: false,
+                attachment: false,
+                toolcall: true,
+                input: { text: true, audio: false, image: false, video: false, pdf: false },
+                output: { text: true, audio: false, image: false, video: false, pdf: false },
+                interleaved: false,
+              },
+              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+              limit: { context: 0, input: 0, output: 0 },
+              status: "active" as const,
+              options: {},
+              headers: {},
+              release_date: "",
+              variants: undefined,
             },
           )
         }).pipe(Effect.provide(SystemPrompt.defaultLayer))
@@ -164,10 +231,27 @@ describe("session.system-prompt", () => {
           const svc = yield* SystemPrompt.Service
           return svc.environment(
             {
-              id: "claude-sonnet-4-20250514",
-              providerID: "anthropic",
-              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
-              variant: "",
+              id: ModelID.make("claude-sonnet-4-20250514"),
+              providerID: ProviderID.anthropic,
+              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+              name: "Claude Sonnet 4",
+              family: undefined,
+              capabilities: {
+                temperature: true,
+                reasoning: false,
+                attachment: false,
+                toolcall: true,
+                input: { text: true, audio: false, image: false, video: false, pdf: false },
+                output: { text: true, audio: false, image: false, video: false, pdf: false },
+                interleaved: false,
+              },
+              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+              limit: { context: 0, input: 0, output: 0 },
+              status: "active" as const,
+              options: {},
+              headers: {},
+              release_date: "",
+              variants: undefined,
             },
             "ses_child",
             "ses_parent",
@@ -209,10 +293,27 @@ describe("session.system-prompt", () => {
           const svc = yield* SystemPrompt.Service
           return svc.environment(
             {
-              id: "claude-sonnet-4-20250514",
-              providerID: "anthropic",
-              api: { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", provider: "anthropic" },
-              variant: "",
+              id: ModelID.make("claude-sonnet-4-20250514"),
+              providerID: ProviderID.anthropic,
+              api: { id: "claude-sonnet-4-20250514", url: "", npm: "@anthropic/sdk" },
+              name: "Claude Sonnet 4",
+              family: undefined,
+              capabilities: {
+                temperature: true,
+                reasoning: false,
+                attachment: false,
+                toolcall: true,
+                input: { text: true, audio: false, image: false, video: false, pdf: false },
+                output: { text: true, audio: false, image: false, video: false, pdf: false },
+                interleaved: false,
+              },
+              cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+              limit: { context: 0, input: 0, output: 0 },
+              status: "active" as const,
+              options: {},
+              headers: {},
+              release_date: "",
+              variants: undefined,
             },
           )
         }).pipe(Effect.provide(SystemPrompt.defaultLayer))
@@ -237,34 +338,39 @@ describe("session.system-prompt", () => {
         const runEnv = Effect.gen(function* () {
           const svc = yield* SystemPrompt.Service
 
+          // Helper to create minimal model object
+          const makeModel = () => ({
+            id: ModelID.make("test"),
+            providerID: ProviderID.make("test"),
+            api: { id: "test", url: "", npm: "test" },
+            name: "Test",
+            family: undefined,
+            capabilities: {
+              temperature: true,
+              reasoning: false,
+              attachment: false,
+              toolcall: true,
+              input: { text: true, audio: false, image: false, video: false, pdf: false },
+              output: { text: true, audio: false, image: false, video: false, pdf: false },
+              interleaved: false,
+            },
+            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+            limit: { context: 0, input: 0, output: 0 },
+            status: "active" as const,
+            options: {},
+            headers: {},
+            release_date: "",
+            variants: undefined,
+          })
+
           // Should not throw with any combination of parameters
-          expect(() => svc.environment({
-            id: "test",
-            providerID: "test",
-            api: { id: "test", name: "Test", provider: "test" },
-            variant: "",
-          })).not.toThrow()
+          expect(() => svc.environment(makeModel())).not.toThrow()
 
-          expect(() => svc.environment({
-            id: "test",
-            providerID: "test",
-            api: { id: "test", name: "Test", provider: "test" },
-            variant: "",
-          }, "ses_test")).not.toThrow()
+          expect(() => svc.environment(makeModel(), "ses_test")).not.toThrow()
 
-          expect(() => svc.environment({
-            id: "test",
-            providerID: "test",
-            api: { id: "test", name: "Test", provider: "test" },
-            variant: "",
-          }, undefined, "ses_parent")).not.toThrow()
+          expect(() => svc.environment(makeModel(), undefined, "ses_parent")).not.toThrow()
 
-          expect(() => svc.environment({
-            id: "test",
-            providerID: "test",
-            api: { id: "test", name: "Test", provider: "test" },
-            variant: "",
-          }, "ses_child", "ses_parent")).not.toThrow()
+          expect(() => svc.environment(makeModel(), "ses_child", "ses_parent")).not.toThrow()
         }).pipe(Effect.provide(SystemPrompt.defaultLayer))
 
         await Effect.runPromise(runEnv)

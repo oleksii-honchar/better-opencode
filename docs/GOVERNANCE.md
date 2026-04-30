@@ -251,6 +251,60 @@ bun run dev:web
 
 ---
 
+### Development Mode: Using Dev Server with openchamber
+
+For development, you can connect openchamber directly to the better-opencode dev server instead of using the installed binary.
+
+**Using the convenience script (recommended):**
+
+```bash
+# Start dev server + VSCode (with VSCode)
+cd /Users/oleksii.honchar/www/misc/better-opencode
+./start-dev.sh
+
+# Start dev server + VSCodeVodium
+./start-dev.sh --vscodium
+
+# Start with custom port and password
+./start-dev.sh --port 5000 --password mysecret
+
+# Stop the dev server
+./start-dev.sh --stop
+```
+
+**Manual setup (without convenience script):**
+
+```bash
+# 1. Start better-opencode dev server
+cd /Users/oleksii.honchar/www/misc/better-opencode
+OPENCODE_PORT=4096 OPENCODE_SERVER_PASSWORD=opencode_dev bun run --cwd packages/opencode --conditions=browser src/index.ts
+
+# 2. Start openchamber in external mode
+cd /Users/oleksii.honchar/www/misc/openchamber
+OPENCODE_PORT=4096 OPENCODE_SKIP_START=true OPENCODE_SERVER_PASSWORD=opencode_dev bun run openchamber:server
+
+# 3. Or configure VSCode environment variables
+export OPENCODE_PORT=4096
+export OPENCODE_SKIP_START=true
+export OPENCODE_SERVER_PASSWORD=opencode_dev
+```
+
+**Environment variables for dev mode:**
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `OPENCODE_PORT` | Port for dev server | `4096` |
+| `OPENCODE_SKIP_START` | Skip spawning opencode (use external) | `true` |
+| `OPENCODE_SERVER_PASSWORD` | Auth password for dev server | `opencode_dev` |
+| `VSCODE_APP` | VSCode variant: `code` or `codium` | `code` |
+| `BETTER_OPENCODE_DIR` | Path to better-opencode | `~/www/misc/better-opencode` |
+
+**VSCode extension configuration:**
+
+The openchamber extension will automatically detect and use the external server when `OPENCODE_SKIP_START=true` is set. No additional configuration needed in VSCode settings.
+
+---
+
 ## Verification Commands
 
 ```bash
