@@ -20,7 +20,7 @@
 set -euo pipefail
 
 FORK_DIR="$(cd "$(dirname "$0")" && pwd)"
-BINARY_SOURCE="$FORK_DIR/packages/opencode/dist/opencode-darwin-arm64/bin/opencode"
+BINARY_SOURCE="$FORK_DIR/packages/opencode/dist/better-opencode-darwin-arm64/bin/opencode"
 BETTER_OPENCODE_BIN="$HOME/bin/better-opencode"
 OPENCHAMBER_SETTINGS="$HOME/.config/openchamber/settings.json"
 
