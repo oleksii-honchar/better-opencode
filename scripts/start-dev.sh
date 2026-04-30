@@ -23,11 +23,47 @@ set -euo pipefail
 # Configuration
 BETTER_OPENCODE_DIR="${BETTER_OPENCODE_DIR:-$HOME/www/misc/better-opencode}"
 OPENCODE_PORT="${OPENCODE_PORT:-4096}"
-OPENCODE_PASSWORD="${OPENCODE_PASSWORD:-opencode_dev}"
+OPENCODE_PASSWORD="${OPENCODE_PASSWORD:-}"  # Will be auto-detected if not set
 VSCODE_DIR="${VSCODE_DIR:-.}"
 
 # VSCode variant - defaults to VSCodeVodium, can be overridden with --vscode or VSCODE_APP env var
 VSCODE_APP="${VSCODE_APP:-codium}"  # Default to VSCodeVodium
+
+# Auto-detect password from running better-opencode process (like session.sh does)
+detect_opencode_password() {
+  local pids
+  pids=$(ps aux 2>/dev/null | grep "[b]etter-opencode serve" | awk '{print $2}') || true
+  if [ -z "$pids" ]; then
+    # Also try standard opencode
+    pids=$(ps aux 2>/dev/null | grep "[o]pencode serve" | awk '{print $2}') || true
+  fi
+  if [ -z "$pids" ]; then
+    echo ""
+    return 1
+  fi
+  for pid in $pids; do
+    local env_output
+    env_output=$(ps eww "$pid" 2>/dev/null | grep 'OPENCODE_SERVER_PASSWORD=' | head -1) || true
+    if [ -n "$env_output" ]; then
+      local password
+      password=$(echo "$env_output" | grep -oE 'OPENCODE_SERVER_PASSWORD=[^ ]+' | head -1 | sed 's/OPENCODE_SERVER_PASSWORD=//')
+      if [ -n "$password" ]; then
+        echo "$password"
+        return 0
+      fi
+    fi
+  done
+  echo ""
+}
+
+# Auto-detect password if not explicitly provided via --password flag
+if [ -z "$OPENCODE_PASSWORD" ]; then
+  OPENCODE_PASSWORD=$(detect_opencode_password) || true
+  if [ -z "$OPENCODE_PASSWORD" ]; then
+    # Fallback to default only if no running process found
+    OPENCODE_PASSWORD="opencode_dev"
+  fi
+fi
 
 # Parse arguments
 STOP=false
@@ -45,6 +81,19 @@ while [[ $# -gt 0 ]]; do
     --password)
       OPENCODE_PASSWORD="$2"
       shift 2
+      ;;
+    --detect-password)
+      # Just detect and print the password, don't start anything
+      if [ -z "$OPENCODE_PASSWORD" ]; then
+        OPENCODE_PASSWORD=$(detect_opencode_password) || true
+      fi
+      if [ -n "$OPENCODE_PASSWORD" ]; then
+        echo "$OPENCODE_PASSWORD"
+      else
+        echo "No running better-opencode process found" >&2
+        exit 1
+      fi
+      exit 0
       ;;
     --vscode)
       VSCODE_APP="code"
