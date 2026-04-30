@@ -180,49 +180,67 @@ cd /Users/oleksii.honchar/www/misc/better-opencode
 #    - Or set in ~/.config/openchamber/settings.json
 ```
 
-### Development: Using Dev Server
+### Development: OpenChamber + local OpenCode (two tabs)
 
-For development, connect the openchamber VSCode extension to the better-opencode dev server:
+Use `scripts/start-dev.sh`: **one terminal runs the OpenCode dev server (Bun)**, a **second terminal launches the IDE**. OpenChamber in the editor must be pointed at that server with **`openchamber.apiUrl`**; otherwise the extension starts its **own** `opencode serve` on a random port.
 
-> **⚠️ Important:** Close VSCode/VSCodeVodium before running this script. Running both instances may cause conflicts.
+> **Before `--ide-only`:** Close VSCodium/VS Code (or pass `--force`). Two IDE instances can fight over ports and extension state.
 
-**Using the convenience script (recommended):**
+#### Tab A — dev server (foreground)
 
-```bash
-# Start dev server + VSCodeVodium (default)
-./scripts/start-dev.sh
-
-# Start dev server + VSCode
-./scripts/start-dev.sh --vscode
-
-# Force launch even if IDE is detected as running
-./scripts/start-dev.sh --force
-
-# Stop the dev server
-./scripts/start-dev.sh --stop
-```
-
-**Manual setup:**
+From the repo root:
 
 ```bash
-# Terminal 1: Start better-opencode dev server
-cd /Users/oleksii.honchar/www/misc/better-opencode
-OPENCODE_PORT=4096 OPENCODE_SERVER_PASSWORD=opencode_dev bun run --cwd packages/opencode --conditions=browser src/index.ts
-
-# Terminal 2: Start VSCode with openchamber extension using external server
-export OPENCODE_PORT=4096
-export OPENCODE_SKIP_START=true
-export OPENCODE_SERVER_PASSWORD=opencode_dev
-code .  # or codium . for VSCodeVodium
+cd ~/www/misc/better-opencode
+./scripts/start-dev.sh              # same as --server-only
+# optional: ./scripts/start-dev.sh --port 5000
 ```
 
-**Key environment variables:**
+This runs `bun run --cwd packages/opencode …` on **`127.0.0.1`** and **`OPENCODE_PORT`** (default **4096**). Leave this tab open; **Ctrl+C** stops the server.
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `OPENCODE_PORT` | Port for dev server | `4096` |
-| `OPENCODE_SKIP_START` | Skip spawning opencode | `true` |
-| `OPENCODE_SERVER_PASSWORD` | Auth password | `opencode_dev` |
+- **Stop without the tab:** `./scripts/start-dev.sh --stop` (kills the listener on `OPENCODE_PORT`).
+- **Dev TLS (e.g. HTTPS to LiteLLM behind Caddy):** Bun does **not** use the macOS Keychain for CA trust. Either `export NODE_EXTRA_CA_CERTS=/path/to/chain.pem` before starting, or place the same PEM at **`~/.config/better-opencode/extra-ca.pem`** — the script sets `NODE_EXTRA_CA_CERTS` automatically when that file exists and the variable is unset.
+
+The dev server is started **without** `OPENCODE_SERVER_PASSWORD` (no Basic auth on local HTTP).
+
+#### Tab B — IDE only
+
+After Tab A is healthy:
+
+```bash
+cd ~/www/misc/better-opencode
+./scripts/start-dev.sh --ide-only           # VSCodium (default)
+./scripts/start-dev.sh --ide-only --vscode  # VS Code
+# Match Tab A if you changed the port:
+./scripts/start-dev.sh --ide-only --port 5000
+```
+
+**Required once (User settings in VS Code / VSCodium):** set the OpenChamber API base URL to the dev server (same host/port as Tab A):
+
+```json
+"openchamber.apiUrl": "http://127.0.0.1:4096"
+```
+
+- **`OPENCODE_SKIP_START`** is used by the **OpenChamber web/desktop** server path; the **VS Code extension does not use it** to decide whether to spawn OpenCode. If `openchamber.apiUrl` is empty, the extension will spawn its own managed server.
+- On **macOS**, if the `codium` CLI is missing, the script launches **`VSCodium.app/Contents/MacOS/VSCodium`** so `OPENCODE_PORT` reaches the GUI process (`open -a` does not pass your shell env).
+
+#### Optional environment (see `./scripts/start-dev.sh --help`)
+
+| Variable | Purpose |
+|----------|---------|
+| `BETTER_OPENCODE_DIR` | Repo path if not `~/www/misc/better-opencode` |
+| `OPENCODE_PORT` | Dev server port (default `4096`) |
+| `NODE_EXTRA_CA_CERTS` | PEM bundle for internal HTTPS (Caddy, custom roots); optional auto-load from `~/.config/better-opencode/extra-ca.pem` |
+| `VSCODE_APP` | `codium` or `code` |
+| `VSCODIUM_APP` / `VSCODIUM_APP_NAME` | macOS bundle path or `open -a` name overrides |
+
+#### Quick troubleshooting
+
+| Symptom | Likely cause |
+|---------|----------------|
+| Second `opencode serve` / random high port | `openchamber.apiUrl` not set (or wrong port) |
+| `unable to get local issuer certificate` on chat / provider calls | Outbound HTTPS from Bun — add `NODE_EXTRA_CA_CERTS` or `extra-ca.pem` (Keychain alone is not enough) |
+| IDE does not see `OPENCODE_PORT` on macOS | Use `codium` CLI or bundle binary launch; avoid relying on `open -a` alone for env |
 
 ---
 

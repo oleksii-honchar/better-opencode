@@ -1,75 +1,50 @@
 #!/bin/bash
-# start-dev.sh — Start better-opencode dev server + openchamber VSCode extension
+# start-dev.sh — better-opencode dev server + OpenChamber (VSCodium / VS Code)
 #
-# Usage:
-#   ./start-dev.sh                    # Start with default settings
-#   ./start-dev.sh --stop             # Stop better-opencode server
-#   ./start-dev.sh --port 5000        # Use custom port
-#   ./start-dev.sh --password secret  # Use custom password
+# Two tabs (only supported workflow):
+#   Tab A: ./scripts/start-dev.sh              # foreground bun server; Ctrl+C stops
+#   Tab B: ./scripts/start-dev.sh --ide-only   # launch IDE with OPENCODE_* env
 #
-# This script:
-#   1. Starts better-opencode dev server in the background
-#   2. Launches VSCode with environment variables for openchamber extension
-#   3. Manages the dev server lifecycle (start/stop)
+#   ./scripts/start-dev.sh --stop              # kill whatever listens on OPENCODE_PORT
+#   ./scripts/start-dev.sh --port 5000 ...
 #
 # Requirements:
 #   - better-opencode at ~/www/misc/better-opencode
 #   - openchamber VSCode extension installed
 #   - bun installed
-#   - IDE (VSCode/VSCodeVodium) must be CLOSED before running this script
+#   - IDE (VSCode/VSCodium) must be CLOSED before running this script
 
 set -euo pipefail
 
-# Configuration
 BETTER_OPENCODE_DIR="${BETTER_OPENCODE_DIR:-$HOME/www/misc/better-opencode}"
 OPENCODE_PORT="${OPENCODE_PORT:-4096}"
-OPENCODE_PASSWORD="${OPENCODE_PASSWORD:-}"  # Will be auto-detected if not set
 VSCODE_DIR="${VSCODE_DIR:-.}"
 
-# VSCode variant - defaults to VSCodeVodium, can be overridden with --vscode or VSCODE_APP env var
-VSCODE_APP="${VSCODE_APP:-codium}"  # Default to VSCodeVodium
+# VSCode variant - defaults to VSCodium, can be overridden with --vscode or VSCODE_APP env var
+VSCODE_APP="${VSCODE_APP:-codium}"  # codium = VSCodium
 
-# Auto-detect password from running better-opencode process (like session.sh does)
-detect_opencode_password() {
-  local pids
-  pids=$(ps aux 2>/dev/null | grep "[b]etter-opencode serve" | awk '{print $2}') || true
-  if [ -z "$pids" ]; then
-    # Also try standard opencode
-    pids=$(ps aux 2>/dev/null | grep "[o]pencode serve" | awk '{print $2}') || true
-  fi
-  if [ -z "$pids" ]; then
-    echo ""
-    return 1
-  fi
-  for pid in $pids; do
-    local env_output
-    env_output=$(ps eww "$pid" 2>/dev/null | grep 'OPENCODE_SERVER_PASSWORD=' | head -1) || true
-    if [ -n "$env_output" ]; then
-      local password
-      password=$(echo "$env_output" | grep -oE 'OPENCODE_SERVER_PASSWORD=[^ ]+' | head -1 | sed 's/OPENCODE_SERVER_PASSWORD=//')
-      if [ -n "$password" ]; then
-        echo "$password"
-        return 0
-      fi
-    fi
-  done
-  echo ""
-}
-
-# Auto-detect password if not explicitly provided via --password flag
-if [ -z "$OPENCODE_PASSWORD" ]; then
-  OPENCODE_PASSWORD=$(detect_opencode_password) || true
-  if [ -z "$OPENCODE_PASSWORD" ]; then
-    # Fallback to default only if no running process found
-    OPENCODE_PASSWORD="opencode_dev"
-  fi
-fi
-
-# Parse arguments
+# Parse arguments  (default: run dev server in foreground)
 STOP=false
 FORCE=false
+MODE=server
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --server-only)
+      if [ "$MODE" = "ide-only" ]; then
+        echo "ERROR: use only one of default/--server-only or --ide-only" >&2
+        exit 1
+      fi
+      MODE=server
+      shift
+      ;;
+    --ide-only)
+      if [ "$MODE" = "ide-only" ]; then
+        echo "ERROR: duplicate --ide-only" >&2
+        exit 1
+      fi
+      MODE=ide-only
+      shift
+      ;;
     --stop|-s)
       STOP=true
       shift
@@ -77,23 +52,6 @@ while [[ $# -gt 0 ]]; do
     --port)
       OPENCODE_PORT="$2"
       shift 2
-      ;;
-    --password)
-      OPENCODE_PASSWORD="$2"
-      shift 2
-      ;;
-    --detect-password)
-      # Just detect and print the password, don't start anything
-      if [ -z "$OPENCODE_PASSWORD" ]; then
-        OPENCODE_PASSWORD=$(detect_opencode_password) || true
-      fi
-      if [ -n "$OPENCODE_PASSWORD" ]; then
-        echo "$OPENCODE_PASSWORD"
-      else
-        echo "No running better-opencode process found" >&2
-        exit 1
-      fi
-      exit 0
       ;;
     --vscode)
       VSCODE_APP="code"
@@ -109,16 +67,19 @@ while [[ $# -gt 0 ]]; do
       echo "Options:"
       echo "  --stop, -s    Stop the better-opencode dev server"
       echo "  --port NUM    Port for dev server (default: 4096)"
-      echo "  --password TXT Password for dev server auth (default: opencode_dev)"
-      echo "  --vscode      Use VSCode instead of VSCodeVodium (default: VSCodeVodium)"
+      echo "  --vscode      Use VSCode instead of VSCodium (default: VSCodium)"
+      echo "  --server-only Same as default: run dev server in foreground (this tab)"
+      echo "  --ide-only    Other tab: launch IDE; server must already listen on OPENCODE_PORT"
       echo "  --force       Force launch even if $VSCODE_APP is detected as running"
       echo "  --help, -h    Show this help message"
       echo ""
       echo "Environment variables:"
       echo "  BETTER_OPENCODE_DIR  Path to better-opencode (default: ~/www/misc/better-opencode)"
       echo "  OPENCODE_PORT        Port for dev server (default: 4096)"
-      echo "  OPENCODE_PASSWORD    Password for dev server (default: opencode_dev)"
-      echo "  VSCODE_APP           VSCode variant: 'codium' (VSCodeVodium) or 'code' (VSCode)"
+      echo "  NODE_EXTRA_CA_CERTS  PEM for internal HTTPS (Caddy, etc.); macOS Keychain alone is not enough for Bun"
+      echo "  VSCODE_APP           VSCode variant: 'codium' (VSCodium) or 'code' (VSCode)"
+      echo "  VSCODIUM_APP         macOS: path to bundle, e.g. /Applications/VSCodium.app (optional)"
+      echo "  VSCODIUM_APP_NAME    macOS: app name for open -a if bundle path fails (optional)"
       exit 0
       ;;
     *)
@@ -129,167 +90,186 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# PID file for managing the dev server
-PID_FILE="$HOME/.local/share/better-opencode-dev.pid"
-LOG_FILE="$HOME/.local/share/better-opencode-dev.log"
+# Bun/Node TLS does not use macOS Keychain. HTTPS to Caddy/internal hosts (e.g. lite-lm) needs a PEM bundle:
+#   export NODE_EXTRA_CA_CERTS=/path/to/your-root-or-chain.pem
+# Or place that PEM at ~/.config/better-opencode/extra-ca.pem (loaded below when NODE_EXTRA_CA_CERTS is unset).
+EXTRA_CA_FALLBACK="${HOME}/.config/better-opencode/extra-ca.pem"
+if [ -z "${NODE_EXTRA_CA_CERTS:-}" ] && [ -f "$EXTRA_CA_FALLBACK" ]; then
+  export NODE_EXTRA_CA_CERTS="$EXTRA_CA_FALLBACK"
+fi
 
-# Ensure directories exist
+LEGACY_PID_FILE="$HOME/.local/share/better-opencode-dev.pid"
+
 mkdir -p "$HOME/.local/share"
 
-if [ "$STOP" = true ]; then
-  echo "Stopping better-opencode dev server..."
-  if [ -f "$PID_FILE" ]; then
-    PID=$(cat "$PID_FILE")
-    if kill -0 "$PID" 2>/dev/null; then
-      kill "$PID"
-      echo "  Stopped process $PID"
-    else
-      echo "  Process $PID not running"
+curl_global_health() {
+  curl -sf "http://127.0.0.1:${OPENCODE_PORT}/global/health"
+}
+
+# Do not use `curl_global_health | grep -q` with `set -o pipefail`: grep exits after match,
+# curl gets SIGPIPE → pipeline fails even when the server returned healthy JSON.
+curl_global_health_ok() {
+  local body
+  body=$(curl_global_health 2>/dev/null) || return 1
+  [[ "$body" == *'"healthy":true'* ]]
+}
+
+# macOS VSCodium.app locations (single source of truth for bundle iteration below).
+_vscodium_macos_bundle_dirs() {
+  [ -n "${VSCODIUM_APP:-}" ] && printf '%s\n' "$VSCODIUM_APP"
+  printf '%s\n' "/Applications/VSCodium.app" "$HOME/Applications/VSCodium.app"
+}
+
+# macOS: `open -a` does not pass env into the GUI. Launch the bundle binary so OPENCODE_PORT reaches the app.
+launch_vscodium_macos_with_env() {
+  local dir="$1"
+  local bundle exe
+  while IFS= read -r bundle; do
+    [ -n "$bundle" ] || continue
+    [ -d "$bundle" ] || continue
+    for exe in "$bundle/Contents/MacOS/VSCodium" "$bundle/Contents/MacOS/Electron"; do
+      if [ -x "$exe" ]; then
+        env -u OPENCODE_SERVER_PASSWORD OPENCODE_PORT="$OPENCODE_PORT" \
+          "$exe" "$dir"
+        return 0
+      fi
+    done
+  done < <(_vscodium_macos_bundle_dirs)
+
+  echo "  NOTE: VSCodium bundle binary not found; falling back to open -a (OpenChamber may start its own server)." >&2
+  open_codium_on_macos "$dir"
+}
+
+# macOS: open the .app bundle directly — no `codium` CLI required (no OPENCODE_*; prefer launch_vscodium_macos_with_env).
+open_codium_on_macos() {
+  local dir="$1"
+  local bundle app
+  while IFS= read -r bundle; do
+    [ -n "$bundle" ] || continue
+    [ -d "$bundle" ] || continue
+    if open -a "$bundle" "$dir" 2>/dev/null; then
+      echo "  Launched $bundle (open -a; no CLI needed)"
+      return 0
     fi
-    rm -f "$PID_FILE"
-  else
-    echo "  No PID file found"
+  done < <(_vscodium_macos_bundle_dirs)
+
+  if [ -n "${VSCODIUM_APP_NAME:-}" ]; then
+    if open -a "$VSCODIUM_APP_NAME" "$dir" 2>/dev/null; then
+      echo "  Launched \"$VSCODIUM_APP_NAME\" (VSCODIUM_APP_NAME)"
+      return 0
+    fi
   fi
-  
-  # Also kill any processes on the port
+
+  for app in "VSCodium" "VSCodium - Insiders" "VSCodeVodium"; do
+    if open -a "$app" "$dir" 2>/dev/null; then
+      echo "  Launched \"$app\" (open -a)"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [ "$STOP" = true ]; then
+  echo "Stopping listener(s) on port $OPENCODE_PORT..."
+  rm -f "$LEGACY_PID_FILE"
   if command -v lsof &> /dev/null; then
-    lsof -ti :"$OPENCODE_PORT" | xargs kill 2>/dev/null || true
+    if lsof -nP -iTCP:"$OPENCODE_PORT" -sTCP:LISTEN &> /dev/null; then
+      lsof -ti :"$OPENCODE_PORT" | xargs kill 2>/dev/null || true
+      echo "  Sent SIGTERM to process(es) on :$OPENCODE_PORT"
+    else
+      echo "  Nothing listening on :$OPENCODE_PORT"
+    fi
+  else
+    echo "  Install lsof to kill by port, or stop the server tab with Ctrl+C."
   fi
-  
   echo "Done."
   exit 0
 fi
 
-# Validate better-opencode directory
+# --- IDE-only tab (no dev server in this script)
+if [ "$MODE" = "ide-only" ]; then
+  echo "Checking OpenCode server on port $OPENCODE_PORT..."
+  if ! curl_global_health_ok; then
+    echo "ERROR: No healthy server at http://127.0.0.1:$OPENCODE_PORT/global/health" >&2
+    echo "Start the dev server in another tab first: $0 (without --ide-only)" >&2
+    echo "Use the same --port as the server tab." >&2
+    exit 1
+  fi
+  echo "  Server OK."
+  echo ""
+
+  if [ "$FORCE" = false ] && command -v lsof &> /dev/null; then
+    if lsof -c "$VSCODE_APP" &> /dev/null; then
+      echo "⚠️  WARNING: $VSCODE_APP is already running!"
+      echo ""
+      echo "  Please close $VSCODE_APP before running this script."
+      echo "  Running both instances may cause port conflicts or extension issues."
+      echo ""
+      echo "  If you want to proceed anyway, run:"
+      echo "    $0 --force"
+      echo ""
+      exit 1
+    fi
+  fi
+
+  echo "Launching $VSCODE_APP with openchamber extension..."
+  echo ""
+  echo "  OpenChamber VS Code: set User setting openchamber.apiUrl = http://127.0.0.1:$OPENCODE_PORT"
+  echo "  (Otherwise the extension spawns its own opencode serve on a random port; OPENCODE_SKIP_START is not used here.)"
+  echo ""
+
+  unset OPENCODE_SERVER_PASSWORD 2>/dev/null || true
+  export OPENCODE_PORT
+
+  if command -v "$VSCODE_APP" &> /dev/null; then
+    "$VSCODE_APP" "$VSCODE_DIR"
+    echo "  $VSCODE_APP started (this tab follows the process; Ctrl+C may close it)."
+  elif [ "$VSCODE_APP" = "code" ] && command -v open &> /dev/null; then
+    open -a "Visual Studio Code" "$VSCODE_DIR"
+    echo "  VSCode launched (open command)"
+  elif [ "$VSCODE_APP" = "codium" ] && [ "$(uname -s)" = "Darwin" ]; then
+    if ! launch_vscodium_macos_with_env "$VSCODE_DIR"; then
+      echo "  WARNING: Could not open VSCodium (tried bundle binary, VSCODIUM_APP, open -a)." >&2
+      echo "  Set VSCODIUM_APP, VSCODIUM_APP_NAME, or install the \`codium\` CLI." >&2
+    fi
+  else
+    echo "  WARNING: Could not find \`$VSCODE_APP\` on PATH." >&2
+  fi
+
+  echo ""
+  echo "Done."
+  exit 0
+fi
+
+# --- Dev server tab (foreground bun)
 if [ ! -d "$BETTER_OPENCODE_DIR" ]; then
   echo "ERROR: better-opencode directory not found: $BETTER_OPENCODE_DIR"
-  echo "Set BETTER_OPENCODE_DIR environment variable or create a symlink"
+  echo "Set BETTER_OPENCODE_DIR or create a symlink"
   exit 1
 fi
 
-# Check if dev server is already running
-if [ -f "$PID_FILE" ]; then
-  PID=$(cat "$PID_FILE")
-  if kill -0 "$PID" 2>/dev/null; then
-    echo "better-opencode dev server is already running (PID: $PID) on port $OPENCODE_PORT"
-    echo "Use --stop to stop it first, or connect to it"
-    echo ""
-    echo "To connect openchamber to this server, set:"
-    echo "  OPENCODE_PORT=$OPENCODE_PORT"
-    echo "  OPENCODE_SKIP_START=true"
-    echo "  OPENCODE_SERVER_PASSWORD=$OPENCODE_PASSWORD"
-    exit 0
-  else
-    echo "Cleaning up stale PID file..."
-    rm -f "$PID_FILE"
-  fi
-fi
-
-# Start better-opencode dev server
-echo "Starting better-opencode dev server..."
-echo "  Directory: $BETTER_OPENCODE_DIR"
-echo "  Port: $OPENCODE_PORT"
-echo "  Log: $LOG_FILE"
-echo ""
-
-cd "$BETTER_OPENCODE_DIR"
-
-# Start the dev server in the background
-OPENCODE_PORT="$OPENCODE_PORT" \
-OPENCODE_SERVER_PASSWORD="$OPENCODE_PASSWORD" \
-bun run --cwd packages/opencode --conditions=browser src/index.ts \
-  --hostname 127.0.0.1 \
-  --port "$OPENCODE_PORT" \
-  > "$LOG_FILE" 2>&1 &
-
-PID=$!
-echo "$PID" > "$PID_FILE"
-
-echo "  PID: $PID"
-echo ""
-
-# Wait for server to start
-echo "Waiting for server to start..."
-for i in {1..10}; do
-  if curl -s http://127.0.0.1:"$OPENCODE_PORT"/global/health > /dev/null 2>&1; then
-    echo "  Server is ready!"
-    break
-  fi
-  sleep 0.5
-done
-
-# Verify server is running
-if ! curl -s http://127.0.0.1:"$OPENCODE_PORT"/global/health | grep -q '"healthy"'; then
-  echo "ERROR: Server failed to start. Check log: $LOG_FILE"
-  rm -f "$PID_FILE"
-  exit 1
-fi
-
-echo ""
-echo "═══════════════════════════════════════════════════════════"
-echo "  better-opencode dev server started!"
-echo "═══════════════════════════════════════════════════════════"
-echo ""
-echo "  Server: http://127.0.0.1:$OPENCODE_PORT"
-echo "  Health: $(curl -s http://127.0.0.1:$OPENCODE_PORT/global/health)"
-echo ""
-echo "  To stop: $0 --stop"
-echo ""
-echo "  Openchamber configuration:"
-echo "    OPENCODE_PORT=$OPENCODE_PORT"
-echo "    OPENCODE_SKIP_START=true"
-echo "    OPENCODE_SERVER_PASSWORD=$OPENCODE_PASSWORD"
-echo ""
-echo "═══════════════════════════════════════════════════════════"
-echo ""
-
-# Check if VSCode/VSCodeVodium is already running
-if [ "$FORCE" = false ] && command -v lsof &> /dev/null; then
-  if lsof -c "$VSCODE_APP" &> /dev/null; then
-    echo "⚠️  WARNING: $VSCODE_APP is already running!"
-    echo ""
-    echo "  Please close $VSCODE_APP before running this script."
-    echo "  Running both instances may cause port conflicts or extension issues."
-    echo ""
-    echo "  If you want to proceed anyway, run:"
-    echo "    $0 --force"
-    echo ""
+if command -v lsof &> /dev/null; then
+  if lsof -nP -iTCP:"$OPENCODE_PORT" -sTCP:LISTEN &> /dev/null; then
+    echo "ERROR: port $OPENCODE_PORT is already in use."
+    echo "Stop it: $0 --stop   or use --port <other>"
     exit 1
   fi
 fi
 
-# Launch VSCode with environment variables for openchamber
-echo "Launching $VSCODE_APP with openchamber extension..."
+SCRIPT_HINT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+echo "better-opencode dev server (foreground) — leave this tab open; Ctrl+C stops."
+echo "Other tab: \"$SCRIPT_HINT\" --ide-only"
 echo ""
-
-# Set environment variables for VSCode
-export OPENCODE_PORT
-export OPENCODE_SKIP_START=true
-export OPENCODE_SERVER_PASSWORD
-
-# Launch VSCode variant (try command, fallback to open)
-if command -v "$VSCODE_APP" &> /dev/null; then
-  "$VSCODE_APP" "$VSCODE_DIR" &
-  echo "  $VSCODE_APP launched ($VSCODE_APP command)"
-elif [ "$VSCODE_APP" = "code" ] && command -v open &> /dev/null; then
-  open -a "Visual Studio Code" "$VSCODE_DIR" &
-  echo "  VSCode launched (open command)"
-elif [ "$VSCODE_APP" = "codium" ] && command -v open &> /dev/null; then
-  open -a "VSCodeVodium" "$VSCODE_DIR" &
-  echo "  VSCodeVodium launched (open command)"
-else
-  echo "  WARNING: Could not find $VSCODE_APP command"
-  echo "  Please open $VSCODE_APP manually with these environment variables:"
-  echo "    OPENCODE_PORT=$OPENCODE_PORT"
-  echo "    OPENCODE_SKIP_START=true"
-  echo "    OPENCODE_SERVER_PASSWORD=$OPENCODE_PASSWORD"
+echo "  OpenChamber (VS Code / VSCodium): set User setting —"
+echo "    \"openchamber.apiUrl\": \"http://127.0.0.1:$OPENCODE_PORT\""
+echo "  Without this, the extension starts its own opencode serve (random port). OPENCODE_SKIP_START does not apply to the extension."
+if [ -n "${NODE_EXTRA_CA_CERTS:-}" ]; then
+  echo "  NODE_EXTRA_CA_CERTS=$NODE_EXTRA_CA_CERTS (internal HTTPS / Caddy)"
 fi
-
-echo ""
-echo "Done. The dev server will continue running in the background."
-echo "Press Ctrl+C in this terminal to exit (server keeps running)."
 echo ""
 
-# Keep script running so environment variables persist
-# (Optional: remove this line if you want the script to exit)
-wait $PID 2>/dev/null || true
+cd "$BETTER_OPENCODE_DIR"
+exec env -u OPENCODE_SERVER_PASSWORD OPENCODE_PORT="$OPENCODE_PORT" \
+  bun run --cwd packages/opencode --conditions=browser src/index.ts \
+  --hostname 127.0.0.1 \
+  --port "$OPENCODE_PORT"
