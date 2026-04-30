@@ -9,11 +9,13 @@
 #   ./build-and-install.sh --unconfigure-openchamber   # Remove OpenChamber config (undo)
 #
 # This script:
-#   1. Fetches latest upstream/dev
-#   2. Creates/updates patched/dev branch from upstream/dev
-#   3. Runs bun install, typecheck, and build
-#   4. Installs forked binary to ~/bin/better-opencode (NOT replacing Homebrew)
-#   5. Configures OpenChamber to use the forked binary (optional, can be done standalone)
+#   1. Builds from current branch (no git operations)
+#   2. Runs bun install, typecheck, and build
+#   3. Installs forked binary to ~/bin/better-opencode (NOT replacing Homebrew)
+#   4. Configures OpenChamber to use the forked binary (optional, can be done standalone)
+#
+# Note: Git operations (fetch, rebase, checkout) are intentionally excluded.
+# Use the script to build from whatever branch you're currently on.
 
 set -euo pipefail
 
@@ -53,6 +55,8 @@ for arg in "$@"; do
       echo "  $0 --only-build                   # Build only, no install"
       echo "  $0 --configure-openchamber        # Configure OpenChamber only (no build)"
       echo "  $0 --unconfigure-openchamber      # Remove OpenChamber config"
+      echo ""
+      echo "Note: No git operations (fetch, rebase, checkout). Builds from current branch."
       exit 0
       ;;
   esac
@@ -64,6 +68,10 @@ if [ ! -d "$FORK_DIR" ]; then
 fi
 
 cd "$FORK_DIR"
+
+# Show current branch
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+echo "=== Current branch: $CURRENT_BRANCH ==="
 
 # OpenChamber configuration helper functions
 configure_openchamber() {
@@ -141,23 +149,7 @@ if [ "$CONFIGURE_OPENCHAMBER" = true ]; then
   exit 0
 fi
 
-# Build path — fetch and rebase
-echo "=== Fetching upstream/dev ==="
-git fetch upstream dev --quiet
-
-echo "=== Ensuring patched/dev branch ==="
-if git show-ref --verify --quiet "refs/heads/patched/dev"; then
-  echo "  patched/dev exists — rebasing onto upstream/dev"
-  git checkout patched/dev
-  git rebase upstream/dev || {
-    echo "  Rebase conflict — resolve and run: git rebase --continue"
-    exit 1
-  }
-else
-  echo "  Creating patched/dev from upstream/dev"
-  git checkout -b patched/dev "upstream/dev"
-fi
-
+# Build path — no git operations, build from current branch
 echo "=== Running bun install ==="
 bun install --quiet
 
