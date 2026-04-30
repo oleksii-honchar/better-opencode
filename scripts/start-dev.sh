@@ -16,6 +16,7 @@
 #   - better-opencode at ~/www/misc/better-opencode
 #   - openchamber VSCode extension installed
 #   - bun installed
+#   - IDE (VSCode/VSCodeVodium) must be CLOSED before running this script
 
 set -euo pipefail
 
@@ -25,11 +26,12 @@ OPENCODE_PORT="${OPENCODE_PORT:-4096}"
 OPENCODE_PASSWORD="${OPENCODE_PASSWORD:-opencode_dev}"
 VSCODE_DIR="${VSCODE_DIR:-.}"
 
-# VSCode variant - supports both VSCode and VSCodeVodium
-VSCODE_APP="${VSCODE_APP:-code}"  # Default to VSCode, can be set to codium
+# VSCode variant - defaults to VSCodeVodium, can be overridden with --vscode or VSCODE_APP env var
+VSCODE_APP="${VSCODE_APP:-codium}"  # Default to VSCodeVodium
 
 # Parse arguments
 STOP=false
+FORCE=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     --stop|-s)
@@ -44,8 +46,12 @@ while [[ $# -gt 0 ]]; do
       OPENCODE_PASSWORD="$2"
       shift 2
       ;;
-    --vscodium)
-      VSCODE_APP="codium"
+    --vscode)
+      VSCODE_APP="code"
+      shift
+      ;;
+    --force)
+      FORCE=true
       shift
       ;;
     --help|-h)
@@ -55,14 +61,15 @@ while [[ $# -gt 0 ]]; do
       echo "  --stop, -s    Stop the better-opencode dev server"
       echo "  --port NUM    Port for dev server (default: 4096)"
       echo "  --password TXT Password for dev server auth (default: opencode_dev)"
-      echo "  --vscodium    Use VSCodeVodium instead of VSCode"
+      echo "  --vscode      Use VSCode instead of VSCodeVodium (default: VSCodeVodium)"
+      echo "  --force       Force launch even if $VSCODE_APP is detected as running"
       echo "  --help, -h    Show this help message"
       echo ""
       echo "Environment variables:"
       echo "  BETTER_OPENCODE_DIR  Path to better-opencode (default: ~/www/misc/better-opencode)"
       echo "  OPENCODE_PORT        Port for dev server (default: 4096)"
       echo "  OPENCODE_PASSWORD    Password for dev server (default: opencode_dev)"
-      echo "  VSCODE_APP           VSCode variant: 'code' (VSCode) or 'codium' (VSCodeVodium)"
+      echo "  VSCODE_APP           VSCode variant: 'codium' (VSCodeVodium) or 'code' (VSCode)"
       exit 0
       ;;
     *)
@@ -186,6 +193,21 @@ echo "    OPENCODE_SERVER_PASSWORD=$OPENCODE_PASSWORD"
 echo ""
 echo "═══════════════════════════════════════════════════════════"
 echo ""
+
+# Check if VSCode/VSCodeVodium is already running
+if [ "$FORCE" = false ] && command -v lsof &> /dev/null; then
+  if lsof -c "$VSCODE_APP" &> /dev/null; then
+    echo "⚠️  WARNING: $VSCODE_APP is already running!"
+    echo ""
+    echo "  Please close $VSCODE_APP before running this script."
+    echo "  Running both instances may cause port conflicts or extension issues."
+    echo ""
+    echo "  If you want to proceed anyway, run:"
+    echo "    $0 --force"
+    echo ""
+    exit 1
+  fi
+fi
 
 # Launch VSCode with environment variables for openchamber
 echo "Launching $VSCODE_APP with openchamber extension..."

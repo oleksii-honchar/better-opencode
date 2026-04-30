@@ -120,26 +120,29 @@ For more info on how to configure OpenCode, [**head over to our docs**](https://
 
 If you're using the [openchamber](https://github.com/anomalyco/openchamber) VSCode extension with this fork, there's a convenience script to start the dev server and connect openchamber to it.
 
-```bash
-# Start dev server + VSCode (one command)
-./start-dev.sh
+> **⚠️ Important:** Close VSCode/VSCodeVodium before running this script. Running both instances may cause conflicts.
 
-# Start with VSCodeVodium (default is VSCode)
-./start-dev.sh --vscodium
+```bash
+# Start dev server + VSCodeVodium (default)
+./scripts/start-dev.sh
+
+# Start with VSCode
+./scripts/start-dev.sh --vscode
 
 # Or just start the dev server
 OPENCODE_PORT=4096 OPENCODE_SERVER_PASSWORD=opencode_dev bun run --cwd packages/opencode --conditions=browser src/index.ts
 
 # Stop the dev server
-./start-dev.sh --stop
+./scripts/start-dev.sh --stop
 ```
 
 **Options:**
 ```bash
-./start-dev.sh --port 5000           # Use custom port
-./start-dev.sh --password secret     # Use custom password
-./start-dev.sh --vscodium            # Use VSCodeVodium instead of VSCode
-./start-dev.sh --stop                # Stop the dev server
+./scripts/start-dev.sh --port 5000           # Use custom port
+./scripts/start-dev.sh --password secret     # Use custom password
+./scripts/start-dev.sh --vscode              # Use VSCode instead of VSCodeVodium
+./scripts/start-dev.sh --force               # Force launch even if IDE is detected as running
+./scripts/start-dev.sh --stop                # Stop the dev server
 ```
 
 **Environment variables:**

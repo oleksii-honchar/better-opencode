@@ -165,143 +165,64 @@ git push origin patched/dev --force-with-lease
 
 ## OpenChamber Integration
 
-### How openchamber Consumes better-opencode
+### Production: Using Built Binary
 
-OpenChamber has two consumption paths:
-
-**1. SDK Packages (npm registry)**
-- `@opencode-ai/sdk` — API client for opencode server
-- Consumed via npm registry (published packages)
-- Path: `packages/sdk/js/` in better-opencode
-- Current version in openchamber: `^1.4.25`
-
-**2. CLI Binary (local path)**
-- The opencode CLI binary used by openchamber desktop/web
-- Configured in openchamber's `settings.json`:
-  ```json
-  {
-    "opencodeBinary": "/Users/oleksii.honchar/bin/better-opencode"
-  }
-  ```
-- Binary built by `build-and-install.sh --install`
-- Installed to: `~/bin/better-opencode`
-
-### Dev Setup: Using Local better-opencode in openchamber
-
-For development, you may want openchamber to use local better-opencode packages instead of published npm packages.
-
-**Option A: file: Path Reference (Recommended for Dev)**
-
-Edit `/Users/oleksii.honchar/www/misc/openchamber/package.json`:
-
-```json
-{
-  "dependencies": {
-    "@opencode-ai/sdk": "file:../better-opencode/packages/sdk/js"
-  }
-}
-```
-
-Then install and dev:
-```bash
-cd /Users/oleksii.honchar/www/misc/openchamber
-bun install
-bun run dev:web
-```
-
-**Option B: bun link**
+After building better-opencode, configure the VSCode extension to use the installed binary:
 
 ```bash
-# In better-opencode
-cd /Users/oleksii.honchar/www/misc/better-opencode/packages/sdk/js
-bun link
-
-# In openchamber
-cd /Users/oleksii.honchar/www/misc/openchamber
-bun unlink @opencode-ai/sdk 2>/dev/null || true
-bun link @opencode-ai/sdk
-```
-
-**Verify the link:**
-```bash
-cd /Users/oleksii.honchar/www/misc/openchamber
-bun pm list @opencode-ai/sdk
-```
-
-### OpenChamber Configuration
-
-The complete openchamber configuration for using better-opencode:
-
-```bash
-# 1. Build and install better-opencode binary
+# 1. Build and install
 cd /Users/oleksii.honchar/www/misc/better-opencode
-./build-and-install.sh --install --clean
+./scripts/build-and-install.sh --install --clean
 
-# 2. Configure openchamber settings (already done in ~/.config/openchamber/settings.json)
-# "opencodeBinary": "/Users/oleksii.honchar/bin/better-opencode"
-
-# 3. (Optional) Set CLI env var for desktop scripts
-echo 'export OPENCHAMBER_OPENCODE_PATH="/Users/oleksii.honchar/bin/better-opencode"' >> ~/.zshrc
-source ~/.zshrc
-
-# 4. Start openchamber dev
-cd /Users/oleksii.honchar/www/misc/openchamber
-bun run dev:web
+# 2. Configure openchamber VSCode extension settings:
+#    - Open VSCode settings.json
+#    - Add: "openchamber.opencodeBinary": "/Users/oleksii.honchar/bin/better-opencode"
+#    - Or set in ~/.config/openchamber/settings.json
 ```
 
----
+### Development: Using Dev Server
 
-### Development Mode: Using Dev Server with openchamber
+For development, connect the openchamber VSCode extension to the better-opencode dev server:
 
-For development, you can connect openchamber directly to the better-opencode dev server instead of using the installed binary.
+> **⚠️ Important:** Close VSCode/VSCodeVodium before running this script. Running both instances may cause conflicts.
 
 **Using the convenience script (recommended):**
 
 ```bash
-# Start dev server + VSCode (with VSCode)
-cd /Users/oleksii.honchar/www/misc/better-opencode
-./start-dev.sh
+# Start dev server + VSCodeVodium (default)
+./scripts/start-dev.sh
 
-# Start dev server + VSCodeVodium
-./start-dev.sh --vscodium
+# Start dev server + VSCode
+./scripts/start-dev.sh --vscode
 
-# Start with custom port and password
-./start-dev.sh --port 5000 --password mysecret
+# Force launch even if IDE is detected as running
+./scripts/start-dev.sh --force
 
 # Stop the dev server
-./start-dev.sh --stop
+./scripts/start-dev.sh --stop
 ```
 
-**Manual setup (without convenience script):**
+**Manual setup:**
 
 ```bash
-# 1. Start better-opencode dev server
+# Terminal 1: Start better-opencode dev server
 cd /Users/oleksii.honchar/www/misc/better-opencode
 OPENCODE_PORT=4096 OPENCODE_SERVER_PASSWORD=opencode_dev bun run --cwd packages/opencode --conditions=browser src/index.ts
 
-# 2. Start openchamber in external mode
-cd /Users/oleksii.honchar/www/misc/openchamber
-OPENCODE_PORT=4096 OPENCODE_SKIP_START=true OPENCODE_SERVER_PASSWORD=opencode_dev bun run openchamber:server
-
-# 3. Or configure VSCode environment variables
+# Terminal 2: Start VSCode with openchamber extension using external server
 export OPENCODE_PORT=4096
 export OPENCODE_SKIP_START=true
 export OPENCODE_SERVER_PASSWORD=opencode_dev
+code .  # or codium . for VSCodeVodium
 ```
 
-**Environment variables for dev mode:**
+**Key environment variables:**
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `OPENCODE_PORT` | Port for dev server | `4096` |
-| `OPENCODE_SKIP_START` | Skip spawning opencode (use external) | `true` |
-| `OPENCODE_SERVER_PASSWORD` | Auth password for dev server | `opencode_dev` |
-| `VSCODE_APP` | VSCode variant: `code` or `codium` | `code` |
-| `BETTER_OPENCODE_DIR` | Path to better-opencode | `~/www/misc/better-opencode` |
-
-**VSCode extension configuration:**
-
-The openchamber extension will automatically detect and use the external server when `OPENCODE_SKIP_START=true` is set. No additional configuration needed in VSCode settings.
+| `OPENCODE_SKIP_START` | Skip spawning opencode | `true` |
+| `OPENCODE_SERVER_PASSWORD` | Auth password | `opencode_dev` |
 
 ---
 

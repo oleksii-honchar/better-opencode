@@ -19,7 +19,10 @@
 
 set -euo pipefail
 
-FORK_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve to the better-opencode root directory (parent of scripts/)
+# When run as ./scripts/build-and-install.sh, dirname resolves to ./scripts
+# So we need to go up one level to reach better-opencode root
+FORK_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BINARY_SOURCE="$FORK_DIR/packages/opencode/dist/opencode-darwin-arm64/bin/opencode"
 BETTER_OPENCODE_BIN="$HOME/bin/better-opencode"
 OPENCHAMBER_SETTINGS="$HOME/.config/openchamber/settings.json"
