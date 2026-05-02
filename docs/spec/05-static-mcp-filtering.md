@@ -1,13 +1,15 @@
 ---
 feature: static-mcp-filtering
-version: 1.0.0
+version: 2.0.0
 status: proposed
 source: architect/spec.md (session 260502-1709-tools-context-management)
 pr: N/A
 implementation: pending
 ---
 
-# Spec: Static MCP Server Filtering by Category
+# Spec: Static MCP Server Filtering by Category and Tool
+
+> **v2.0.0** — Added per-tool filtering (enabledTools / disabledTools) in addition to server-level category filtering.
 
 ## Problem Statement
 
@@ -17,13 +19,24 @@ The current opencode configuration exposes **150+ tool definitions** to **every 
 
 ## Design Decision
 
-**Static MCP server filtering by user-defined category.**
+**Two-tier filtering: server-level category + per-tool whitelist/blacklist.**
+
+### Tier 1: Server-Level Category Filtering
 
 - Each MCP server optionally declares a `category` string in `opencode.json`
 - Each agent frontmatter declares an `allowedMcpCategories` array
 - At agent spawn, only MCP servers whose category matches are loaded
 - No predefined categories — the user defines them freely
 - No dynamic gate, no approval flows, no agent type registry file
+
+### Tier 2: Per-Tool Filtering
+
+- Each MCP server optionally declares `enabledTools` (whitelist) or `disabledTools` (blacklist)
+- Tool filtering applies **after** category filtering — if the server is excluded by category, tool filtering is not evaluated
+- `enabledTools` and `disabledTools` are **mutually exclusive** — cannot use both simultaneously
+- If both are specified, `enabledTools` takes precedence with a warning logged
+- Tool names must match **exactly** (case-sensitive, raw MCP tool names — not sanitized)
+- If all tools are filtered out, a warning is logged and no tools from that server are available
 
 ## Architecture
 
@@ -215,6 +228,146 @@ for (const [key, item] of Object.entries(yield* mcp.tools(input.agent))) {
 3. MCP.tools(agent) → filter MCP servers by category
 4. Load tools from matching MCP servers only
 5. Inject tools into agent system prompt
+```
+
+## Tool-Level Filtering
+
+### Configuration Options
+
+Both `enabledTools` (whitelist) and `disabledTools` (blacklist) are optional fields on MCP server configuration. They apply to **both** Local and Remote MCP server types.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabledTools` | `string[]` | **Whitelist** — only these tool names will be loaded from the MCP server |
+| `disabledTools` | `string[]` | **Blacklist** — these tool names will be excluded from the MCP server |
+
+### Filtering Order
+
+1. **Category filter** — Server-level agent filtering (existing)
+2. **Tool filter** — Per-tool whitelist/blacklist (new)
+
+Both filters are applied in sequence. If category filter excludes the server, tool filter is not evaluated.
+
+### Mutual Exclusion
+
+The `enabledTools` and `disabledTools` fields cannot both be specified. If both are present, a warning is logged and `enabledTools` takes precedence.
+
+### Empty Tool List
+
+If all tools are filtered out, a warning is logged and no tools from that server are available.
+
+### Example: enabledTools (Whitelist)
+
+Only the specified tools will be loaded from the MCP server.
+
+```jsonc
+{
+  "mcp": {
+    "datadog": {
+      "type": "local",
+      "command": ["npx", "@datadog-mcp/server"],
+      "enabled": true,
+      "category": "observability",
+      "enabledTools": [
+        "search_datadog_dashboards",
+        "search_datadog_events"
+      ]
+    }
+  }
+}
+```
+
+### Example: disabledTools (Blacklist)
+
+The specified tools will be excluded from the MCP server.
+
+```jsonc
+{
+  "mcp": {
+    "github": {
+      "type": "local",
+      "command": ["npx", "@modelcontextprotocol/server-github"],
+      "enabled": true,
+      "category": "development",
+      "disabledTools": [
+        "merge_pull_request",
+        "create_repository"
+      ]
+    }
+  }
+}
+```
+
+### Example: Combined Category + Tool Filtering
+
+Both filters work together — only tools from matching servers are loaded, and within those servers, only matching tools are included.
+
+```jsonc
+{
+  "mcp": {
+    "datadog": {
+      "type": "local",
+      "command": ["npx", "@datadog-mcp/server"],
+      "enabled": true,
+      "category": "observability",
+      "enabledTools": [
+        "search_datadog_dashboards",
+        "search_datadog_events"
+      ]
+    },
+    "github": {
+      "type": "local",
+      "command": ["npx", "@modelcontextprotocol/server-github"],
+      "enabled": true,
+      "category": "development",
+      "disabledTools": [
+        "merge_pull_request"
+      ]
+    }
+  }
+}
+```
+
+```yaml
+# agents/developer.md
+name: developer
+displayName: Developer
+description: Implements features and fixes through code
+allowedMcpCategories: [core, code, observability, browser]
+sessionTimeout: 720
+```
+
+**Result:** Developer gets:
+- `search_datadog_dashboards` (observability category + whitelisted tool)
+- `search_datadog_events` (observability category + whitelisted tool)
+- `github_*` tools **except** `merge_pull_request` (development category + blacklisted tool excluded)
+
+### Filtering Flow Diagram
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                  MCP.tools(agent) — Filtering Flow            │
+│                                                              │
+│  For each MCP server:                                        │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ 1. Category Filter                                       │ │
+│  │    ┌───────────────────────────────────────────────────┐ │ │
+│  │    │ Server category missing? → Load ALL tools         │ │ │
+│  │    │ Server category matches agent? → Continue to 2     │ │ │
+│  │    │ Server category doesn't match → SKIP server        │ │ │
+│  │    └───────────────────────────────────────────────────┘ │ │
+│  │                                                         │ │
+│  │ 2. Tool Filter                                           │ │
+│  │    ┌───────────────────────────────────────────────────┐ │ │
+│  │    │ enabledTools specified? → Whitelist filter        │ │ │
+│  │    │ disabledTools specified? → Blacklist filter       │ │ │
+│  │    │ Both specified? → enabledTools wins (warn)        │ │ │
+│  │    │ All tools filtered? → SKIP server (warn)          │ │ │
+│  │    └───────────────────────────────────────────────────┘ │ │
+│  │                                                         │ │
+│  │ 3. Return filtered tools                                 │ │
+│  └─────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ## Expected Context Reduction

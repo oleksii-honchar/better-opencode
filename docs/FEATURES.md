@@ -109,7 +109,7 @@ In multi-repo and monorepo environments, the agent discovers and enumerates all 
 
 ---
 
-## 5. Static MCP Server Filtering by Category
+## 5. Static MCP Server Filtering by Category and Tool
 
 📋 [Detailed Spec](./spec/05-static-mcp-filtering.md)
 
@@ -117,14 +117,18 @@ In multi-repo and monorepo environments, the agent discovers and enumerates all 
 
 **Problem:** opencode exposes **150+ tool definitions** to **every agent session** regardless of relevance, creating **~225,000 tokens of context pollution per session**.
 
-**Solution:** Each MCP server optionally declares a `category` string. Each agent frontmatter declares `allowedMcpCategories` array. At agent spawn, only MCP servers whose category matches are loaded. No predefined categories — user-defined, user-driven.
+**Solution:** Two-tier filtering:
+1. **Server-level category filtering** — Each MCP server optionally declares a `category` string. Each agent frontmatter declares `allowedMcpCategories` array. At agent spawn, only MCP servers whose category matches are loaded.
+2. **Per-tool filtering** — Each MCP server optionally declares `enabledTools` (whitelist) or `disabledTools` (blacklist). Tool filtering applies **after** category filtering.
 
-**MCP server config:**
+No predefined categories — user-defined, user-driven.
+
+**MCP server config (category + tool filtering):**
 ```jsonc
 {
   "mcp": {
-    "github":  { "enabled": true, "category": "code" },
-    "datadog": { "enabled": true, "category": "observability" },
+    "github":  { "enabled": true, "category": "code", "enabledTools": ["read_file", "list_issues"] },
+    "datadog": { "enabled": true, "category": "observability", "disabledTools": ["execute_query"] },
     "slack":   { "enabled": true, "category": "office" }
   }
 }
@@ -137,4 +141,6 @@ allowedMcpCategories: [core, code, observability, browser]
 ```
 
 **Result:** Developer agent gets ~80 tools instead of 150+ — **47% context reduction**. Session-manager gets ~15 tools — **90% reduction**.
+
+**Filtering order:** Category filter → Tool filter. If category filter excludes the server, tool filter is not evaluated.
 ```
