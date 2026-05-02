@@ -106,4 +106,35 @@ In multi-repo and monorepo environments, the agent discovers and enumerates all 
     /Users/oleksii.honchar/workspace/other-app
     /Users/oleksii.honchar/workspace/shared-lib
 </env>
+
+---
+
+## 5. Static MCP Server Filtering by Category
+
+📋 [Detailed Spec](./spec/05-static-mcp-filtering.md)
+
+**Status:** ⏳ Pending — New feature proposal
+
+**Problem:** opencode exposes **150+ tool definitions** to **every agent session** regardless of relevance, creating **~225,000 tokens of context pollution per session**.
+
+**Solution:** Each MCP server optionally declares a `category` string. Each agent frontmatter declares `allowedMcpCategories` array. At agent spawn, only MCP servers whose category matches are loaded. No predefined categories — user-defined, user-driven.
+
+**MCP server config:**
+```jsonc
+{
+  "mcp": {
+    "github":  { "enabled": true, "category": "code" },
+    "datadog": { "enabled": true, "category": "observability" },
+    "slack":   { "enabled": true, "category": "office" }
+  }
+}
+```
+
+**Agent frontmatter:**
+```yaml
+name: developer
+allowedMcpCategories: [core, code, observability, browser]
+```
+
+**Result:** Developer agent gets ~80 tools instead of 150+ — **47% context reduction**. Session-manager gets ~15 tools — **90% reduction**.
 ```
