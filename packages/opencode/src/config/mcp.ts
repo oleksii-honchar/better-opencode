@@ -16,6 +16,9 @@ export const Local = Schema.Struct({
   timeout: Schema.optional(PositiveInt).annotate({
     description: "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
   }),
+  category: Schema.optional(Schema.String).annotate({
+    description: "Category for agent-level filtering. If omitted, server is loaded for all agents.",
+  }),
 })
   .annotate({ identifier: "McpLocalConfig" })
   .pipe(withStatics((s) => ({ zod: zod(s) })))
@@ -51,6 +54,9 @@ export const Remote = Schema.Struct({
   }),
   timeout: Schema.optional(PositiveInt).annotate({
     description: "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
+  }),
+  category: Schema.optional(Schema.String).annotate({
+    description: "Category for agent-level filtering. If omitted, server is loaded for all agents.",
   }),
 })
   .annotate({ identifier: "McpRemoteConfig" })
