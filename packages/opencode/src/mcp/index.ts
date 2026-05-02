@@ -670,9 +670,56 @@ export const layer = Layer.effect(
               return
             }
 
-            const timeout = entry?.timeout ?? defaultTimeout
-            for (const mcpTool of listed) {
-              result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+            // Filter by enabledTools (whitelist) and disabledTools (blacklist)
+            const enabledTools = entry?.enabledTools
+            const disabledTools = entry?.disabledTools
+
+            if (enabledTools || disabledTools) {
+              // Mutual exclusion: if both specified, prefer enabledTools
+              if (enabledTools && disabledTools) {
+                log.warn("MCP config has both enabledTools and disabledTools — using enabledTools only", {
+                  clientName,
+                })
+              }
+
+              const toolFilter = enabledTools ?? disabledTools
+              const isWhitelist = !!enabledTools
+
+              const filteredTools = listed.filter((mcpTool) => {
+                if (isWhitelist) {
+                  return toolFilter!.includes(mcpTool.name)
+                }
+                // Blacklist: include if NOT in disabled list
+                return !toolFilter!.includes(mcpTool.name)
+              })
+
+              if (filteredTools.length === 0) {
+                log.warn("all tools filtered out for MCP server", {
+                  clientName,
+                  enabledTools,
+                  disabledTools,
+                })
+                return
+              }
+
+              const timeout = entry?.timeout ?? defaultTimeout
+              for (const mcpTool of filteredTools) {
+                result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+              }
+
+              log.debug("MCP tools filtered", {
+                clientName,
+                original: listed.length,
+                filtered: filteredTools.length,
+                filter: isWhitelist ? "enabledTools" : "disabledTools",
+                count: filteredTools.length,
+              })
+            } else {
+              // No tool filtering — use original listed tools
+              const timeout = entry?.timeout ?? defaultTimeout
+              for (const mcpTool of listed) {
+                result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+              }
             }
           }),
         { concurrency: "unbounded" },
