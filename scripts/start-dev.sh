@@ -27,6 +27,7 @@ VSCODE_APP="${VSCODE_APP:-codium}"  # codium = VSCodium
 STOP=false
 FORCE=false
 MODE=server
+SERVER_LOGS=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     --server-only)
@@ -61,6 +62,10 @@ while [[ $# -gt 0 ]]; do
       FORCE=true
       shift
       ;;
+    --server-logs)
+      SERVER_LOGS=true
+      shift
+      ;;
     --help|-h)
       echo "Usage: $0 [OPTIONS]"
       echo ""
@@ -69,6 +74,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --port NUM    Port for dev server (default: 4096)"
       echo "  --vscode      Use VSCode instead of VSCodium (default: VSCodium)"
       echo "  --server-only Same as default: run dev server in foreground (this tab)"
+      echo "  --server-logs Tail dev server logs (requires running server)"
       echo "  --ide-only    Other tab: launch IDE; server must already listen on OPENCODE_PORT"
       echo "  --force       Force launch even if $VSCODE_APP is detected as running"
       echo "  --help, -h    Show this help message"
@@ -241,6 +247,24 @@ if [ "$MODE" = "ide-only" ]; then
   exit 0
 fi
 
+# --- Server logs tab (tail dev.log)
+if [ "$SERVER_LOGS" = true ]; then
+  LOG_DIR="$HOME/.local/share/opencode/log"
+  DEV_LOG="$LOG_DIR/dev.log"
+
+  if [ ! -f "$DEV_LOG" ]; then
+    echo "ERROR: Dev log not found at $DEV_LOG"
+    echo "Is the dev server running? Start it with: $0"
+    exit 1
+  fi
+
+  echo "Tailing dev server logs: $DEV_LOG"
+  echo "Press Ctrl+C to stop."
+  echo ""
+  tail -f "$DEV_LOG"
+  exit 0
+fi
+
 # --- Dev server tab (foreground bun)
 if [ ! -d "$BETTER_OPENCODE_DIR" ]; then
   echo "ERROR: better-opencode directory not found: $BETTER_OPENCODE_DIR"
@@ -259,6 +283,7 @@ fi
 SCRIPT_HINT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 echo "better-opencode dev server (foreground) — leave this tab open; Ctrl+C stops."
 echo "Other tab: \"$SCRIPT_HINT\" --ide-only"
+echo "Log monitoring: \"$SCRIPT_HINT\" --server-logs"
 echo ""
 echo "  OpenChamber (VS Code / VSCodium): set User setting —"
 echo "    \"openchamber.apiUrl\": \"http://127.0.0.1:$OPENCODE_PORT\""
@@ -269,7 +294,14 @@ fi
 echo ""
 
 cd "$BETTER_OPENCODE_DIR"
+
+# Build server arguments
+SERVER_ARGS=(
+  --hostname 127.0.0.1
+  --port "$OPENCODE_PORT"
+  --log-level DEBUG
+)
+
 exec env -u OPENCODE_SERVER_PASSWORD OPENCODE_PORT="$OPENCODE_PORT" \
   bun run --cwd packages/opencode --conditions=browser src/index.ts \
-  --hostname 127.0.0.1 \
-  --port "$OPENCODE_PORT"
+  "${SERVER_ARGS[@]}"

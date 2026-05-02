@@ -3,7 +3,7 @@ export * as ConfigAgent from "./agent"
 import { Exit, Schema, SchemaGetter } from "effect"
 import { Bus } from "@/bus"
 import { zod } from "@/util/effect-zod"
-import { PositiveInt, withStatics } from "@/util/schema"
+import { PositiveInt, withStatics, type DeepMutable } from "@/util/schema"
 import * as Log from "@opencode-ai/core/util/log"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Glob } from "@opencode-ai/core/util/glob"
@@ -35,6 +35,9 @@ const AgentSchema = Schema.StructWithRest(
     disable: Schema.optional(Schema.Boolean),
     description: Schema.optional(Schema.String).annotate({ description: "Description of when to use the agent" }),
     mode: Schema.optional(Schema.Literals(["subagent", "primary", "all"])),
+    allowedMcpCategories: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+      description: "MCP server categories this agent can access",
+    }),
     hidden: Schema.optional(Schema.Boolean).annotate({
       description: "Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)",
     }),
@@ -60,6 +63,7 @@ const KNOWN_KEYS = new Set([
   "temperature",
   "top_p",
   "mode",
+  "allowedMcpCategories",
   "hidden",
   "color",
   "steps",
@@ -105,7 +109,7 @@ export const Info = AgentSchema.pipe(
 )
   .annotate({ identifier: "AgentConfig" })
   .pipe(withStatics((s) => ({ zod: zod(s) })))
-export type Info = Schema.Schema.Type<typeof Info>
+export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
 export async function load(dir: string) {
   const result: Record<string, Info> = {}

@@ -11,6 +11,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js"
 import { Config } from "@/config/config"
 import { ConfigMCP } from "../config/mcp"
+import * as Agent from "../agent/agent"
 import * as Log from "@opencode-ai/core/util/log"
 import { NamedError } from "@opencode-ai/core/util/error"
 import z from "zod/v4"
@@ -211,7 +212,7 @@ interface State {
 export interface Interface {
   readonly status: () => Effect.Effect<Record<string, Status>>
   readonly clients: () => Effect.Effect<Record<string, MCPClient>>
-  readonly tools: () => Effect.Effect<Record<string, Tool>>
+  readonly tools: (agent?: Agent.Info) => Effect.Effect<Record<string, Tool>>
   readonly prompts: () => Effect.Effect<Record<string, PromptInfo & { client: string }>>
   readonly resources: () => Effect.Effect<Record<string, ResourceInfo & { client: string }>>
   readonly add: (name: string, mcp: ConfigMCP.Info) => Effect.Effect<{ status: Record<string, Status> | Status }>
@@ -627,13 +628,18 @@ export const layer = Layer.effect(
       s.status[name] = { status: "disabled" }
     })
 
-    const tools = Effect.fn("MCP.tools")(function* () {
+    const tools = Effect.fn("MCP.tools")(function* (agent?: Agent.Info) {
       const result: Record<string, Tool> = {}
       const s = yield* InstanceState.get(state)
 
       const cfg = yield* cfgSvc.get()
       const config = cfg.mcp ?? {}
       const defaultTimeout = cfg.experimental?.mcp_timeout
+
+      const allowedCategories = agent?.allowedMcpCategories
+      if (!allowedCategories) {
+        // No agent or no allowedMcpCategories — load all tools (backward-compatible)
+      }
 
       const connectedClients = Object.entries(s.clients).filter(
         ([clientName]) => s.status[clientName]?.status === "connected",
@@ -652,9 +658,68 @@ export const layer = Layer.effect(
               return
             }
 
-            const timeout = entry?.timeout ?? defaultTimeout
-            for (const mcpTool of listed) {
-              result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+            // Filter by category if agent has allowedMcpCategories
+            const serverCategory = entry?.category
+            if (allowedCategories && serverCategory && !allowedCategories.includes(serverCategory)) {
+              log.debug("skipping MCP server (category mismatch)", {
+                server: clientName,
+                category: serverCategory,
+                allowed: allowedCategories,
+                agent: agent?.name,
+              })
+              return
+            }
+
+            // Filter by enabledTools (whitelist) and disabledTools (blacklist)
+            const enabledTools = entry?.enabledTools
+            const disabledTools = entry?.disabledTools
+
+            if (enabledTools || disabledTools) {
+              // Mutual exclusion: if both specified, prefer enabledTools
+              if (enabledTools && disabledTools) {
+                log.warn("MCP config has both enabledTools and disabledTools — using enabledTools only", {
+                  clientName,
+                })
+              }
+
+              const toolFilter = enabledTools ?? disabledTools
+              const isWhitelist = !!enabledTools
+
+              const filteredTools = listed.filter((mcpTool) => {
+                if (isWhitelist) {
+                  return toolFilter!.includes(mcpTool.name)
+                }
+                // Blacklist: include if NOT in disabled list
+                return !toolFilter!.includes(mcpTool.name)
+              })
+
+              if (filteredTools.length === 0) {
+                log.warn("all tools filtered out for MCP server", {
+                  clientName,
+                  enabledTools,
+                  disabledTools,
+                })
+                return
+              }
+
+              const timeout = entry?.timeout ?? defaultTimeout
+              for (const mcpTool of filteredTools) {
+                result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+              }
+
+              log.debug("MCP tools filtered", {
+                clientName,
+                original: listed.length,
+                filtered: filteredTools.length,
+                filter: isWhitelist ? "enabledTools" : "disabledTools",
+                count: filteredTools.length,
+              })
+            } else {
+              // No tool filtering — use original listed tools
+              const timeout = entry?.timeout ?? defaultTimeout
+              for (const mcpTool of listed) {
+                result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+              }
             }
           }),
         { concurrency: "unbounded" },
