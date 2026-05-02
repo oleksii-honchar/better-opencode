@@ -35,7 +35,7 @@ const AgentSchema = Schema.StructWithRest(
     disable: Schema.optional(Schema.Boolean),
     description: Schema.optional(Schema.String).annotate({ description: "Description of when to use the agent" }),
     mode: Schema.optional(Schema.Literals(["subagent", "primary", "all"])),
-    allowedMcpCategories: Schema.optional(Schema.Array(Schema.String)).annotate({
+    allowedMcpCategories: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
       description: "MCP server categories this agent can access",
     }),
     hidden: Schema.optional(Schema.Boolean).annotate({

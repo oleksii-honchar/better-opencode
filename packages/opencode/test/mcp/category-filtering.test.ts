@@ -16,6 +16,7 @@ import { Agent } from "../../src/agent/agent"
 import { Config } from "@/config/config"
 import { provideInstance, tmpdir } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
+import { Permission } from "../../src/permission"
 
 // Helper to create a mock agent with allowedMcpCategories
 function createAgent(
@@ -25,7 +26,7 @@ function createAgent(
   return {
     name,
     mode: "subagent" as const,
-    permission: { "*": "allow" },
+    permission: Permission.fromConfig({ "*": "allow" }),
     options: {},
     ...(options?.allowedMcpCategories ? { allowedMcpCategories: options.allowedMcpCategories } : {}),
   }

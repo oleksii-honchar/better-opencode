@@ -45,7 +45,7 @@ export const Info = Schema.Struct({
   prompt: Schema.optional(Schema.String),
   options: Schema.Record(Schema.String, Schema.Unknown),
   steps: Schema.optional(Schema.Finite),
-  allowedMcpCategories: Schema.optional(Schema.Array(Schema.String)).annotate({
+  allowedMcpCategories: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
     description: "MCP server categories this agent can access",
   }),
 })
