@@ -1,0 +1,79 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "perplexity_research",
+        "description": "Deep research using Perplexity AI",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "perplexity_search",
+        "description": "Quick search using Perplexity AI",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "query": "What is the latest version of Node.js?"
+        }
+      },
+      {
+        "name": "perplexity_ask",
+        "description": "Ask a question to Perplexity",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "perplexity_reason",
+        "description": "Reason about a question using Perplexity",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 4
+  }
+}

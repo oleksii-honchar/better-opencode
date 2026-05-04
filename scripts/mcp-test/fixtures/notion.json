@@ -1,0 +1,99 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "search",
+        "description": "Search Notion pages",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "query": "test document"
+        }
+      },
+      {
+        "name": "get_page",
+        "description": "Get a Notion page",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "page_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "page_id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_block_children",
+        "description": "Get children of a Notion block",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "block_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "block_id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "update_page",
+        "description": "Update a Notion page",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "page_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "page_id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "append_block_children",
+        "description": "Append children to a Notion block",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "block_id": {
+              "type": "string"
+            },
+            "children": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "block_id",
+            "children"
+          ]
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 5
+  }
+}

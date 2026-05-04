@@ -1,0 +1,250 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "getJiraIssue",
+        "description": "Get a Jira issue",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "issueKey": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "issueKey"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "cloudId": "test.atlassian.net",
+          "issueIdOrKey": "TEST-1"
+        }
+      },
+      {
+        "name": "editJiraIssue",
+        "description": "Edit a Jira issue",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "issueKey": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "issueKey"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "getJiraProjectIssueTypesMetadata",
+        "description": "Get Jira project issue types metadata",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "projectId"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "getJiraIssueTypeMetaWithFields",
+        "description": "Get Jira issue type metadata with fields",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "issueTypeId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "issueTypeId"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "getTransitionsForJiraIssue",
+        "description": "Get transitions for a Jira issue",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "issueKey": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "issueKey"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "addCommentToJiraIssue",
+        "description": "Add a comment to a Jira issue",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "issueKey": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "issueKey"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "addWorklogToJiraIssue",
+        "description": "Add a worklog to a Jira issue",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "issueKey": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "issueKey"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "transitionJiraIssue",
+        "description": "Transition a Jira issue",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "issueKey": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "issueKey"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "createJiraIssue",
+        "description": "Create a Jira issue",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "projectId"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "getConfluencePage",
+        "description": "Get a Confluence page",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "pageId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pageId"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "updateConfluencePage",
+        "description": "Update a Confluence page",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "pageId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pageId"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "createConfluencePage",
+        "description": "Create a Confluence page",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "spaceKey": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "spaceKey"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "createConfluenceFooterComment",
+        "description": "Create a Confluence footer comment",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "pageId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pageId"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "searchConfluenceUsingCql",
+        "description": "Search Confluence using CQL",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "cql": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "cql"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "getConfluenceSpaces",
+        "description": "Get Confluence spaces",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 15
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "list_collections",
+        "description": "List all collections in the database",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": true,
+        "queryPayload": {}
+      },
+      {
+        "name": "find_documents",
+        "description": "Find documents in a collection",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string"
+            },
+            "filter": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "collection"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "insert_document",
+        "description": "Insert a document into a collection",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string"
+            },
+            "document": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "collection",
+            "document"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "update_document",
+        "description": "Update a document in a collection",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string"
+            },
+            "filter": {
+              "type": "object"
+            },
+            "update": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "collection",
+            "filter",
+            "update"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "delete_document",
+        "description": "Delete a document from a collection",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string"
+            },
+            "filter": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "collection",
+            "filter"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "aggregate",
+        "description": "Run an aggregation pipeline",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "collection": {
+              "type": "string"
+            },
+            "pipeline": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "collection",
+            "pipeline"
+          ]
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 6
+  }
+}

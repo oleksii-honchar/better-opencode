@@ -1,0 +1,459 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "list_documents",
+        "description": "List documents",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": true,
+        "queryPayload": {}
+      },
+      {
+        "name": "search_documents",
+        "description": "Search documents",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_document",
+        "description": "Get a document",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_document_content",
+        "description": "Get document content",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "download_document",
+        "description": "Download a document",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_document_thumbnail",
+        "description": "Get document thumbnail",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "list_tags",
+        "description": "List tags",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "update_document",
+        "description": "Update a document",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "create_tag",
+        "description": "Create a tag",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "update_tag",
+        "description": "Update a tag",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "delete_tag",
+        "description": "Delete a tag",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "post_document",
+        "description": "Post a document",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "bulk_edit_correspondents",
+        "description": "Bulk edit correspondents",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "bulk_edit_custom_fields",
+        "description": "Bulk edit custom fields",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "bulk_edit_document_types",
+        "description": "Bulk edit document types",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "bulk_edit_documents",
+        "description": "Bulk edit documents",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "bulk_edit_tags",
+        "description": "Bulk edit tags",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "create_correspondent",
+        "description": "Create a correspondent",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "create_custom_field",
+        "description": "Create a custom field",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "create_document_type",
+        "description": "Create a document type",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "delete_correspondent",
+        "description": "Delete a correspondent",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "delete_custom_field",
+        "description": "Delete a custom field",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "delete_document_type",
+        "description": "Delete a document type",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_correspondent",
+        "description": "Get a correspondent",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_custom_field",
+        "description": "Get a custom field",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_document_type",
+        "description": "Get a document type",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "list_correspondents",
+        "description": "List correspondents",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "list_custom_fields",
+        "description": "List custom fields",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "list_document_types",
+        "description": "List document types",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "update_correspondent",
+        "description": "Update a correspondent",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "update_custom_field",
+        "description": "Update a custom field",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "update_document_type",
+        "description": "Update a document type",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 32
+  }
+}

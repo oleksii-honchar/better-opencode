@@ -1,0 +1,31 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "markdown_to_browsable_html",
+        "description": "Convert Markdown to browsable HTML",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "markdown": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "markdown"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "markdown": "# Hello\n\nThis is a test markdown document."
+        }
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 1
+  }
+}
