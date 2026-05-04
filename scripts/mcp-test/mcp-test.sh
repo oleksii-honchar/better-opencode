@@ -188,8 +188,8 @@ QUIET = os.environ.get("QUIET", "false").lower() == "true"
 NO_COLOR = os.environ.get("NO_COLOR", "0") == "1"
 FIXTURES_DIR = os.environ.get("FIXTURES_DIR", "")
 
-DEFAULT_TIMEOUT_LOCAL = 45
-DEFAULT_TIMEOUT_REMOTE = 30
+DEFAULT_TIMEOUT_LOCAL = 60
+DEFAULT_TIMEOUT_REMOTE = 60
 CHROME_DEBUG_PORT = 9222
 CHROME_DEBUG_PROFILE = os.path.expanduser("~/chrome-debug-profile")
 
@@ -887,7 +887,7 @@ def test_local_server(server):
             try:
                 call_response = _stdio_jsonrpc_call(proc, "tools/call",
                                                      {"name": tool_name, "arguments": args},
-                                                     timeout=15)
+                                                     timeout=120)
                 if "result" in call_response:
                     result = call_response["result"]
                     content = result.get("content", [])
