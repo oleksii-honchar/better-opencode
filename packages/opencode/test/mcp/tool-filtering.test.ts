@@ -16,7 +16,6 @@ import { MCP } from "../../src/mcp"
 import { Agent } from "../../src/agent/agent"
 import { Config } from "@/config/config"
 import { provideInstance, tmpdir } from "../fixture/fixture"
-import { Instance } from "../../src/project/instance"
 import { Permission } from "../../src/permission"
 
 // Helper to create a mock agent with allowedMcpCategories
@@ -119,13 +118,10 @@ describe("mcp.tool-filtering", () => {
       "server-b": { tools: [{ name: "delete" }] },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           return yield* mcp.tools(undefined)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
@@ -133,8 +129,6 @@ describe("mcp.tool-filtering", () => {
         expect(result).toHaveProperty("server-a_read")
         expect(result).toHaveProperty("server-a_write")
         expect(result).toHaveProperty("server-b_delete")
-      },
-    })
   })
 
   test("MCP.tools() respects enabledTools whitelist", async () => {
@@ -147,13 +141,10 @@ describe("mcp.tool-filtering", () => {
       },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           return yield* mcp.tools(undefined)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
@@ -161,8 +152,6 @@ describe("mcp.tool-filtering", () => {
         expect(result).toHaveProperty("server-a_read")
         expect(result).toHaveProperty("server-a_write")
         expect(result).not.toHaveProperty("server-a_delete")
-      },
-    })
   })
 
   test("MCP.tools() returns no tools when enabledTools whitelist is empty", async () => {
@@ -175,21 +164,16 @@ describe("mcp.tool-filtering", () => {
       },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           return yield* mcp.tools(undefined)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
         // Empty whitelist returns no tools
         expect(result).not.toHaveProperty("server-a_read")
         expect(result).not.toHaveProperty("server-a_write")
-      },
-    })
   })
 
   test("MCP.tools() respects disabledTools blacklist", async () => {
@@ -202,13 +186,10 @@ describe("mcp.tool-filtering", () => {
       },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           return yield* mcp.tools(undefined)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
@@ -216,8 +197,6 @@ describe("mcp.tool-filtering", () => {
         expect(result).toHaveProperty("server-a_read")
         expect(result).toHaveProperty("server-a_write")
         expect(result).not.toHaveProperty("server-a_delete")
-      },
-    })
   })
 
   test("MCP.tools() returns all tools when disabledTools blacklist is empty", async () => {
@@ -230,21 +209,16 @@ describe("mcp.tool-filtering", () => {
       },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           return yield* mcp.tools(undefined)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
         // Empty blacklist returns all tools
         expect(result).toHaveProperty("server-a_read")
         expect(result).toHaveProperty("server-a_write")
-      },
-    })
   })
 
   test("MCP.tools() prefers enabledTools when both fields specified", async () => {
@@ -258,13 +232,10 @@ describe("mcp.tool-filtering", () => {
       },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           return yield* mcp.tools(undefined)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
@@ -272,8 +243,6 @@ describe("mcp.tool-filtering", () => {
         expect(result).toHaveProperty("server-a_read")
         expect(result).not.toHaveProperty("server-a_write")
         expect(result).not.toHaveProperty("server-a_delete")
-      },
-    })
   })
 
   test("MCP.tools() combines category and tool filtering", async () => {
@@ -292,14 +261,11 @@ describe("mcp.tool-filtering", () => {
       },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           const agent = createAgent("dev-agent", { allowedMcpCategories: ["dev"] })
           return yield* mcp.tools(agent)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
@@ -308,8 +274,6 @@ describe("mcp.tool-filtering", () => {
         expect(result).toHaveProperty("server-a_read")
         expect(result).not.toHaveProperty("server-a_write")
         expect(result).not.toHaveProperty("server-b_delete")
-      },
-    })
   })
 
   test("MCP.tools() tool filter applies after category filter", async () => {
@@ -328,14 +292,11 @@ describe("mcp.tool-filtering", () => {
       },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           const agent = createAgent("dev-agent", { allowedMcpCategories: ["dev"] })
           return yield* mcp.tools(agent)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
@@ -344,8 +305,6 @@ describe("mcp.tool-filtering", () => {
         expect(result).toHaveProperty("server-a_read")
         expect(result).not.toHaveProperty("server-a_write")
         expect(result).toHaveProperty("server-b_delete")
-      },
-    })
   })
 
   test("MCP.tools() tool filter is per-server, not global", async () => {
@@ -362,13 +321,10 @@ describe("mcp.tool-filtering", () => {
       },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           return yield* mcp.tools(undefined)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
@@ -377,8 +333,6 @@ describe("mcp.tool-filtering", () => {
         expect(result).not.toHaveProperty("server-a_write")
         expect(result).toHaveProperty("server-b_read")
         expect(result).toHaveProperty("server-b_delete")
-      },
-    })
   })
 
   test("MCP.tools() tool names must match exactly (case-sensitive)", async () => {
@@ -391,20 +345,15 @@ describe("mcp.tool-filtering", () => {
       },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           return yield* mcp.tools(undefined)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
         // Exact match only - "Read" != "read"
         expect(result).toHaveProperty("server-a_Read")
         expect(result).not.toHaveProperty("server-a_read")
-      },
-    })
   })
 })

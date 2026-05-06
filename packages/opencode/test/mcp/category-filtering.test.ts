@@ -15,7 +15,6 @@ import { MCP } from "../../src/mcp"
 import { Agent } from "../../src/agent/agent"
 import { Config } from "@/config/config"
 import { provideInstance, tmpdir } from "../fixture/fixture"
-import { Instance } from "../../src/project/instance"
 import { Permission } from "../../src/permission"
 
 // Helper to create a mock agent with allowedMcpCategories
@@ -86,22 +85,17 @@ describe("mcp.category-filtering", () => {
       "server-b": { tools: [{ name: "write" }], category: "prod" },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           const agent = createAgent("test-agent")
           return yield* mcp.tools(agent)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
         // Should return tools from both servers (no filtering)
         expect(result).toHaveProperty("server-a_read")
         expect(result).toHaveProperty("server-b_write")
-      },
-    })
   })
 
   test("MCP.tools() returns all tools when agent parameter is undefined", async () => {
@@ -112,21 +106,16 @@ describe("mcp.category-filtering", () => {
       "server-b": { tools: [{ name: "write" }], category: "prod" },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           return yield* mcp.tools(undefined)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
         // Should return tools from both servers (no filtering)
         expect(result).toHaveProperty("server-a_read")
         expect(result).toHaveProperty("server-b_write")
-      },
-    })
   })
 
   test("MCP.tools() filters out servers with mismatched category", async () => {
@@ -137,22 +126,17 @@ describe("mcp.category-filtering", () => {
       "server-b": { tools: [{ name: "write" }], category: "prod" },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           const agent = createAgent("dev-agent", { allowedMcpCategories: ["dev"] })
           return yield* mcp.tools(agent)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
         // Should only return tools from server-a (dev category)
         expect(result).toHaveProperty("server-a_read")
         expect(result).not.toHaveProperty("server-b_write")
-      },
-    })
   })
 
   test("MCP.tools() returns all tools when server has no category", async () => {
@@ -163,22 +147,17 @@ describe("mcp.category-filtering", () => {
       "server-b": { tools: [{ name: "write" }] }, // No category
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           const agent = createAgent("dev-agent", { allowedMcpCategories: ["dev"] })
           return yield* mcp.tools(agent)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
         // Should return tools from both servers (server-b has no category = load for all)
         expect(result).toHaveProperty("server-a_read")
         expect(result).toHaveProperty("server-b_write")
-      },
-    })
   })
 
   test("MCP.tools() filters when agent has multiple allowed categories", async () => {
@@ -190,14 +169,11 @@ describe("mcp.category-filtering", () => {
       "server-c": { tools: [{ name: "delete" }], category: "staging" },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           const agent = createAgent("multi-agent", { allowedMcpCategories: ["dev", "staging"] })
           return yield* mcp.tools(agent)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
@@ -205,8 +181,6 @@ describe("mcp.category-filtering", () => {
         expect(result).toHaveProperty("server-a_read")
         expect(result).not.toHaveProperty("server-b_write")
         expect(result).toHaveProperty("server-c_delete")
-      },
-    })
   })
 
   test("MCP.tools() returns all tools when agent has empty allowedMcpCategories", async () => {
@@ -217,21 +191,16 @@ describe("mcp.category-filtering", () => {
       "server-b": { tools: [{ name: "write" }], category: "prod" },
     }
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
         const runTools = Effect.gen(function* () {
           const mcp = yield* MCP.Service
           const agent = createAgent("empty-agent", { allowedMcpCategories: [] })
           return yield* mcp.tools(agent)
-        }).pipe(Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
+        }).pipe(provideInstance(tmp.path), Effect.provide(Layer.mergeAll(Config.defaultLayer, createMockMcpLayer(mockConfig))))
 
         const result = await Effect.runPromise(runTools)
 
         // Empty array is truthy, so servers with any category will be skipped
         expect(result).not.toHaveProperty("server-a_read")
         expect(result).not.toHaveProperty("server-b_write")
-      },
-    })
   })
 })
