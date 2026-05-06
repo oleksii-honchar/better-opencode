@@ -1,6 +1,6 @@
 # better-opencode Governance
 
-This document defines the governance procedures for maintaining the `better-opencode` fork — how to make changes, sync with upstream, build, and push.
+This document defines the governance procedures for maintaining the `better-opencode` fork — how to make changes, sync with upstream, rebase feature branches, build, and push.
 
 For an overview of the fork's purpose and features, see [BETTER-OPENCODE.md](./BETTER-OPENCODE.md).
 
@@ -9,25 +9,43 @@ For an overview of the fork's purpose and features, see [BETTER-OPENCODE.md](./B
 ## Fork Structure
 
 ```
-                    upstream/anomalyco/opencode
-                    ┌─────────────────────────┐
-                    │  dev (development)      │◀── current target
-                    └─────────────────────────┘
-                              │
-                              │ fork
-                              ▼
-              oleksii-honchar/better-opencode (origin)
-              ┌─────────────────────────────────────┐
-              │  dev (mirrors upstream/dev)         │◀── kept current
-              │  patched/dev (working branch)       │◀── your work
-              └─────────────────────────────────────┘
+                     upstream/anomalyco/opencode
+                     ┌─────────────────────────┐
+                     │  dev (development)      │◀── upstream target, changes over time
+                     └─────────────────────────┘
+                               │
+                               │ fork
+                               ▼
+               oleksii-honchar/better-opencode (origin)
+               ┌─────────────────────────────────────┐
+               │  dev (mirrors upstream/dev)         │◀── kept current
+               │  patched/dev (working branch)       │◀── patches + synced with upstream
+               │  260430-feat-01, 260502-feat-05...  │◀── feature branches off patched/dev
+               └─────────────────────────────────────┘
 ```
 
 **Key rules:**
 - **`dev`** — Mirrors upstream/dev. Kept current via periodic sync.
 - **`patched/dev`** — Your working branch. Contains patches + synced with upstream.
+- **Feature branches** — Branch off `patched/dev`. Rebased onto `patched/dev` before merge.
 - **`origin`** — Your fork (push target). NOT the original repo.
 - **`upstream`** — Original repo (read-only, never push).
+
+---
+
+## Core Principle: Preserve Our Features
+
+**Our features are the highest priority.** When resolving any merge or rebase conflict:
+
+1. **Always preserve our feature code** — if a conflict exists between our changes and upstream changes, our feature logic wins.
+2. **Adapt to upstream structural changes** — if upstream changed APIs, types, or patterns (e.g., Effect migration), adapt our feature code to the new upstream patterns while preserving its behavior.
+3. **Never discard our feature changes** — do NOT use `-X theirs` or blindly accept upstream's version when our feature code is involved.
+4. **If unsure, keep both** — include both our code and upstream's code, then clean up manually.
+
+This principle applies to:
+- Rebase conflicts on `patched/dev` onto upstream/dev
+- Rebase conflicts on feature branches onto `patched/dev`
+- Merge conflicts when integrating feature branches into `patched/dev`
 
 ---
 
@@ -50,9 +68,11 @@ git log --oneline upstream/dev..patched/dev | wc -l  # commits ahead
 git checkout patched/dev
 git rebase upstream/dev
 
-# 4. If conflicts occur, resolve them:
-#    git rebase --continue      (after resolving each conflict)
-#    git rebase --abort         (to cancel)
+# 4. If conflicts occur, resolve them (preserve our features!):
+#    - Edit conflicted files — keep our feature code, adapt to upstream changes
+#    - git add <resolved-file>
+#    - git rebase --continue      (after resolving each conflict)
+#    - git rebase --abort         (to cancel)
 
 # 5. Push rebased branch to your fork
 git push origin patched/dev --force-with-lease
@@ -60,16 +80,21 @@ git push origin patched/dev --force-with-lease
 
 ---
 
-## Making Changes to the Fork
+## Rebase Workflow for Feature Branches
 
-### Scenario 1: Adding a new patch/feature
+Feature branches are created from `patched/dev` and must be rebased onto `patched/dev` before they are merged back. This ensures a linear history and that our features stay on top of the latest upstream + patches.
+
+### Step 1: Create a feature branch from `patched/dev`
 
 ```bash
 cd ~/www/misc/better-opencode
-git checkout patched/dev
 
-# Create a feature branch from patched/dev
-git checkout -b feature/my-new-patch
+# Ensure patched/dev is up to date (sync with upstream first if needed)
+git checkout patched/dev
+git pull origin patched/dev
+
+# Create feature branch
+git checkout -b 260430-feat-01
 
 # Make your changes...
 # ...
@@ -77,33 +102,92 @@ git checkout -b feature/my-new-patch
 # Commit and push
 git add .
 git commit -m "feat: describe your change"
-git push origin feature/my-new-patch
+git push origin 260430-feat-01
+```
 
-# When ready to merge into patched/dev:
+### Step 2: Rebase feature branch onto `patched/dev` (before merge)
+
+```bash
+cd ~/www/misc/better-opencode
+
+# 1. Make sure patched/dev is current
 git checkout patched/dev
-git merge feature/my-new-patch
+git pull origin patched/dev
+
+# 2. Switch to feature branch
+git checkout 260430-feat-01
+
+# 3. Rebase onto patched/dev
+git rebase patched/dev
+
+# 4. Resolve any conflicts:
+#    - Our feature code is the priority — preserve it
+#    - Adapt to upstream structural changes if needed
+#    - git add <resolved-file>
+#    - git rebase --continue
+
+# 5. Force-push the rebased branch
+git push origin 260430-feat-01 --force-with-lease
+```
+
+### Step 3: Merge feature branch into `patched/dev`
+
+```bash
+git checkout patched/dev
+git merge 260430-feat-01 --no-ff
 git push origin patched/dev
 ```
 
-### Scenario 2: Fixing a merge conflict after rebase
+Use `--no-ff` to preserve the feature branch as a distinct merge commit in history.
 
-```bash
-# After git rebase upstream/dev fails:
-git status  # shows conflicted files
+---
 
-# Resolve conflicts in each file, then:
-git add <resolved-file>
-git rebase --continue  # repeat until rebase completes
+## Rebase Workflow — Agent Instructions
+
+When an agent (or human) is performing a rebase, follow these steps:
+
+### 1. Read this governance file first
+
+Before resolving any conflicts, read `docs/GOVERNANCE.md` and `docs/FEATURES.md` to understand:
+- What features exist and their implementation status
+- The core principle: **preserve our features**
+- The branch structure and sync workflow
+
+### 2. Understand the rebase direction
+
+- **`patched/dev` onto `upstream/dev`** — upstream changed, adapt our patches to new upstream
+- **`feature branch` onto `patched/dev`** — patched/dev moved forward, update feature branch
+
+### 3. Resolve conflicts with feature preservation priority
+
+When a conflict marker appears:
+
+```
+<<<<<<< HEAD
+[our code]
+=======
+[upstream code]
+>>>>>>> upstream/dev
 ```
 
-### Scenario 3: Temporarily switching to Homebrew opencode
+Apply this decision tree:
+
+1. **Is our code in the conflict?** → Keep our code, adapt to upstream patterns if needed.
+2. **Is this a structural change (API, type, pattern)?** → Adapt our code to the new upstream pattern while preserving its behavior.
+3. **Is this a doc/spec file for our feature?** → Keep our version.
+4. **Is this a shared file where both sides added different things?** → Keep both, merge carefully.
+5. **When in doubt** → Keep our code. It's safer to have a conflict to fix later than to lose feature code.
+
+### 4. Verify after rebase
+
+After rebase completes:
 
 ```bash
-# Remove OpenChamber config (switch back to Homebrew)
-./build-and-install.sh --unconfigure-openchamber
+# Typecheck
+cd ~/www/misc/better-opencode && pnpm typecheck
 
-# When ready to switch back:
-./build-and-install.sh --configure-openchamber
+# Run relevant tests
+cd ~/www/misc/better-opencode && pnpm test -- <test-path>
 ```
 
 ---
@@ -147,9 +231,9 @@ git push origin patched/dev --force-with-lease
 
 | Problem | Solution |
 |---------|----------|
-| Rebase fails with conflicts | `git rebase --abort` to reset, then resolve manually |
-| Accidentally modified `patched/dev` | `git checkout patched/dev && git reset --hard upstream/dev` |
-| Lost local changes | Check `git reflog` to recover |
+| Rebase fails with conflicts | Resolve conflicts (preserve our features!), `git rebase --continue` | 
+| Rebase is too messy to continue | `git rebase --abort` to reset, then resolve manually |
+| Accidentally lost our feature code in conflict | Check `git reflog` to recover, or re-apply from feature branch |
 | Fork is far behind upstream | Run sync steps above, resolve conflicts iteratively |
 
 ---
@@ -160,188 +244,8 @@ git push origin patched/dev --force-with-lease
 - **Don't add patches to `dev`** — `dev` mirrors upstream/dev. Use `patched/dev` for your work.
 - **Don't use `-X theirs` with local patches** — It will discard your changes on conflict.
 - **Don't forget to fetch `origin/patched/dev`** — Your fork's remote may have updates you haven't seen.
-
----
-
-## Verification Commands
-
-```bash
-# Verify remotes are correct
-git remote -v
-# origin → oleksii-honchar/better-opencode.git (your fork)
-# upstream → anomalyco/opencode.git (original)
-
-# Verify current branch
-git branch --show-current
-# Should show: patched/dev
-
-# Verify divergence
-git log --oneline origin/patched/dev..patched/dev | wc -l  # commits ahead
-git log --oneline patched/dev..origin/patched/dev | wc -l  # commits behind
-```
-
-# better-opencode Governance
-
-This document defines the governance procedures for maintaining the `better-opencode` fork — how to make changes, sync with upstream, build, and push.
-
-For an overview of the fork's purpose and features, see [BETTER-OPENCODE.md](./BETTER-OPENCODE.md).
-
----
-
-## Fork Structure
-
-```
-                    upstream/anomalyco/opencode
-                    ┌─────────────────────────┐
-                    │  dev (development)      │◀── current target
-                    └─────────────────────────┘
-                              │
-                              │ fork
-                              ▼
-              oleksii-honchar/better-opencode (origin)
-              ┌─────────────────────────────────────┐
-              │  dev (mirrors upstream/dev)         │◀── kept current
-              │  patched/dev (working branch)       │◀── your work
-              └─────────────────────────────────────┘
-```
-
-**Key rules:**
-- **`dev`** — Mirrors upstream/dev. Kept current via periodic sync.
-- **`patched/dev`** — Your working branch. Contains patches + synced with upstream.
-- **`origin`** — Your fork (push target). NOT the original repo.
-- **`upstream`** — Original repo (read-only, never push).
-
----
-
-## Syncing with Upstream (Staying Current)
-
-**Before making any changes, always sync first:**
-
-```bash
-cd ~/www/misc/better-opencode
-
-# 1. Fetch latest from both remotes
-git fetch upstream dev --quiet
-git fetch origin --quiet
-
-# 2. Check divergence
-git log --oneline patched/dev..upstream/dev | wc -l  # commits behind
-git log --oneline upstream/dev..patched/dev | wc -l  # commits ahead
-
-# 3. Rebase patched/dev onto upstream/dev
-git checkout patched/dev
-git rebase upstream/dev
-
-# 4. If conflicts occur, resolve them:
-#    git rebase --continue      (after resolving each conflict)
-#    git rebase --abort         (to cancel)
-
-# 5. Push rebased branch to your fork
-git push origin patched/dev --force-with-lease
-```
-
----
-
-## Making Changes to the Fork
-
-### Scenario 1: Adding a new patch/feature
-
-```bash
-cd ~/www/misc/better-opencode
-git checkout patched/dev
-
-# Create a feature branch from patched/dev
-git checkout -b feature/my-new-patch
-
-# Make your changes...
-# ...
-
-# Commit and push
-git add .
-git commit -m "feat: describe your change"
-git push origin feature/my-new-patch
-
-# When ready to merge into patched/dev:
-git checkout patched/dev
-git merge feature/my-new-patch
-git push origin patched/dev
-```
-
-### Scenario 2: Fixing a merge conflict after rebase
-
-```bash
-# After git rebase upstream/dev fails:
-git status  # shows conflicted files
-
-# Resolve conflicts in each file, then:
-git add <resolved-file>
-git rebase --continue  # repeat until rebase completes
-```
-
-### Scenario 3: Temporarily switching to Homebrew opencode
-
-```bash
-# Remove OpenChamber config (switch back to Homebrew)
-./build-and-install.sh --unconfigure-openchamber
-
-# When ready to switch back:
-./build-and-install.sh --configure-openchamber
-```
-
----
-
-## Building and Testing
-
-**Quick build (no install):**
-```bash
-./build-and-install.sh --only-build
-```
-
-**Full build + install:**
-```bash
-./build-and-install.sh --install --clean
-```
-
-**Verify the build:**
-```bash
-~/bin/better-opencode --version
-~/bin/better-opencode --help
-```
-
----
-
-## Pushing Changes to GitHub
-
-**After making local changes:**
-```bash
-cd ~/www/misc/better-opencode
-git push origin patched/dev
-```
-
-**If you need to force push (after rebase):**
-```bash
-git push origin patched/dev --force-with-lease
-```
-
----
-
-## Recovery Scenarios
-
-| Problem | Solution |
-|---------|----------|
-| Rebase fails with conflicts | `git rebase --abort` to reset, then resolve manually |
-| Accidentally modified `patched/dev` | `git checkout patched/dev && git reset --hard upstream/dev` |
-| Lost local changes | Check `git reflog` to recover |
-| Fork is far behind upstream | Run sync steps above, resolve conflicts iteratively |
-
----
-
-## Common Mistakes to Avoid
-
-- **Don't push to `upstream`** — `upstream` is read-only. Always push to `origin`.
-- **Don't add patches to `dev`** — `dev` mirrors upstream/dev. Use `patched/dev` for your work.
-- **Don't use `-X theirs` with local patches** — It will discard your changes on conflict.
-- **Don't forget to fetch `origin/patched/dev`** — Your fork's remote may have updates you haven't seen.
+- **Don't merge feature branches without rebasing first** — Always rebase onto `patched/dev` before merging to avoid unnecessary merge commits.
+- **Don't skip typecheck after rebase** — Upstream changes may have broken our feature code silently.
 
 ---
 
