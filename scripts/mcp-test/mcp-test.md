@@ -138,6 +138,7 @@ SSE responses are parsed by extracting `data:` lines and parsing JSON from each.
 | github | `https://api.githubcopilot.com/mcp/` | Bearer token | ✅ PASS |
 | context7 | `https://mcp.context7.com/mcp` | x-api-key header | ✅ PASS |
 | paperless | `https://lite-llm.lan/mcp/paperless` | Bearer token | ✅ PASS |
+| kreuzberg | `https://lite-llm.lan/mcp/kreuzberg` | Bearer token | ✅ PASS |
 | notion | `https://mcp.notion.com/mcp` | None | ❌ FAIL (Cloudflare 403) |
 
 ### Key Protocol Details
@@ -192,8 +193,9 @@ If a schema has no `required` field (some servers omit it), the first string pro
 | mcp-server-snowflake | local | stdio | ? | database |
 | octocode | local (disabled) | stdio | ? | development |
 | paperless | remote | HTTP | 32 | documents |
+| kreuzberg | remote | HTTP | ? | documents |
 
-**Total:** 18 servers (16 enabled, 2 disabled), 14 local + 4 remote
+**Total:** 19 servers (17 enabled, 2 disabled), 14 local + 5 remote
 
 ## Known Limitations
 

@@ -521,11 +521,21 @@ def test_remote_server(server):
                     content_preview = ""
                     if content:
                         text_parts = [c.get("text", "") for c in content if c.get("type") == "text"]
-                        content_preview = " ".join(text_parts)[:500]
-                    checks.append({"name": "tools-call", "status": "passed",
-                                    "duration_ms": int((time.time() - check_call) * 1000),
-                                    "tool": tool_name,
-                                    "content_preview": content_preview})
+                        content_preview = " ".join(text_parts)[:4000]
+                    # Check if content contains error indicators
+                    error_indicators = ["McpError", "Error:", "error:"]
+                    has_error = any(indicator in content_preview for indicator in error_indicators)
+                    if has_error:
+                        checks.append({"name": "tools-call", "status": "failed",
+                                        "duration_ms": int((time.time() - check_call) * 1000),
+                                        "tool": tool_name,
+                                        "error": content_preview[:200]})
+                        overall_status = "failed"
+                    else:
+                        checks.append({"name": "tools-call", "status": "passed",
+                                        "duration_ms": int((time.time() - check_call) * 1000),
+                                        "tool": tool_name,
+                                        "content_preview": content_preview})
                 elif "error" in response:
                     err = response["error"]
                     checks.append({"name": "tools-call", "status": "failed",
@@ -894,7 +904,7 @@ def test_local_server(server):
                     content_preview = ""
                     if content:
                         text_parts = [c.get("text", "") for c in content if c.get("type") == "text"]
-                        content_preview = " ".join(text_parts)[:500]
+                        content_preview = " ".join(text_parts)[:4000]
                     checks.append({"name": "tools-call", "status": "passed",
                                     "duration_ms": int((time.time() - check_call) * 1000),
                                     "tool": tool_name,
@@ -993,7 +1003,7 @@ def generate_human_report(results):
                     if c.get("error"):
                         detail = f": {c['error'][:80]}"
                     if c.get("content_preview"):
-                        detail = f" (tool: {c['tool']}, preview: {c['content_preview'][:60]}...)"
+                        detail = f" (tool: {c['tool']}, preview: {c['content_preview'][:4000]})"
                     print(f"  {color}{status_sym} {s['name']:24s} {c['name']:20s}{detail}{COLOR_OFF}")
         print("")
 
