@@ -16,7 +16,8 @@
 
 set -euo pipefail
 
-BETTER_OPENCODE_DIR="${BETTER_OPENCODE_DIR:-$HOME/www/misc/better-opencode}"
+# Auto-detect repo root from script location; override via BETTER_OPENCODE_DIR env var
+BETTER_OPENCODE_DIR="${BETTER_OPENCODE_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 OPENCODE_PORT="${OPENCODE_PORT:-4096}"
 VSCODE_DIR="${VSCODE_DIR:-.}"
 
