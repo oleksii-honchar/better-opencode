@@ -1,0 +1,187 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "conversations_history",
+        "description": "Get conversation history",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "channel"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "channel_id": "general"
+        }
+      },
+      {
+        "name": "conversations_replies",
+        "description": "Get conversation replies",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string"
+            },
+            "timestamp": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "channel",
+            "timestamp"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "conversations_search_messages",
+        "description": "Search messages in conversations",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "channels_list",
+        "description": "List Slack channels",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "conversations_unreads",
+        "description": "Get unread conversations",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "conversations_mark",
+        "description": "Mark a conversation",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "channel"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "usergroups_list",
+        "description": "List user groups",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "usergroups_me",
+        "description": "Get user groups for current user",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "usergroups_create",
+        "description": "Create a user group",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "usergroups_update",
+        "description": "Update a user group",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "usergroup": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "usergroup"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "usergroups_users_update",
+        "description": "Update users in a user group",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "usergroup": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "usergroup"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "users_search",
+        "description": "Search Slack users",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 12
+  }
+}

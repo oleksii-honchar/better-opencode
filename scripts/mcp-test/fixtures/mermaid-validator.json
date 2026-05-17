@@ -1,0 +1,40 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "validateMermaid",
+        "description": "Validates a Mermaid diagram and returns the rendered image (PNG or SVG) if valid",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "diagram": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "svg",
+                "png"
+              ],
+              "default": "png"
+            }
+          },
+          "required": [
+            "diagram"
+          ],
+          "additionalProperties": false
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "diagram": "graph TD; A-->B;"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 1
+  }
+}

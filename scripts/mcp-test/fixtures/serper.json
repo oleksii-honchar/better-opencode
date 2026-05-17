@@ -1,0 +1,86 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "google_search",
+        "description": "Tool to perform web searches via Serper API and retrieve rich results",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "q": {
+              "type": "string",
+              "description": "Search query string"
+            },
+            "gl": {
+              "type": "string",
+              "description": "Region code (ISO 3166-1 alpha-2)"
+            },
+            "hl": {
+              "type": "string",
+              "description": "Language code (ISO 639-1)"
+            },
+            "location": {
+              "type": "string",
+              "description": "Location for search results"
+            },
+            "num": {
+              "type": "number",
+              "description": "Number of results to return"
+            },
+            "tbs": {
+              "type": "string",
+              "description": "Time-based search filter"
+            },
+            "page": {
+              "type": "number",
+              "description": "Page number of results"
+            },
+            "autocorrect": {
+              "type": "boolean",
+              "description": "Whether to autocorrect spelling"
+            }
+          },
+          "required": [
+            "q",
+            "gl",
+            "hl"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "q": "TypeScript best practices 2025",
+          "gl": "us",
+          "hl": "en"
+        }
+      },
+      {
+        "name": "scrape",
+        "description": "Tool to scrape a webpage and retrieve the text and markdown content",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "The URL of the webpage to scrape."
+            },
+            "includeMarkdown": {
+              "type": "boolean",
+              "description": "Whether to include markdown content.",
+              "default": false
+            }
+          },
+          "required": [
+            "url"
+          ]
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 2
+  }
+}

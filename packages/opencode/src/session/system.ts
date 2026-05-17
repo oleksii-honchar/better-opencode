@@ -33,11 +33,11 @@ export function provider(model: Provider.Model) {
 }
 
 export interface Interface {
-  readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
+  readonly environment: (model: Provider.Model, sessionID?: string, parentSessionID?: string) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
+export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") { }
 
 export const layer = Layer.effect(
   Service,
@@ -45,7 +45,7 @@ export const layer = Layer.effect(
     const skill = yield* Skill.Service
 
     return Service.of({
-      environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
+      environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model, sessionID?: string, parentSessionID?: string) {
         const ctx = yield* InstanceState.context
         return [
           [
@@ -57,6 +57,8 @@ export const layer = Layer.effect(
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,
+            ...(sessionID ? [`  Session ID: ${sessionID}`] : []),
+            ...(parentSessionID ? [`  Parent Session ID: ${parentSessionID}`] : []),
             `</env>`,
           ].join("\n"),
         ]

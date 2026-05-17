@@ -1,0 +1,57 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "query",
+        "description": "Execute a SQL query against the database",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "query": "SELECT 1"
+        }
+      },
+      {
+        "name": "list_tables",
+        "description": "List all tables in the database",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "describe_table",
+        "description": "Describe the schema of a table",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "table"
+          ]
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 3
+  }
+}
