@@ -694,10 +694,17 @@ export const layer = Layer.effect(
               })
 
               if (filteredTools.length === 0) {
+                const listedNames = listed.map((t) => t.name)
                 log.warn("all tools filtered out for MCP server", {
                   clientName,
                   enabledTools,
                   disabledTools,
+                  filter: isWhitelist ? "enabledTools" : "disabledTools",
+                  expectedToolNames: toolFilter,
+                  receivedToolNames: listedNames,
+                  hint: isWhitelist
+                    ? `enabledTools names must match the tool names returned by the server. For remote servers proxied through LiteLLM (/mcp/<server>), tools are prefixed with "<server>-" (e.g. paperless-list_documents, hugging_kreuzberg-extract_bytes)`
+                    : "disabledTools names must match the tool names returned by the server",
                 })
                 return
               }
