@@ -44,7 +44,7 @@ import { ShellID } from "@/tool/shell/id"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Truncate } from "@/tool/truncate"
 import { decodeDataUrl } from "@/util/data-url"
-import { store as storeAttachment, trackForMessage as trackAttachmentForMessage, cleanup as cleanupAttachments, hasAttachments as hasMessageAttachments } from "@/session/attachment"
+import { store as storeAttachment, trackForMessage, hasAttachments as hasMessageAttachments } from "@/session/attachment"
 import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import { zod } from "@/util/effect-zod"
@@ -1085,8 +1085,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 ]
               }
               // For image/media files: store as temp file + inject URI reference
-              const { uri, path: filePath } = storeAttachment(part.url, part.filename)
-              trackAttachmentForMessage(info.id, filePath)
+              const { uri, path: attachmentPath } = storeAttachment(part.url, part.filename)
+              trackForMessage(info.id, attachmentPath)
               log.info("stored attachment as temp file", {
                 messageID: info.id,
                 filename: part.filename ?? "unnamed",
@@ -1417,10 +1417,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
         const result =
           input.noReply === true ? message : yield* loop({ sessionID: input.sessionID })
-        // Cleanup attachments AFTER the LLM loop completes — temp files are needed during
-        // tool calls for URI resolution, so we can't clean up in createUserMessage's scope.
-        log.debug("cleaning up attachments", { messageID: message.info.id })
-        cleanupAttachments(message.info.id)
+        // No cleanup — temp files are small and the OS handles /tmp lifecycle
+        // (macOS periodic daily, Linux tmpwatch). Attempting to clean up creates
+        // timing bugs when tool calls span loop iterations.
         return result
       },
     )

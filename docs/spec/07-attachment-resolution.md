@@ -215,15 +215,21 @@ case "data:":
     // ...
   }
   // For image/media files: store as temp file + inject URI reference
-  const { uri, path: filePath } = storeAttachment(part.url, part.filename)
-  trackAttachmentForMessage(info.id, filePath)
+  const { uri, path: attachmentPath } = storeAttachment(part.url, part.filename)
+  trackForMessage(info.id, attachmentPath) // for hasAttachments() system prompt injection
+  log.info("stored attachment as temp file", {
+    messageID: info.id,
+    filename: part.filename ?? "unnamed",
+    mime: part.mime,
+    uri,
+  })
   return [
     {
       messageID: info.id,
       sessionID: input.sessionID,
       type: "text",
       synthetic: true,
-      text: `Attached file: ${part.filename ?? "unnamed"} (${uri})`,
+      text: `Attached file: ${part.filename ?? "unnamed"} — use "${uri}" as the data argument for tools like extract_bytes`,
     },
     { ...part, messageID: info.id, sessionID: input.sessionID }, // FilePart for visual input
   ]
@@ -274,22 +280,22 @@ function resolveAttachmentUris(args: unknown): unknown {
 }
 ```
 
-### 4. Cleanup Lifecycle
+### 4. Tracking and Cleanup
 
 **File:** `packages/opencode/src/session/prompt.ts`
 
-Cleanup is called **after the LLM loop completes** (not as a finalizer in `createUserMessage`, which would fire before tool calls):
+**Tracking:** `trackForMessage(info.id, attachmentPath)` is called immediately after storing an attachment. This registers the file path under the message ID in the registry.
 
 ```ts
-const result =
-  input.noReply === true ? message : yield* loop({ sessionID: input.sessionID })
-// Cleanup attachments AFTER the LLM loop completes — temp files are needed during
-// tool calls for URI resolution, so we can't clean up in createUserMessage's scope.
-cleanupAttachments(message.info.id)
-return result
+const { uri, path: attachmentPath } = storeAttachment(part.url, part.filename)
+trackForMessage(info.id, attachmentPath)
 ```
 
-**Critical lifecycle detail:** The cleanup must happen after `loop()` returns because the LLM may make multiple tool calls across loop iterations. If cleanup fires when `createUserMessage`'s scope closes (before `loop()`), temp files are deleted while still needed for URI resolution.
+**Why tracking exists:** The `hasAttachments(messageID)` function reads the registry to determine whether `FILE_ATTACHMENTS_SYSTEM_PROMPT` should be injected into the system prompt. Without tracking, the LLM would never know it can use `opencode://attachment/` URIs in tool calls.
+
+**No app-level cleanup:** Temp files are **not** deleted by the application. The OS manages `/tmp` lifecycle (macOS periodic daily cleanup, Linux tmpwatch). Orphaned attachment files are small and get cleaned eventually. App-level cleanup created timing bugs — it fired at the wrong time relative to LLM tool calls.
+
+**Critical design decision:** Attempts to call `cleanup()` after `loop()` still caused premature deletion in some edge cases (MCP tool resolution runs synchronously during `handle.process()`). Removing cleanup entirely eliminates the timing problem and delegates lifecycle management to the OS.
 
 ## Data Models
 
@@ -343,10 +349,10 @@ Located at: `{os.tmpdir()}/opencode-attachments/.registry.json`
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Temp file not cleaned up | Disk space leak | Cleanup called after loop; OS also cleans tmpdir on reboot |
-| Registry corruption | Orphaned temp files | `loadRegistry()` returns `{}` on parse error — safe degradation |
+| Temp files accumulate on disk | Disk space leak over time | OS cleans tmpdir periodically; orphaned files are small (individual attachments) |
+| Registry corruption | `hasAttachments()` returns false, system prompt not injected | `loadRegistry()` returns `{}` on parse error — safe degradation, only affects system prompt injection |
 | Extension mismatch (e.g., `.bin` instead of `.png`) | Tool may reject file | MIME type parsing from data URL header provides fallback |
-| Cleanup fires too early | Tool calls fail with missing files | Cleanup moved to after `loop()`, not in `createUserMessage` scope |
+| Unresolvable URI (file missing during tool call) | Tool receives raw URI string | `resolveAttachmentUris()` passes through original string, tool handles error |
 
 ## Files Changed
 
