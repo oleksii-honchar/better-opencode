@@ -171,8 +171,8 @@ function referenceTextPart(input: {
       ...(metadata.problem
         ? [`Problem: ${metadata.problem}`]
         : [
-            "For targeted context, inspect the reference path directly with Read, Glob, and Grep. For broader research, call the task tool with subagent scout and include this reference path.",
-          ]),
+          "For targeted context, inspect the reference path directly with Read, Glob, and Grep. For broader research, call the task tool with subagent scout and include this reference path.",
+        ]),
     ].join("\n"),
     metadata: { reference: metadata },
   }
@@ -187,7 +187,7 @@ export interface Interface {
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
+export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") { }
 
 export const layer = Layer.effect(
   Service,
@@ -1084,15 +1084,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return yield* Effect.die(err)
     })
 
-    // Check if the model has vision capability — uses existing modalities.input from models.dev
-    function canModelSeeImages(capabilities: { input?: { image?: boolean } }): boolean {
-      return capabilities.input?.image ?? false
-    }
 
-    // Check if a MIME type is an image (not document/audio/video/etc)
-    function isImageMime(mime: string | undefined): boolean {
-      return mime?.startsWith("image/") ?? false
-    }
 
     const currentModel = Effect.fnUntraced(function* (sessionID: SessionID) {
       const current = Database.use((db) =>
@@ -1131,20 +1123,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           .get(),
       )
       const model = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
-      // Fetch full model to check vision capability for attachment handling
-      const fullModel = yield* provider.getModel(model.providerID, model.modelID).pipe(
-        Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)),
-        Effect.catchDefect(() => Effect.succeed(undefined)),
-      )
-      const hasVision = fullModel != null
-        ? canModelSeeImages(fullModel.capabilities ?? {})
-        : false
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
         !input.variant && ag.variant && same
           ? yield* provider
-              .getModel(model.providerID, model.modelID)
-              .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
+            .getModel(model.providerID, model.modelID)
+            .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
           : undefined
       const variant = input.variant ?? (ag.variant && full?.variants?.[ag.variant] ? ag.variant : undefined)
 
@@ -1260,11 +1244,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   })
                 }
               }
-              // Include FilePart for non-images unconditionally;
-              // for images, only include if model supports vision
-              if (!isImageMime(part.mime) || hasVision) {
-                pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
-              }
+              pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
             } else {
               const error = Cause.squash(exit.cause)
               log.error("failed to read MCP resource", { error, clientName, uri })
@@ -1318,12 +1298,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   synthetic: true,
                   text: `Attached file: ${part.filename ?? "unnamed"} — use "${uri}" as the data argument for tools like extract_bytes`,
                 },
+                { ...part, messageID: info.id, sessionID: input.sessionID },
               ]
-              // Include FilePart for non-images unconditionally;
-              // for images, only include if model supports vision
-              if (!isImageMime(part.mime) || hasVision) {
-                pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
-              }
               return pieces
             case "file:": {
               log.info("file", { mime: part.mime })
@@ -1485,11 +1461,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   synthetic: true,
                   text: `Called the Read tool with the following input: {"filePath":"${filepath}"}`,
                 },
-              ]
-              // Include FilePart for non-images unconditionally;
-              // for images, only include if model supports vision
-              if (!isImageMime(mime) || hasVision) {
-                pieces.push({
+                {
                   id: part.id,
                   messageID: info.id,
                   sessionID: input.sessionID,
@@ -1500,8 +1472,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   mime,
                   filename: part.filename!,
                   source: part.source,
-                })
-              }
+                },
+              ]
               return pieces
             }
           }
@@ -1547,11 +1519,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const parts = yield* Effect.forEach(resolvedParts, (part) =>
         part.type === "file" && part.mime.startsWith("image/")
           ? image.normalize(part).pipe(
-              Effect.catchIf(
-                (error) => error instanceof Image.ResizerUnavailableError,
-                () => Effect.succeed(part),
-              ),
-            )
+            Effect.catchIf(
+              (error) => error instanceof Image.ResizerUnavailableError,
+              () => Effect.succeed(part),
+            ),
+          )
           : Effect.succeed(part),
       )
 
@@ -1615,10 +1587,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 name: part.filename,
                 source: part.source
                   ? new Source({
-                      start: part.source.text.start,
-                      end: part.source.text.end,
-                      text: part.source.text.value,
-                    })
+                    start: part.source.text.start,
+                    end: part.source.text.end,
+                    text: part.source.text.value,
+                  })
                   : undefined,
               }),
             )
@@ -1629,10 +1601,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 name: part.name,
                 source: part.source
                   ? new Source({
-                      start: part.source.start,
-                      end: part.source.end,
-                      text: part.source.value,
-                    })
+                    start: part.source.start,
+                    end: part.source.end,
+                    text: part.source.value,
+                  })
                   : undefined,
               }),
             )
@@ -2031,15 +2003,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const isSubtask = (agent.mode === "subagent" && cmd.subtask !== false) || cmd.subtask === true
       const parts = isSubtask
         ? [
-            {
-              type: "subtask" as const,
-              agent: agent.name,
-              description: cmd.description ?? "",
-              command: input.command,
-              model: { providerID: taskModel.providerID, modelID: taskModel.modelID },
-              prompt: templateParts.find((y) => y.type === "text")?.text ?? "",
-            },
-          ]
+          {
+            type: "subtask" as const,
+            agent: agent.name,
+            description: cmd.description ?? "",
+            command: input.command,
+            model: { providerID: taskModel.providerID, modelID: taskModel.modelID },
+            prompt: templateParts.find((y) => y.type === "text")?.text ?? "",
+          },
+        ]
         : [...templateParts, ...(input.parts ?? [])]
 
       const userAgent = isSubtask ? (input.agent ?? (yield* agents.defaultInfo()).name) : agent.name
@@ -2149,7 +2121,7 @@ export type PromptInput = Schema.Schema.Type<typeof PromptInput>
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({
   sessionID: SessionID,
-}) {}
+}) { }
 
 export const ShellInput = Schema.Struct({
   sessionID: SessionID,
