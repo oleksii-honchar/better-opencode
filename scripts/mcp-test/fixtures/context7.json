@@ -1,0 +1,52 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "resolve-library-id",
+        "description": "Resolve a library to its ID in the Context7 system",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "library": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "library"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "query": "express",
+          "libraryName": "express"
+        }
+      },
+      {
+        "name": "query-docs",
+        "description": "Query documentation from Context7",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "libraryId": {
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "libraryId",
+            "query"
+          ]
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 2
+  }
+}

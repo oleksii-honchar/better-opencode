@@ -42,10 +42,14 @@ export const Info = Schema.Struct({
       providerID: ProviderID,
     }),
   ),
+  modelPreset: Schema.optional(Schema.Literals(["precise", "instruct"])),
   variant: Schema.optional(Schema.String),
   prompt: Schema.optional(Schema.String),
   options: Schema.Record(Schema.String, Schema.Unknown),
   steps: Schema.optional(Schema.Finite),
+  allowedMcpCategories: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+    description: "MCP server categories this agent can access",
+  }),
 }).annotate({ identifier: "Agent" })
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
@@ -295,6 +299,7 @@ export const layer = Layer.effect(
               native: false,
             }
           if (value.model) item.model = Provider.parseModel(value.model)
+          item.modelPreset = value.modelPreset ?? item.modelPreset
           item.variant = value.variant ?? item.variant
           item.prompt = value.prompt ?? item.prompt
           item.description = value.description ?? item.description
@@ -305,6 +310,7 @@ export const layer = Layer.effect(
           item.hidden = value.hidden ?? item.hidden
           item.name = value.name ?? item.name
           item.steps = value.steps ?? item.steps
+          item.allowedMcpCategories = value.allowedMcpCategories
           item.options = mergeDeep(item.options, value.options ?? {})
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
         }
@@ -453,6 +459,27 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+/**
+ * Resolves the effective model for an agent:
+ * 1. Explicit `model` takes precedence
+ * 2. `modelPreset` computes a suffixed model ID from the parent model
+ * 3. Falls back to parent model
+ */
+export function resolveAgentModel(
+  agentModel: Info["model"],
+  agentModelPreset: Info["modelPreset"],
+  parentModel: { providerID: ProviderID; modelID: ModelID },
+): { modelID: ModelID; providerID: ProviderID } {
+  if (agentModel) return agentModel
+  if (agentModelPreset) {
+    return {
+      modelID: ModelID.make(`${parentModel.modelID}-${agentModelPreset}`),
+      providerID: parentModel.providerID,
+    }
+  }
+  return parentModel
+}
 
 export const defaultLayer = layer.pipe(
   Layer.provide(Plugin.defaultLayer),

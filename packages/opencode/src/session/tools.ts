@@ -7,7 +7,7 @@ import { Tool } from "@/tool/tool"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
-import { ModelID } from "@/provider/schema"
+import { ModelID, ProviderID } from "@/provider/schema"
 import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
 import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
@@ -15,11 +15,62 @@ import { Effect } from "effect"
 import { MessageV2 } from "./message-v2"
 import * as Session from "./session"
 import { SessionProcessor } from "./processor"
-import { PartID } from "./schema"
+import { PartID, MessageID, SessionID } from "./schema"
 import * as Log from "@opencode-ai/core/util/log"
 import { EffectBridge } from "@/effect/bridge"
 
 const log = Log.create({ service: "session.tools" })
+
+/** Type for tool.execute.after hook output with the inject field that plugins may add. */
+type ToolExecuteAfterOutput = {
+  title: string
+  output: string
+  metadata: any
+  inject?: Array<{ role: "user" | "system"; text: string }>
+}
+
+/**
+ * Flush synthetic user messages injected by tool.execute.after hooks.
+ * Persists messages via sessions API so they survive compaction.
+ * System-role injections are wrapped in <system-reminder> tags.
+ */
+const flushInjectedMessages = Effect.fn("SessionTools.flushInjectedMessages")(function* (input: {
+  injected: Array<{ role: "user" | "system"; text: string }>
+  sessionID: SessionID
+  agent: string
+  providerID: ProviderID
+  modelID: ModelID
+}) {
+  if (input.injected.length === 0) return
+
+  const sessions = yield* Session.Service
+
+  for (const injection of input.injected) {
+    const isSystem = injection.role === "system"
+    const wrapped = isSystem
+      ? `<system-reminder>${injection.text}</system-reminder>`
+      : injection.text
+
+    const userMsg: MessageV2.User = {
+      id: MessageID.ascending(),
+      sessionID: input.sessionID,
+      role: "user",
+      time: { created: Date.now() },
+      agent: input.agent,
+      model: { providerID: input.providerID, modelID: input.modelID },
+    }
+    yield* sessions.updateMessage(userMsg)
+
+    yield* sessions.updatePart({
+      id: PartID.ascending(),
+      messageID: userMsg.id,
+      sessionID: input.sessionID,
+      type: "text",
+      text: wrapped,
+      synthetic: true,
+    } satisfies MessageV2.TextPart)
+  }
+})
 
 export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   agent: Agent.Info
@@ -100,11 +151,21 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
                 messageID: input.processor.message.id,
               })),
             }
-            yield* plugin.trigger(
+            const hookOutput = yield* plugin.trigger(
               "tool.execute.after",
               { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
               output,
             )
+            const hookOutputWithInject = hookOutput as ToolExecuteAfterOutput
+            if (hookOutputWithInject.inject && hookOutputWithInject.inject.length > 0) {
+              yield* flushInjectedMessages({
+                injected: hookOutputWithInject.inject,
+                sessionID: ctx.sessionID,
+                agent: input.agent.name,
+                providerID: input.model.providerID,
+                modelID: ModelID.make(input.model.api.id),
+              })
+            }
             if (options.abortSignal?.aborted) {
               yield* input.processor.completeToolCall(options.toolCallId, output)
             }
@@ -115,7 +176,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     })
   }
 
-  for (const [key, item] of Object.entries(yield* mcp.tools())) {
+  for (const [key, item] of Object.entries(yield* mcp.tools(input.agent))) {
     const execute = item.execute
     if (!execute) continue
 
@@ -144,11 +205,21 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               },
             }),
           )
-          yield* plugin.trigger(
+          const hookOutput = yield* plugin.trigger(
             "tool.execute.after",
             { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId, args },
             result,
           )
+          const hookOutputWithInject = hookOutput as ToolExecuteAfterOutput
+          if (hookOutputWithInject.inject && hookOutputWithInject.inject.length > 0) {
+            yield* flushInjectedMessages({
+              injected: hookOutputWithInject.inject,
+              sessionID: ctx.sessionID,
+              agent: input.agent.name,
+              providerID: input.model.providerID,
+              modelID: ModelID.make(input.model.api.id),
+            })
+          }
 
           const textParts: string[] = []
           const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []

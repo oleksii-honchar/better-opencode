@@ -47,6 +47,7 @@ export const SessionTable = sqliteTable(
       providerID: string
       variant?: string
     }>(),
+    workspace_folders: text({ mode: "json" }).$type<string[]>(),
     ...Timestamps,
     time_compacting: integer(),
     time_archived: integer(),

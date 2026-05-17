@@ -13,6 +13,7 @@ export interface LoadInput {
   directory: string
   worktree?: string
   project?: Project.Info
+  workspaceFolders?: string[]
 }
 
 export interface Interface {
@@ -47,6 +48,7 @@ export const layer: Layer.Layer<Service, never, Project.Service | InstanceBootst
                 directory: input.directory,
                 worktree: input.worktree,
                 project: input.project,
+                workspaceFolders: input.workspaceFolders,
               }
             : yield* project.fromDirectory(input.directory).pipe(
                 Effect.map((result) => ({

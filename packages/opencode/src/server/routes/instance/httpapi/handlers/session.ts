@@ -13,6 +13,7 @@ import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
+import * as Log from "@opencode-ai/core/util/log"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
@@ -149,7 +150,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       )
     })
 
+    const log = Log.create({ service: "session.http" })
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
+      log.info(`workspaceFolders=${JSON.stringify(ctx.payload?.workspaceFolders)}`, { action: "create" })
       return yield* shareSvc.create(ctx.payload)
     })
 
@@ -157,9 +160,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       request: HttpServerRequest.HttpServerRequest
     }) {
       const body = yield* Effect.orDie(ctx.request.text)
+      log.info(`createRaw body=${JSON.stringify(body)}`, { action: "createRaw" })
       if (body.trim().length === 0) return yield* create({})
 
       const json = yield* tryParseJson(body)
+      log.info(`createRaw json=${JSON.stringify(json)}`, { action: "createRaw" })
       const decoded = yield* Schema.decodeUnknownEffect(Session.CreateInput)(json).pipe(
         Effect.mapError(() => new HttpApiError.BadRequest({})),
       )
@@ -167,8 +172,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         ? {
             ...decoded,
             permission: decoded.permission ? [...decoded.permission] : undefined,
+            workspaceFolders: decoded.workspaceFolders ? [...decoded.workspaceFolders] : undefined,
           }
         : decoded
+      log.info(`createRaw payload.workspaceFolders=${JSON.stringify(payload?.workspaceFolders)}`, { action: "createRaw" })
       return yield* create({ payload })
     })
 

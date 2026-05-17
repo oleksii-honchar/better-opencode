@@ -70,7 +70,7 @@ export function fromRow(row: SessionRow): Info {
       : undefined
   const share = row.share_url ? { url: row.share_url } : undefined
   const revert = row.revert ?? undefined
-  return {
+  const result = {
     id: row.id,
     slug: row.slug,
     projectID: row.project_id,
@@ -102,6 +102,7 @@ export function fromRow(row: SessionRow): Info {
     share,
     revert,
     permission: row.permission ? [...row.permission] : undefined,
+    workspaceFolders: row.workspace_folders ?? undefined,
     time: {
       created: row.time_created,
       updated: row.time_updated,
@@ -109,10 +110,12 @@ export function fromRow(row: SessionRow): Info {
       archived: row.time_archived ?? undefined,
     },
   }
+  log.info(`fromRow workspace_folders=${JSON.stringify(row.workspace_folders)}`, { id: row.id })
+  return result
 }
 
 export function toRow(info: Info) {
-  return {
+  const row = {
     id: info.id,
     project_id: info.projectID,
     workspace_id: info.workspaceID,
@@ -137,11 +140,14 @@ export function toRow(info: Info) {
     tokens_cache_write: (info.tokens ?? EmptyTokens).cache.write,
     revert: info.revert ?? null,
     permission: info.permission,
+    workspace_folders: info.workspaceFolders ?? null,
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
     time_archived: info.time.archived,
   }
+  log.info(`toRow workspaceFolders=${JSON.stringify(info.workspaceFolders)}`, { id: info.id })
+  return row
 }
 
 function getForkedTitle(title: string): string {
@@ -224,6 +230,7 @@ export const Info = Schema.Struct({
   time: Time,
   permission: optionalOmitUndefined(Permission.Ruleset),
   revert: optionalOmitUndefined(Revert),
+  workspaceFolders: optionalOmitUndefined(Schema.Array(Schema.String)),
 }).annotate({ identifier: "Session" })
 export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
 
@@ -248,6 +255,7 @@ export const CreateInput = Schema.optional(
     model: Schema.optional(Model),
     permission: Schema.optional(Permission.Ruleset),
     workspaceID: Schema.optional(WorkspaceID),
+    workspaceFolders: Schema.optional(Schema.Array(Schema.String)),
   }),
 )
 export type CreateInput = Types.DeepMutable<Schema.Schema.Type<typeof CreateInput>>
@@ -457,6 +465,7 @@ export interface Interface {
     model?: Schema.Schema.Type<typeof Model>
     permission?: Permission.Ruleset
     workspaceID?: WorkspaceID
+    workspaceFolders?: string[]
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
@@ -530,6 +539,7 @@ export const layer: Layer.Layer<
       directory: string
       path?: string
       permission?: Permission.Ruleset
+      workspaceFolders?: string[]
     }) {
       const ctx = yield* InstanceState.context
       const result: Info = {
@@ -545,6 +555,7 @@ export const layer: Layer.Layer<
         agent: input.agent,
         model: input.model,
         permission: input.permission ? [...input.permission] : undefined,
+        workspaceFolders: input.workspaceFolders,
         cost: 0,
         tokens: EmptyTokens,
         time: {
@@ -553,6 +564,7 @@ export const layer: Layer.Layer<
         },
       }
       log.info("created", result)
+      log.info(`workspaceFolders=${JSON.stringify(result.workspaceFolders)}`, { id: result.id })
 
       yield* sync.run(Event.Created, { sessionID: result.id, info: result })
 
@@ -661,6 +673,7 @@ export const layer: Layer.Layer<
       model?: Schema.Schema.Type<typeof Model>
       permission?: Permission.Ruleset
       workspaceID?: WorkspaceID
+      workspaceFolders?: string[]
     }) {
       const ctx = yield* InstanceState.context
       const workspace = yield* InstanceState.workspaceID
@@ -673,6 +686,7 @@ export const layer: Layer.Layer<
         model: input?.model,
         permission: input?.permission,
         workspaceID: input?.workspaceID ?? workspace,
+        workspaceFolders: input?.workspaceFolders,
       })
     })
 
@@ -685,6 +699,7 @@ export const layer: Layer.Layer<
         path: sessionPath(ctx.worktree, ctx.directory),
         workspaceID: original.workspaceID,
         title,
+        workspaceFolders: original.workspaceFolders,
       })
       const msgs = yield* messages({ sessionID: input.sessionID })
       const idMap = new Map<string, MessageID>()

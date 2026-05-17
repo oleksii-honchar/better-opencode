@@ -1,0 +1,8 @@
+export { defaultConfig, mergeConfig } from "./config"
+export type { UnstuckConfig } from "./config"
+export { LoopDetectedError } from "./error"
+export type { LoopDetectedInfo, StepRecord } from "./error"
+export { LoopDetectorImpl, normalizeAndFingerprint, computeToolSignature } from "./loop-detector"
+export type { LoopDetector, StreamChunk, DetectorState } from "./loop-detector"
+export { SentenceTracker } from "./sentence-tracker"
+export { wrapWithLoopDetection } from "./wrapper"
