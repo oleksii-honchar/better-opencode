@@ -144,3 +144,42 @@ allowedMcpCategories: [core, code, observability, browser]
 **Result:** Developer agent gets ~80 tools instead of 150+ — **47% context reduction**. Session-manager gets ~15 tools — **90% reduction**.
 
 **Filtering order:** Category filter → Tool filter. If category filter excludes the server, tool filter is not evaluated.
+
+---
+
+## 6. Attachment Resolution
+
+📋 [Detailed Spec](./spec/07-attachment-resolution.md)
+
+**Status:** ✅ Implemented
+
+**Problem:** Vision models can *see* attached images but cannot *extract* base64 data to construct tool call arguments. When the LLM calls `extract_bytes(data: ???)`, it has no way to pass the file data — the data URL is only in the FilePart for visual rendering, not accessible as text.
+
+**Solution:** Store attachments as temp files with `opencode://attachment/<uuid>.<ext>` URIs, inject URI references into the prompt as synthetic text parts, and intercept MCP tool execution to resolve URIs to base64 before forwarding.
+
+**Flow:**
+```
+User attaches image → resolvePart stores temp file + generates URI
+→ Prompt includes: FilePart(visual) + synthetic text("Attached file: photo.png — use \"opencode://attachment/abc123.png\" as the data argument for tools like extract_bytes")
+→ System prompt includes: "## File Attachments" (conditional, when attachments present)
+→ LLM calls extract_bytes(data: "opencode://attachment/abc123.png")
+→ convertMcpTool intercepts, resolves URI → base64
+→ Tool receives valid base64 → success
+```
+
+**Components:**
+- **`session/attachment.ts`** — `store()`, `resolve()`, `trackForMessage()`, `cleanup()`, `hasAttachments()` functions
+- **`session/prompt.ts`** — `resolvePart` stores non-text attachments, injects synthetic URI text parts (instructional format), conditionally injects `FILE_ATTACHMENTS_SYSTEM_PROMPT` into system array
+- **`mcp/index.ts`** — `convertMcpTool` intercepts tool args, resolves `opencode://attachment/` URIs to base64
+- **Cleanup lifecycle** — Runs after LLM loop completes (not as a scope finalizer that fires before tool calls)
+
+**URI format:** `opencode://attachment/{uuid}.{ext}` — UUID-based filename with original extension, stored in `{os.tmpdir()}/opencode-attachments/`
+
+**Two-Layer LLM Instruction (D24):** The LLM needs explicit instruction to use the URI scheme correctly. Without it, the model may treat URIs as file paths, URLs, or ignore them entirely.
+
+- **Layer 1 — System Prompt Injection:** A `## File Attachments` section is conditionally injected into the system prompt (between general instructions and skills) when the current message has tracked attachments. Explains the URI scheme, instructs the LLM to pass URIs as-is to tools like `extract_bytes`, and warns against treating URIs as file paths or URLs. ~100 tokens when present, 0 when absent.
+- **Layer 2 — Instructional Synthetic Text:** The synthetic text part uses an instructional format (not merely informational): `Attached file: photo.png — use "opencode://attachment/abc123.png" as the data argument for tools like extract_bytes`. The em dash and "use" directive make the action explicit at the point of reference.
+
+The system prompt gives the LLM the general rule; the synthetic text applies it to each specific attachment. Together they eliminate ambiguity — the LLM knows both the pattern (from the system prompt) and the concrete instance (from the synthetic text).
+
+**Vision Flag Check (Step 2.3):** Before constructing a user message, opencode checks whether the active model has vision capability via `capabilities.input.image` (derived from models.dev `modalities.input.includes("image")`). Vision models receive both the `FilePart` (visual image) and the synthetic text URI. Non-vision models receive only the synthetic text URI — they cannot *see* the image but can still pass the URI to tools like `extract_bytes` for extraction. No new configuration property was introduced; the existing modalities array is used as the sole source of truth.
