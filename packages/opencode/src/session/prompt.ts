@@ -932,6 +932,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return capabilities.input?.image ?? false
     }
 
+    // Check if a MIME type is an image (not document/audio/video/etc)
+    function isImageMime(mime: string | undefined): boolean {
+      return mime?.startsWith("image/") ?? false
+    }
+
     const lastModel = Effect.fnUntraced(function* (sessionID: SessionID) {
       const match = yield* sessions.findMessage(sessionID, (m) => m.info.role === "user" && !!m.info.model)
       if (Option.isSome(match) && match.value.info.role === "user") return match.value.info.model
@@ -952,7 +957,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const model = input.model ?? ag.model ?? (yield* lastModel(input.sessionID))
       // Fetch full model to check vision capability for attachment handling
       const fullModel = yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.catchDefect(() => Effect.void))
-      const hasVision = Option.match(fullModel, { onNone: () => false, onSome: (m) => canModelSeeImages(m.capabilities) })
+      const hasVision = fullModel != null
+        ? canModelSeeImages(fullModel.capabilities ?? {})
+        : false
 
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
@@ -1056,7 +1063,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   })
                 }
               }
-              pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
+              // Include FilePart for non-images unconditionally;
+              // for images, only include if model supports vision
+              if (!isImageMime(part.mime) || hasVision) {
+                pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
+              }
             } else {
               const error = Cause.squash(exit.cause)
               log.error("failed to read MCP resource", { error, clientName, uri })
@@ -1102,7 +1113,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 mime: part.mime,
                 uri,
               })
-              return [
+              const pieces: Draft<MessageV2.Part>[] = [
                 {
                   messageID: info.id,
                   sessionID: input.sessionID,
@@ -1110,8 +1121,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   synthetic: true,
                   text: `Attached file: ${part.filename ?? "unnamed"} — use "${uri}" as the data argument for tools like extract_bytes`,
                 },
-                { ...part, messageID: info.id, sessionID: input.sessionID }, // FilePart for visual input
               ]
+              // Include FilePart for non-images unconditionally;
+              // for images, only include if model supports vision
+              if (!isImageMime(part.mime) || hasVision) {
+                pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
+              }
+              return pieces
             case "file:": {
               log.info("file", { mime: part.mime })
               const filepath = fileURLToPath(part.url)
@@ -1253,7 +1269,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 ]
               }
 
-              return [
+              const pieces: Draft<MessageV2.Part>[] = [
                 {
                   messageID: info.id,
                   sessionID: input.sessionID,
@@ -1261,7 +1277,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   synthetic: true,
                   text: `Called the Read tool with the following input: {"filePath":"${filepath}"}`,
                 },
-                {
+              ]
+              // Include FilePart for non-images unconditionally;
+              // for images, only include if model supports vision
+              if (!isImageMime(mime) || hasVision) {
+                pieces.push({
                   id: part.id,
                   messageID: info.id,
                   sessionID: input.sessionID,
@@ -1272,8 +1292,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   mime,
                   filename: part.filename!,
                   source: part.source,
-                },
-              ]
+                })
+              }
+              return pieces
             }
           }
         }
