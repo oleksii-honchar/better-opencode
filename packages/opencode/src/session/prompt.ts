@@ -44,6 +44,7 @@ import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
+import { store as storeAttachment, trackForMessage, hasAttachments as hasMessageAttachments } from "@/session/attachment"
 import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import * as EffectLogger from "@opencode-ai/core/effect/logger"
@@ -79,6 +80,18 @@ IMPORTANT:
 - This tool provides your final answer - no further actions are taken after calling it`
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
+
+const FILE_ATTACHMENTS_SYSTEM_PROMPT = `## File Attachments
+
+When the user attaches a file, you will see a reference like:
+Attached file: photo.png — use "opencode://attachment/d4b96841-f2f1-4b15-ba48-8bb4aeaa788d.png" as the data argument for tools like extract_bytes
+
+The opencode://attachment/ URI is the actual file data. To use it with tools, pass the full
+opencode://attachment/... URI as the \`data\` argument — do NOT try to read the file from disk
+or ask the user for base64 data. The system will resolve it automatically.
+
+Example tool call:
+  extract_bytes(data: "opencode://attachment/d4b96841-f2f1-4b15-ba48-8bb4aeaa788d.png")`
 
 const log = Log.create({ service: "session.prompt" })
 const elog = EffectLogger.create({ service: "session.prompt" })
@@ -609,7 +622,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
       }
 
-      for (const [key, item] of Object.entries(yield* mcp.tools())) {
+      for (const [key, item] of Object.entries(yield* mcp.tools(input.agent))) {
         const execute = item.execute
         if (!execute) continue
 
@@ -1071,6 +1084,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return yield* Effect.die(err)
     })
 
+    // Check if the model has vision capability — uses existing modalities.input from models.dev
+    function canModelSeeImages(capabilities: { input?: { image?: boolean } }): boolean {
+      return capabilities.input?.image ?? false
+    }
+
+    // Check if a MIME type is an image (not document/audio/video/etc)
+    function isImageMime(mime: string | undefined): boolean {
+      return mime?.startsWith("image/") ?? false
+    }
+
     const currentModel = Effect.fnUntraced(function* (sessionID: SessionID) {
       const current = Database.use((db) =>
         db.select({ model: SessionTable.model }).from(SessionTable).where(eq(SessionTable.id, sessionID)).get(),
@@ -1108,6 +1131,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           .get(),
       )
       const model = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
+      // Fetch full model to check vision capability for attachment handling
+      const fullModel = yield* provider.getModel(model.providerID, model.modelID).pipe(
+        Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)),
+        Effect.catchDefect(() => Effect.succeed(undefined)),
+      )
+      const hasVision = fullModel != null
+        ? canModelSeeImages(fullModel.capabilities ?? {})
+        : false
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
         !input.variant && ag.variant && same
@@ -1229,7 +1260,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   })
                 }
               }
-              pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
+              // Include FilePart for non-images unconditionally;
+              // for images, only include if model supports vision
+              if (!isImageMime(part.mime) || hasVision) {
+                pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
+              }
             } else {
               const error = Cause.squash(exit.cause)
               log.error("failed to read MCP resource", { error, clientName, uri })
@@ -1266,7 +1301,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   { ...part, messageID: info.id, sessionID: input.sessionID },
                 ]
               }
-              break
+              // For image/media files: store as temp file + inject URI reference
+              const { uri, path: attachmentPath } = storeAttachment(part.url, part.filename)
+              trackForMessage(info.id, attachmentPath)
+              log.info("stored attachment as temp file", {
+                messageID: info.id,
+                filename: part.filename ?? "unnamed",
+                mime: part.mime,
+                uri,
+              })
+              const pieces: Draft<MessageV2.Part>[] = [
+                {
+                  messageID: info.id,
+                  sessionID: input.sessionID,
+                  type: "text",
+                  synthetic: true,
+                  text: `Attached file: ${part.filename ?? "unnamed"} — use "${uri}" as the data argument for tools like extract_bytes`,
+                },
+              ]
+              // Include FilePart for non-images unconditionally;
+              // for images, only include if model supports vision
+              if (!isImageMime(part.mime) || hasVision) {
+                pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
+              }
+              return pieces
             case "file:": {
               log.info("file", { mime: part.mime })
               const filepath = fileURLToPath(part.url)
@@ -1418,7 +1476,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 ]
               }
 
-              return [
+              const pieces: Draft<MessageV2.Part>[] = [
                 ...(referenceContext ? [{ ...referenceContext, messageID: info.id, sessionID: input.sessionID }] : []),
                 {
                   messageID: info.id,
@@ -1427,7 +1485,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   synthetic: true,
                   text: `Called the Read tool with the following input: {"filePath":"${filepath}"}`,
                 },
-                {
+              ]
+              // Include FilePart for non-images unconditionally;
+              // for images, only include if model supports vision
+              if (!isImageMime(mime) || hasVision) {
+                pieces.push({
                   id: part.id,
                   messageID: info.id,
                   sessionID: input.sessionID,
@@ -1438,8 +1500,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   mime,
                   filename: part.filename!,
                   source: part.source,
-                },
-              ]
+                })
+              }
+              return pieces
             }
           }
         }
@@ -1629,6 +1692,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
 
       if (input.noReply === true) return message
+      // No cleanup — temp files are small and the OS handles /tmp lifecycle
+      // (macOS periodic daily, Linux tmpwatch). Attempting to clean up creates
+      // timing bugs when tool calls span loop iterations.
       return yield* loop({ sessionID: input.sessionID })
     })
 
@@ -1713,6 +1779,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
           ) {
             yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+            // Update token ref to prevent double-trigger; isOverflow uses stale lastFinished.tokens otherwise  
+            Object.assign(lastFinished.tokens, { input: 0, output: 0, reasoning: 0, total: 0, cache: { read: 0, write: 0 } })
             continue
           }
 
@@ -1811,11 +1879,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             const [skills, env, instructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
-              sys.environment(model),
+              sys.environment(model, sessionID, session.parentID),
               instruction.system().pipe(Effect.orDie),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
-            const system = [...env, ...instructions, ...(skills ? [skills] : [])]
+            const system = [...env, ...instructions, ...(hasMessageAttachments(lastUser.id) ? [FILE_ATTACHMENTS_SYSTEM_PROMPT] : []), ...(skills ? [skills] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
