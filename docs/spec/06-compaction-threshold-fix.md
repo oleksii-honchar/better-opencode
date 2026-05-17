@@ -39,15 +39,18 @@ if (
   (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
 ) {
   yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
-  // Update token ref to prevent double-trigger; isOverflow uses stale lastFinished.tokens otherwise
-  Object.assign(lastFinished.tokens, { total: 0 })
+  // Update token ref to prevent double-trigger; isOverflow uses stale lastFinished.tokens otherwise  
+  Object.assign(lastFinished.tokens, { input: 0, output: 0, reasoning: 0, total: 0, cache: { read: 0, write: 0 } })
   continue
 }
 ```
 
-### Why `{ total: 0 }` Instead of `context.totalTokens`?
+### Why All Fields Set to Zero?
 
-The original spec called for updating to `context.totalTokens`, but `context` was not in lexical scope at line 1486. Setting `{ total: 0 }` is semantically equivalent—after compaction succeeds, the input tokens that triggered overflow have been summarized/cleared from the context. Both approaches mark these stale counts as "cleared," preventing `isOverflow` from immediately re-firing on the next loop iteration with outdated values.
+The original spec called for `{ total: context.totalTokens }`, but `context` wasn't in lexical scope. Setting **all** token fields to `0` ensures the next `isOverflow` check calculates `count = 0` (since `0 || 0+0+... = 0`), which is definitely below threshold (`usable ≈ 150k`). This prevents immediate double-trigger because:
+- The compaction just fired means we hit overflow with stale token data
+- Clearing all fields to 0 makes next check see "no tokens" → not overflow → skip re-fire  
+- Alternative `{ total: 1 }` works but setting all fields documents intent clearer (compacted messages have effectively zero pending input)
 
 ### Key Insights
 
