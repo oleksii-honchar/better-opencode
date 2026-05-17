@@ -13,6 +13,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js"
 import { Config } from "@/config/config"
 import { ConfigMCP } from "../config/mcp"
+import * as Agent from "../agent/agent"
 import * as Log from "@opencode-ai/core/util/log"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Installation } from "../installation"
@@ -28,6 +29,7 @@ import { TuiEvent } from "@/cli/cmd/tui/event"
 import open from "open"
 import { Effect, Exit, Layer, Option, Context, Schema, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
+import { resolve as resolveAttachment } from "@/session/attachment"
 import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -166,10 +168,12 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
     description: mcpTool.description ?? "",
     inputSchema: jsonSchema(schema),
     execute: async (args: unknown) => {
+      // Resolve opencode://attachment URIs in args before forwarding
+      const resolvedArgs = resolveAttachmentUris(args)
       return client.callTool(
         {
           name: mcpTool.name,
-          arguments: (args || {}) as Record<string, unknown>,
+          arguments: (resolvedArgs || {}) as Record<string, unknown>,
         },
         CallToolResultSchema,
         {
@@ -179,6 +183,37 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
       )
     },
   })
+}
+
+/**
+ * Recursively resolves opencode://attachment URIs in args to base64 strings.
+ * Walks the entire arg tree (objects, arrays) and replaces any URI string
+ * with its base64 content from the temp file store.
+ */
+function resolveAttachmentUris(args: unknown): unknown {
+  if (typeof args === "string") {
+    if (args.startsWith("opencode://attachment/")) {
+      const base64 = resolveAttachment(args)
+      if (base64) {
+        log.debug("resolved attachment URI", { uri: args, size: base64.length })
+        return base64
+      }
+      // If not found, keep original — the tool will handle the error
+      log.warn("attachment URI not resolved", { uri: args })
+    }
+    return args
+  }
+  if (Array.isArray(args)) {
+    return args.map(resolveAttachmentUris)
+  }
+  if (args !== null && typeof args === "object") {
+    const result: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+      result[key] = resolveAttachmentUris(value)
+    }
+    return result
+  }
+  return args // number, boolean, null — pass through
 }
 
 function defs(key: string, client: MCPClient, timeout?: number) {
@@ -238,7 +273,7 @@ interface State {
 export interface Interface {
   readonly status: () => Effect.Effect<Record<string, Status>>
   readonly clients: () => Effect.Effect<Record<string, MCPClient>>
-  readonly tools: () => Effect.Effect<Record<string, Tool>>
+  readonly tools: (agent?: Agent.Info) => Effect.Effect<Record<string, Tool>>
   readonly prompts: () => Effect.Effect<Record<string, PromptInfo & { client: string }>>
   readonly resources: () => Effect.Effect<Record<string, ResourceInfo & { client: string }>>
   readonly add: (name: string, mcp: ConfigMCP.Info) => Effect.Effect<{ status: Record<string, Status> | Status }>
@@ -654,13 +689,18 @@ export const layer = Layer.effect(
       s.status[name] = { status: "disabled" }
     })
 
-    const tools = Effect.fn("MCP.tools")(function* () {
+    const tools = Effect.fn("MCP.tools")(function* (agent?: Agent.Info) {
       const result: Record<string, Tool> = {}
       const s = yield* InstanceState.get(state)
 
       const cfg = yield* cfgSvc.get()
       const config = cfg.mcp ?? {}
       const defaultTimeout = cfg.experimental?.mcp_timeout
+
+      const allowedCategories = agent?.allowedMcpCategories
+      if (!allowedCategories) {
+        // No agent or no allowedMcpCategories — load all tools (backward-compatible)
+      }
 
       const connectedClients = Object.entries(s.clients).filter(
         ([clientName]) => s.status[clientName]?.status === "connected",
@@ -679,9 +719,75 @@ export const layer = Layer.effect(
               return
             }
 
-            const timeout = entry?.timeout ?? defaultTimeout
-            for (const mcpTool of listed) {
-              result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+            // Filter by category if agent has allowedMcpCategories
+            const serverCategory = entry?.category
+            if (allowedCategories && serverCategory && !allowedCategories.includes(serverCategory)) {
+              log.debug("skipping MCP server (category mismatch)", {
+                server: clientName,
+                category: serverCategory,
+                allowed: allowedCategories,
+                agent: agent?.name,
+              })
+              return
+            }
+
+            // Filter by enabledTools (whitelist) and disabledTools (blacklist)
+            const enabledTools = entry?.enabledTools
+            const disabledTools = entry?.disabledTools
+
+            if (enabledTools || disabledTools) {
+              // Mutual exclusion: if both specified, prefer enabledTools
+              if (enabledTools && disabledTools) {
+                log.warn("MCP config has both enabledTools and disabledTools — using enabledTools only", {
+                  clientName,
+                })
+              }
+
+              const toolFilter = enabledTools ?? disabledTools
+              const isWhitelist = !!enabledTools
+
+              const filteredTools = listed.filter((mcpTool) => {
+                if (isWhitelist) {
+                  return toolFilter!.includes(mcpTool.name)
+                }
+                // Blacklist: include if NOT in disabled list
+                return !toolFilter!.includes(mcpTool.name)
+              })
+
+              if (filteredTools.length === 0) {
+                const listedNames = listed.map((t) => t.name)
+                log.warn("all tools filtered out for MCP server", {
+                  clientName,
+                  enabledTools,
+                  disabledTools,
+                  filter: isWhitelist ? "enabledTools" : "disabledTools",
+                  expectedToolNames: toolFilter,
+                  receivedToolNames: listedNames,
+                  hint: isWhitelist
+                    ? `enabledTools names must match the tool names returned by the server. For remote servers proxied through LiteLLM (/mcp/<server>), tools are prefixed with "<server>-" (e.g. paperless-list_documents, hugging_kreuzberg-extract_bytes)`
+                    : "disabledTools names must match the tool names returned by the server",
+                })
+                return
+              }
+
+              const timeout = entry?.timeout ?? defaultTimeout
+              for (const mcpTool of filteredTools) {
+                result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+              }
+
+              log.debug("MCP tools filtered", {
+                clientName,
+                original: listed.length,
+                filtered: filteredTools.length,
+                filter: isWhitelist ? "enabledTools" : "disabledTools",
+                count: filteredTools.length,
+              })
+            } else {
+              // No tool filtering — use original listed tools
+              const timeout = entry?.timeout ?? defaultTimeout
+              for (const mcpTool of listed) {
+                result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+              }
             }
           }),
         { concurrency: "unbounded" },
