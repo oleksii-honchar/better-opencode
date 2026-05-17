@@ -113,6 +113,17 @@ export function trackForMessage(messageID: string, filePath: string): void {
 }
 
 /**
+ * Checks if a message has tracked attachments.
+ *
+ * @param messageID - The message ID to check
+ * @returns true if the message has one or more tracked attachments
+ */
+export function hasAttachments(messageID: string): boolean {
+  const registry = loadRegistry()
+  return (registry[messageID]?.length ?? 0) > 0
+}
+
+/**
  * Removes all temp files for a given message ID.
  * Called when a session/message is cleaned up.
  *
