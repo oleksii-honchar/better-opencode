@@ -927,6 +927,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return yield* Effect.failCause(exit.cause)
     })
 
+    // Check if the model has vision capability — uses existing modalities.input from models.dev
+    function canModelSeeImages(capabilities: { input?: { image?: boolean } }): boolean {
+      return capabilities.input?.image ?? false
+    }
+
     const lastModel = Effect.fnUntraced(function* (sessionID: SessionID) {
       const match = yield* sessions.findMessage(sessionID, (m) => m.info.role === "user" && !!m.info.model)
       if (Option.isSome(match) && match.value.info.role === "user") return match.value.info.model
@@ -945,6 +950,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
 
       const model = input.model ?? ag.model ?? (yield* lastModel(input.sessionID))
+      // Fetch full model to check vision capability for attachment handling
+      const fullModel = yield* provider.getModel(model.providerID, model.modelID).pipe(Effect.catchDefect(() => Effect.void))
+      const hasVision = Option.match(fullModel, { onNone: () => false, onSome: (m) => canModelSeeImages(m.capabilities) })
+
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
         !input.variant && ag.variant && same

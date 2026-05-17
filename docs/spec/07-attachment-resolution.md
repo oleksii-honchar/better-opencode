@@ -359,5 +359,50 @@ Located at: `{os.tmpdir()}/opencode-attachments/.registry.json`
 | File | Change |
 |------|--------|
 | `packages/opencode/src/session/attachment.ts` | New — store, resolve, trackForMessage, cleanup |
-| `packages/opencode/src/session/prompt.ts` | Modified — resolvePart integration + cleanup after loop |
+| `packages/opencode/src/session/prompt.ts` | Modified — resolvePart integration + cleanup after loop + vision flag check |
 | `packages/opencode/src/mcp/index.ts` | Modified — convertMcpTool URI resolution |
+
+## Vision Flag Check (Step 2.3)
+
+### Problem
+
+Not all models support image input. When a non-vision model receives a `FilePart` with an image data URL, it may error or silently ignore it, wasting context tokens and potentially confusing the model.
+
+### Solution
+
+Before constructing a user message, opencode checks whether the active model has vision capability. The existing `modalities.input.includes("image")` from models.dev (wired through to `capabilities.input.image`) is used as the sole source of truth — no new configuration property was introduced.
+
+**Implementation in `session/prompt.ts`:**
+
+1. **At start of `createUserMessage`:** Fetches the full model via `provider.getModel(model.providerID, model.modelID)`. Determines `hasVision` from `capabilities.input.image`. If lookup fails, defaults to `false` (safe conservative default — no FilePart).
+
+2. **Helper function:**
+```ts
+function canModelSeeImages(capabilities: { input?: { image?: boolean } }): boolean {
+  return capabilities.input?.image ?? false
+}
+```
+
+3. **In `resolvePart` (data: URL, non-text):** The FilePart is only included when `hasVision` is true. The synthetic text URI is **always** included regardless of vision capability.
+
+```ts
+const syntheticText = {
+  messageID: info.id,
+  sessionID: input.sessionID,
+  type: "text",
+  synthetic: true,
+  text: `Attached file: ${part.filename ?? "unnamed"} — use "${uri}" as the data argument for tools like extract_bytes`,
+}
+if (hasVision) {
+  return [syntheticText, { ...part, messageID: info.id, sessionID: input.sessionID }]
+}
+return [syntheticText] // non-vision: URI only
+```
+
+**Result:**
+| Model Type | FilePart (visual) | Synthetic Text URI | Can use extract_bytes |
+|------------|-------------------|--------------------|-----------------------|
+| Vision model | ✅ Included | ✅ Included | Yes |
+| Non-vision model | ❌ Skipped | ✅ Included | Yes |
+
+Non-vision models are not blocked from processing attachments — they simply cannot *see* them, but can still call `extract_bytes` with the URI to get structured text extraction.
