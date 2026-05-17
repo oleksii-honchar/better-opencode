@@ -1482,6 +1482,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
           ) {
             yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+            // Update token ref to prevent double-trigger; isOverflow uses stale lastFinished.tokens otherwise
+            Object.assign(lastFinished.tokens, { total: 0 })
             continue
           }
 

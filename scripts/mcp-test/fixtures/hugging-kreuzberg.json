@@ -2,8 +2,8 @@
   "tools_list_response": {
     "tools": [
       {
-        "name": "hugging-kreuzberg-extract_bytes",
-        "description": "Accepts base64-encoded file data, decodes to binary, and POSTs to Kreuzberg POST /extract as multipart form data. Returns extracted text, metadata, and tables.",
+        "name": "hugging_kreuzberg-extract_bytes",
+        "description": "Accepts base64-encoded file data or a full data URL (e.g. data:image/png;base64,...), decodes to binary, and POSTs to Kreuzberg POST /extract as multipart form data. Returns extracted text, metadata, and tables.",
         "shouldTest": true,
         "queryPayload": {
           "data": "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z3+AAAAIklEQVQIW2nk5+f/DWD///////8fAAAPCgEBGfJq1wAAAABJRU5ErkJggg==",
@@ -11,8 +11,8 @@
         }
       },
       {
-        "name": "hugging-kreuzberg-extract_structured",
-        "description": "Receives base64 file data only. Schema and model are configured server-side via environment variables. POSTs to Kreuzberg POST /extract-structured as multipart form data.",
+        "name": "hugging_kreuzberg-extract_structured",
+        "description": "Accepts base64-encoded file data or a full data URL (e.g. data:image/png;base64,...). Schema and model are configured server-side via environment variables. POSTs to Kreuzberg POST /extract-structured as multipart form data.",
         "shouldTest": false
       }
     ]
