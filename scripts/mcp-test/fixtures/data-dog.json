@@ -1,0 +1,225 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "search_datadog_spans",
+        "description": "Search Datadog spans",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_datadog_trace",
+        "description": "Get a Datadog trace",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_datadog_logs",
+        "description": "Search Datadog logs",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "query": "status:error"
+        }
+      },
+      {
+        "name": "analyze_datadog_logs",
+        "description": "Analyze Datadog logs",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_datadog_dashboards",
+        "description": "Search Datadog dashboards",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_datadog_events",
+        "description": "Search Datadog events",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_datadog_dashboard",
+        "description": "Get a Datadog dashboard",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_datadog_incidents",
+        "description": "Search Datadog incidents",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_datadog_incident",
+        "description": "Get a Datadog incident",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_datadog_monitors",
+        "description": "Search Datadog monitors",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_datadog_metric",
+        "description": "Get a Datadog metric",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_datadog_metrics",
+        "description": "Search Datadog metrics",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_datadog_hosts",
+        "description": "Search Datadog hosts",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_datadog_services",
+        "description": "Search Datadog services",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_datadog_service_dependencies",
+        "description": "Search Datadog service dependencies",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "upsert_datadog_dashboard",
+        "description": "Upsert a Datadog dashboard",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "create_datadog_notebook",
+        "description": "Create a Datadog notebook",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "edit_datadog_notebook",
+        "description": "Edit a Datadog notebook",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_datadog_rum_events",
+        "description": "Search Datadog RUM events",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "aggregate_rum_events",
+        "description": "Aggregate RUM events",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "aggregate_spans",
+        "description": "Aggregate spans",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 21
+  }
+}

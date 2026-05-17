@@ -324,6 +324,9 @@ const live: Layer.Layer<
                   }
                   return args.params
                 },
+                overrideSupportedUrls({ model }) {
+                  return model.supportedUrls ?? {}
+                },
               },
             ],
           }),

@@ -2,6 +2,7 @@ import path from "path"
 import { Effect } from "effect"
 import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { InstanceState } from "@/effect/instance-state"
+import { WorkspaceFoldersRef } from "@/effect/instance-ref"
 import type * as Tool from "./tool"
 import { containsPath } from "../project/instance-context"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -25,6 +26,12 @@ export const assertExternalDirectoryEffect = Effect.fn("Tool.assertExternalDirec
   const ins = yield* InstanceState.context
   const full = process.platform === "win32" ? AppFileSystem.normalizePath(target) : target
   if (containsPath(full, ins)) return
+
+  // Defensive check: if the path is inside any workspace folder,
+  // skip the external_directory permission prompt even if
+  // InstanceContext.workspaceFolders is not set (e.g. old sessions)
+  const workspaceFolders = yield* WorkspaceFoldersRef
+  if (workspaceFolders?.some((folder) => AppFileSystem.contains(folder, full))) return
 
   const kind = options?.kind ?? "file"
   const dir = kind === "directory" ? full : path.dirname(full)

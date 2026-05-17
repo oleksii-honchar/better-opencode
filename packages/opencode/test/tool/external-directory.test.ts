@@ -6,6 +6,7 @@ import type { Tool } from "@/tool/tool"
 import { assertExternalDirectoryEffect } from "../../src/tool/external-directory"
 import { Filesystem } from "@/util/filesystem"
 import { provideInstance, TestInstance, tmpdirScoped } from "../fixture/fixture"
+import { WorkspaceFoldersRef } from "../../src/effect/instance-ref"
 import type { Permission } from "../../src/permission"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { testEffect } from "../lib/effect"
@@ -104,6 +105,43 @@ describe("tool.assertExternalDirectory", () => {
         expect(requests.length).toBe(0)
       }),
     ),
+  )
+
+  it.live("skips prompting when path is inside a workspace folder from WorkspaceFoldersRef", () =>
+    Effect.gen(function* () {
+      const { requests, ctx } = makeCtx()
+
+      const directory = "/tmp/project"
+      const workspaceFolder = "/tmp/workspace-a"
+      const target = path.join(workspaceFolder, "file.txt")
+
+      yield* provideInstance(directory)(
+        assertExternalDirectoryEffect(ctx, target),
+      ).pipe(
+        Effect.provideService(WorkspaceFoldersRef, [workspaceFolder]),
+      )
+
+      expect(requests.length).toBe(0)
+    }),
+  )
+
+  it.live("still prompts when path is outside workspace folders from WorkspaceFoldersRef", () =>
+    Effect.gen(function* () {
+      const { requests, ctx } = makeCtx()
+
+      const directory = "/tmp/project"
+      const workspaceFolder = "/tmp/workspace-a"
+      const target = "/tmp/outside/file.txt"
+
+      yield* provideInstance(directory)(
+        assertExternalDirectoryEffect(ctx, target),
+      ).pipe(
+        Effect.provideService(WorkspaceFoldersRef, [workspaceFolder]),
+      )
+
+      const req = requests.find((r) => r.permission === "external_directory")
+      expect(req).toBeDefined()
+    }),
   )
 
   if (process.platform === "win32") {

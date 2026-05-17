@@ -20,7 +20,8 @@ import path from "path"
 import { Plugin } from "@/plugin"
 import { Skill } from "../skill"
 import { Effect, Context, Layer, Schema } from "effect"
-import { InstanceState } from "@/effect/instance-state"
+import { InstanceRef } from "@/effect/instance-ref"
+import { WorkspaceFoldersRef } from "@/effect/instance-ref"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
@@ -42,10 +43,14 @@ export const Info = Schema.Struct({
       providerID: ProviderID,
     }),
   ),
+  modelPreset: Schema.optional(Schema.Literals(["precise", "instruct"])),
   variant: Schema.optional(Schema.String),
   prompt: Schema.optional(Schema.String),
   options: Schema.Record(Schema.String, Schema.Unknown),
   steps: Schema.optional(Schema.Finite),
+  allowedMcpCategories: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+    description: "MCP server categories this agent can access",
+  }),
 }).annotate({ identifier: "Agent" })
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
@@ -89,14 +94,16 @@ export const layer = Layer.effect(
     const provider = yield* Provider.Service
     const flags = yield* RuntimeFlags.Service
 
-    const state = yield* InstanceState.make<State>(
-      Effect.fn("Agent.state")(function* (ctx) {
+    const state = Effect.fn("Agent.state")(function* () {
+        const ctx = yield* InstanceRef
         const cfg = yield* config.get()
         const skillDirs = yield* skill.dirs()
+        const workspaceFolders = (yield* WorkspaceFoldersRef) ?? ctx?.workspaceFolders
         const whitelistedDirs = [
           Truncate.GLOB,
           path.join(Global.Path.tmp, "*"),
           ...skillDirs.map((dir) => path.join(dir, "*")),
+          ...(workspaceFolders ?? []).map((dir: string) => path.join(dir, "*")),
         ]
         const readonlyExternalDirectory = {
           "*": "ask",
@@ -157,7 +164,7 @@ export const layer = Layer.effect(
                 edit: {
                   "*": "deny",
                   [path.join(".opencode", "plans", "*.md")]: "allow",
-                  [path.relative(ctx.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
+                  [path.relative(ctx?.worktree ?? "/", path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
                 },
               }),
               user,
@@ -295,6 +302,7 @@ export const layer = Layer.effect(
               native: false,
             }
           if (value.model) item.model = Provider.parseModel(value.model)
+          item.modelPreset = value.modelPreset ?? item.modelPreset
           item.variant = value.variant ?? item.variant
           item.prompt = value.prompt ?? item.prompt
           item.description = value.description ?? item.description
@@ -305,6 +313,7 @@ export const layer = Layer.effect(
           item.hidden = value.hidden ?? item.hidden
           item.name = value.name ?? item.name
           item.steps = value.steps ?? item.steps
+          item.allowedMcpCategories = value.allowedMcpCategories
           item.options = mergeDeep(item.options, value.options ?? {})
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
         }
@@ -365,21 +374,24 @@ export const layer = Layer.effect(
           defaultInfo,
           defaultAgent,
         } satisfies State
-      }),
-    )
+      })
 
     return Service.of({
       get: Effect.fn("Agent.get")(function* (agent: string) {
-        return yield* InstanceState.useEffect(state, (s) => s.get(agent))
+        const s = yield* state()
+        return yield* s.get(agent)
       }),
       list: Effect.fn("Agent.list")(function* () {
-        return yield* InstanceState.useEffect(state, (s) => s.list())
+        const s = yield* state()
+        return yield* s.list()
       }),
       defaultInfo: Effect.fn("Agent.defaultInfo")(function* () {
-        return yield* InstanceState.useEffect(state, (s) => s.defaultInfo())
+        const s = yield* state()
+        return yield* s.defaultInfo()
       }),
       defaultAgent: Effect.fn("Agent.defaultAgent")(function* () {
-        return yield* InstanceState.useEffect(state, (s) => s.defaultAgent())
+        const s = yield* state()
+        return yield* s.defaultAgent()
       }),
       generate: Effect.fn("Agent.generate")(function* (input: {
         description: string
@@ -395,7 +407,7 @@ export const layer = Layer.effect(
 
         const system = [PROMPT_GENERATE]
         yield* plugin.trigger("experimental.chat.system.transform", { model: resolved }, { system })
-        const existing = yield* InstanceState.useEffect(state, (s) => s.list())
+        const existing = yield* (yield* state()).list()
 
         // TODO: clean this up so provider specific logic doesnt bleed over
         const authInfo = yield* auth.get(model.providerID).pipe(Effect.orDie)
@@ -453,6 +465,27 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+/**
+ * Resolves the effective model for an agent:
+ * 1. Explicit `model` takes precedence
+ * 2. `modelPreset` computes a suffixed model ID from the parent model
+ * 3. Falls back to parent model
+ */
+export function resolveAgentModel(
+  agentModel: Info["model"],
+  agentModelPreset: Info["modelPreset"],
+  parentModel: { providerID: ProviderID; modelID: ModelID },
+): { modelID: ModelID; providerID: ProviderID } {
+  if (agentModel) return agentModel
+  if (agentModelPreset) {
+    return {
+      modelID: ModelID.make(`${parentModel.modelID}-${agentModelPreset}`),
+      providerID: parentModel.providerID,
+    }
+  }
+  return parentModel
+}
 
 export const defaultLayer = layer.pipe(
   Layer.provide(Plugin.defaultLayer),

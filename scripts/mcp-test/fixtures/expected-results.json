@@ -1,0 +1,358 @@
+{
+  "description": "Expected test results for the MCP smoke test fixture suite. Used to validate the script's logic.",
+  "total_servers": 18,
+  "enabled_servers": 17,
+  "disabled_servers": 1,
+  "categories": {
+    "validation": [
+      "mermaid-validator"
+    ],
+    "research": [
+      "perplexity",
+      "context7",
+      "serper"
+    ],
+    "observability": [
+      "data-dog"
+    ],
+    "database": [
+      "pg-billing-engine",
+      "pg-payments",
+      "mongodb-mcp-server",
+      "mcp-server-snowflake"
+    ],
+    "development": [
+      "github",
+      "octocode"
+    ],
+    "browser": [
+      "chrome-devtools",
+      "browser-mcp"
+    ],
+    "office": [
+      "Atlassian-Rovo-MCP",
+      "notion",
+      "md-to-html",
+      "slack"
+    ],
+    "documents": [
+      "paperless"
+    ]
+  },
+  "server_results": {
+    "mermaid-validator": {
+      "status": "passed",
+      "tool_count": 1,
+      "tools": [
+        "validateMermaid"
+      ]
+    },
+    "perplexity": {
+      "status": "passed",
+      "tool_count": 4,
+      "tools": [
+        "perplexity_research",
+        "perplexity_search",
+        "perplexity_ask",
+        "perplexity_reason"
+      ]
+    },
+    "context7": {
+      "status": "passed",
+      "tool_count": 2,
+      "tools": [
+        "resolve-library-id",
+        "query-docs"
+      ]
+    },
+    "data-dog": {
+      "status": "passed",
+      "tool_count": 21,
+      "tools": [
+        "search_datadog_spans",
+        "get_datadog_trace",
+        "search_datadog_logs",
+        "analyze_datadog_logs"
+      ]
+    },
+    "pg-billing-engine": {
+      "status": "passed",
+      "tool_count": 3,
+      "tools": [
+        "query",
+        "list_tables",
+        "describe_table"
+      ]
+    },
+    "pg-payments": {
+      "status": "passed",
+      "tool_count": 3,
+      "tools": [
+        "query",
+        "list_tables",
+        "describe_table"
+      ]
+    },
+    "github": {
+      "status": "passed",
+      "tool_count": 26,
+      "tools": [
+        "search_code",
+        "search_issues",
+        "list_issues",
+        "list_pull_requests",
+        "pull_request_read",
+        "issue_read",
+        "get_file_contents",
+        "list_commits",
+        "get_commit",
+        "search_repositories",
+        "add_comment_to_pending_review",
+        "add_reply_to_pull_request_comment"
+      ]
+    },
+    "serper": {
+      "status": "passed",
+      "tool_count": 2,
+      "tools": [
+        "google_search",
+        "scrape"
+      ]
+    },
+    "chrome-devtools": {
+      "status": "passed",
+      "tool_count": 10,
+      "tools": [
+        "click",
+        "evaluate_script",
+        "fill",
+        "list_pages",
+        "navigate_page",
+        "new_page",
+        "take_screenshot",
+        "take_snapshot",
+        "performance_start_trace",
+        "lighthouse_audit"
+      ]
+    },
+    "Atlassian-Rovo-MCP": {
+      "status": "passed",
+      "tool_count": 15,
+      "tools": [
+        "getJiraIssue",
+        "editJiraIssue"
+      ]
+    },
+    "browser-mcp": {
+      "status": "passed",
+      "tool_count": 2,
+      "tools": [
+        "browser_navigate",
+        "browser_snapshot"
+      ]
+    },
+    "notion": {
+      "status": "passed",
+      "tool_count": 5,
+      "tools": [
+        "search",
+        "get_page",
+        "get_block_children",
+        "update_page",
+        "append_block_children"
+      ]
+    },
+    "mongodb-mcp-server": {
+      "status": "passed",
+      "tool_count": 6,
+      "tools": [
+        "list_collections",
+        "find_documents",
+        "insert_document",
+        "update_document",
+        "delete_document",
+        "aggregate"
+      ]
+    },
+    "md-to-html": {
+      "status": "passed",
+      "tool_count": 1,
+      "tools": [
+        "markdown_to_browsable_html"
+      ]
+    },
+    "slack": {
+      "status": "passed",
+      "tool_count": 12,
+      "tools": [
+        "conversations_history",
+        "conversations_replies",
+        "conversations_search_messages"
+      ]
+    },
+    "mcp-server-snowflake": {
+      "status": "passed",
+      "tool_count": 4,
+      "tools": [
+        "execute_query",
+        "list_schemas",
+        "list_tables",
+        "describe_table"
+      ]
+    },
+    "octocode": {
+      "status": "disabled",
+      "tool_count": 3,
+      "tools": [
+        "search_code",
+        "list_repos",
+        "get_file"
+      ]
+    },
+    "paperless": {
+      "status": "passed",
+      "tool_count": 35,
+      "tools": [
+        "list_documents",
+        "search_documents",
+        "get_document",
+        "get_document_content",
+        "download_document",
+        "get_document_thumbnail",
+        "list_tags"
+      ]
+    }
+  },
+  "test_cases": [
+    {
+      "name": "default_run",
+      "description": "Default run \u2014 16 enabled servers, all pass",
+      "args": [],
+      "expected_total": 17,
+      "expected_passed": 17,
+      "expected_failed": 0,
+      "expected_exit_code": 0
+    },
+    {
+      "name": "all_servers",
+      "description": "Run with --all \u2014 17 servers (includes disabled octocode)",
+      "args": [
+        "--all"
+      ],
+      "expected_total": 18,
+      "expected_passed": 18,
+      "expected_failed": 0,
+      "expected_exit_code": 0
+    },
+    {
+      "name": "single_server",
+      "description": "Run with --server mermaid-validator \u2014 1 server",
+      "args": [
+        "--server",
+        "mermaid-validator"
+      ],
+      "expected_total": 1,
+      "expected_passed": 1,
+      "expected_failed": 0,
+      "expected_exit_code": 0
+    },
+    {
+      "name": "category_filter",
+      "description": "Run with --category database \u2014 4 servers",
+      "args": [
+        "--category",
+        "database"
+      ],
+      "expected_total": 4,
+      "expected_passed": 4,
+      "expected_failed": 0,
+      "expected_exit_code": 0
+    },
+    {
+      "name": "category_browser",
+      "description": "Run with --category browser \u2014 2 servers",
+      "args": [
+        "--category",
+        "browser"
+      ],
+      "expected_total": 2,
+      "expected_passed": 2,
+      "expected_failed": 0,
+      "expected_exit_code": 0
+    },
+    {
+      "name": "multiple_servers",
+      "description": "Run with --server mermaid-validator --server github \u2014 2 servers",
+      "args": [
+        "--server",
+        "mermaid-validator",
+        "--server",
+        "github"
+      ],
+      "expected_total": 2,
+      "expected_passed": 2,
+      "expected_failed": 0,
+      "expected_exit_code": 0
+    },
+    {
+      "name": "json_output",
+      "description": "Run with --json \u2014 produces valid JSON output",
+      "args": [
+        "--json"
+      ],
+      "expected_total": 16,
+      "expected_passed": 16,
+      "expected_failed": 0,
+      "expected_exit_code": 0
+    },
+    {
+      "name": "missing_config",
+      "description": "Run with --config /nonexistent \u2014 config error",
+      "args": [
+        "--config",
+        "/nonexistent/config.json"
+      ],
+      "expected_total": 17,
+      "expected_passed": 17,
+      "expected_failed": 0,
+      "expected_exit_code": 2
+    },
+    {
+      "name": "server_not_found",
+      "description": "Run with --server nonexistent \u2014 no servers found",
+      "args": [
+        "--server",
+        "nonexistent"
+      ],
+      "expected_total": 0,
+      "expected_passed": 0,
+      "expected_failed": 0,
+      "expected_exit_code": 2
+    },
+    {
+      "name": "disabled_server_only",
+      "description": "Run with --server octocode (disabled) \u2014 should be skipped without --all",
+      "args": [
+        "--server",
+        "octocode"
+      ],
+      "expected_total": 0,
+      "expected_passed": 0,
+      "expected_failed": 0,
+      "expected_exit_code": 2
+    },
+    {
+      "name": "disabled_server_with_all",
+      "description": "Run with --all --server octocode \u2014 should include disabled server",
+      "args": [
+        "--all",
+        "--server",
+        "octocode"
+      ],
+      "expected_total": 1,
+      "expected_passed": 1,
+      "expected_failed": 0,
+      "expected_exit_code": 0
+    }
+  ]
+}

@@ -5,6 +5,7 @@ let createPromptSubmit: typeof import("./submit").createPromptSubmit
 
 const createdClients: string[] = []
 const createdSessions: string[] = []
+const createdSessionArgs: Array<unknown> = []
 const enabledAutoAccept: Array<{ sessionID: string; directory: string }> = []
 const optimistic: Array<{
   directory?: string
@@ -31,8 +32,9 @@ const clientFor = (directory: string) => {
   createdClients.push(directory)
   return {
     session: {
-      create: async () => {
+      create: async (args?: unknown) => {
         createdSessions.push(directory)
+        createdSessionArgs.push(args)
         return {
           data: {
             id: `session-${createdSessions.length}`,
@@ -204,6 +206,7 @@ beforeAll(async () => {
 beforeEach(() => {
   createdClients.length = 0
   createdSessions.length = 0
+  createdSessionArgs.length = 0
   enabledAutoAccept.length = 0
   optimistic.length = 0
   optimisticSeeded.length = 0
@@ -341,5 +344,72 @@ describe("prompt submit worktree selection", () => {
 
     expect(storedSessions["/repo/worktree-a"]).toEqual([{ id: "session-1", title: "New session 1" }])
     expect(optimisticSeeded).toEqual([true])
+  })
+
+  test("passes workspaceFolders to session.create when global is set", async () => {
+    const workspaceFolders = [
+      { path: "/repo/worktree-a", name: "worktree-a" },
+    ]
+    ; (globalThis as any).__opencode_workspaceFolders = workspaceFolders
+
+    try {
+      const submit = createPromptSubmit({
+        info: () => undefined,
+        imageAttachments: () => [],
+        commentCount: () => 0,
+        autoAccept: () => false,
+        mode: () => "shell",
+        working: () => false,
+        editor: () => undefined,
+        queueScroll: () => undefined,
+        promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+        addToHistory: () => undefined,
+        resetHistoryNavigation: () => undefined,
+        setMode: () => undefined,
+        setPopover: () => undefined,
+        newSessionWorktree: () => selected,
+        onNewSessionWorktreeReset: () => undefined,
+        onSubmit: () => undefined,
+      })
+
+      const event = { preventDefault: () => undefined } as unknown as Event
+
+      await submit.handleSubmit(event)
+
+      expect(createdSessionArgs).toHaveLength(1)
+      expect(createdSessionArgs[0]).toEqual({ workspaceFolders })
+    } finally {
+      delete (globalThis as any).__opencode_workspaceFolders
+    }
+  })
+
+  test("passes undefined to session.create when global is not set", async () => {
+    delete (globalThis as any).__opencode_workspaceFolders
+
+    const submit = createPromptSubmit({
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "shell",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      newSessionWorktree: () => selected,
+      onNewSessionWorktreeReset: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+
+    expect(createdSessionArgs).toHaveLength(1)
+    expect(createdSessionArgs[0]).toBeUndefined()
   })
 })

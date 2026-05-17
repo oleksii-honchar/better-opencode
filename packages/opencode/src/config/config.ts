@@ -303,6 +303,82 @@ export const Info = Schema.Struct({
       }),
     }),
   ),
+  unstuck: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable loop detection (default: true)",
+      }),
+      loopThreshold: Schema.optional(PositiveInt).annotate({
+        description: "Number of identical steps before a step_loop is detected (default: 3)",
+      }),
+      detectToolOnlyLoops: Schema.optional(Schema.Boolean).annotate({
+        description: "Detect loops based on tool call patterns alone (default: true)",
+      }),
+      toolLoopThreshold: Schema.optional(PositiveInt).annotate({
+        description: "Number of identical tool sequences before a tool_loop is detected (default: 4)",
+      }),
+      historySize: Schema.optional(PositiveInt).annotate({
+        description: "Number of steps to keep in history for loop detection (default: 10)",
+      }),
+      minThinkingLength: Schema.optional(PositiveInt).annotate({
+        description: "Minimum thinking text length to include in step fingerprint (default: 50)",
+      }),
+      includeReasoning: Schema.optional(Schema.Boolean).annotate({
+        description: "Include reasoning text in loop detection (default: true)",
+      }),
+      includeText: Schema.optional(Schema.Boolean).annotate({
+        description: "Include text output in loop detection (default: true)",
+      }),
+      enableSentenceLoopDetection: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable periodic sentence repetition detection (default: true)",
+      }),
+      sentenceLoopThreshold: Schema.optional(PositiveInt).annotate({
+        description: "Number of periodic sentence repetitions to trigger detection (default: 3)",
+      }),
+      minSentenceLength: Schema.optional(PositiveInt).annotate({
+        description: "Minimum sentence length to consider for loop detection (default: 15)",
+      }),
+      strategy: Schema.optional(
+        Schema.Literals(["nudge-and-prune", "abort", "warn"]),
+      ).annotate({
+        description: "Strategy when a loop is detected: 'nudge-and-prune' sends a break prompt, 'abort' stops the stream, 'warn' logs and stops (default: 'nudge-and-prune')",
+      }),
+      maxNudges: Schema.optional(PositiveInt).annotate({
+        description: "Maximum nudge retries before falling back to abort (default: 2)",
+      }),
+      pruneCount: Schema.optional(PositiveInt).annotate({
+        description: "Number of recent assistant messages to prune when nudging (default: 3)",
+      }),
+      nudgeMessage: Schema.optional(Schema.String).annotate({
+        description: "Custom nudge message to inject when a loop is detected (default: auto-generated)",
+      }),
+      logLevel: Schema.optional(
+        Schema.Literals(["debug", "info", "warn"]),
+      ).annotate({
+        description: "Log level for unstuck events (default: 'info')",
+      }),
+      evidenceThresholds: Schema.optional(
+        Schema.Struct({
+          stepLoop: Schema.optional(PositiveInt).annotate({
+            description: "Number of step_loop detections before intervention (default: 2)",
+          }),
+          toolLoop: Schema.optional(PositiveInt).annotate({
+            description: "Number of tool_loop detections before intervention (default: 2)",
+          }),
+          sentenceLoop: Schema.optional(PositiveInt).annotate({
+            description: "Number of sentence_loop detections before intervention (default: 1)",
+          }),
+        }),
+      ).annotate({
+        description: "Evidence thresholds for each loop type before nudge-and-prune intervention is triggered",
+      }),
+      evidenceWindow: Schema.optional(PositiveInt).annotate({
+        description: "Maximum age of evidence records before they expire (in seconds, default: Infinity — no eviction)",
+      }),
+    }),
+  ).annotate({
+    description: "Loop detection configuration — detects and breaks model loops during streaming",
+  }),
 }).annotate({ identifier: "Config" })
 
 // Uses the shared `DeepMutable` from `@opencode-ai/core/schema`. See the definition

@@ -15,6 +15,9 @@ import { TuiEvent } from "@/cli/cmd/tui/event"
 import { Cause, Effect, Exit, Option, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import * as Log from "@opencode-ai/core/util/log"
+
+const log = Log.create({ service: "tool.task" })
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -146,6 +149,7 @@ export const TaskTool = Tool.define(
         ? yield* sessions.get(SessionID.make(taskID)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         : undefined
       const parent = yield* sessions.get(ctx.sessionID)
+      log.info(`TaskTool: parent.workspaceFolders=${JSON.stringify(parent.workspaceFolders)}`, { sessionID: ctx.sessionID, subagent_type: params.subagent_type })
       const parentAgent = parent.agent
         ? yield* agent.get(parent.agent).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         : undefined
@@ -166,15 +170,18 @@ export const TaskTool = Tool.define(
               permission: item,
             })) ?? []),
           ],
+          workspaceFolders: parent.workspaceFolders,
         }))
+      log.info(`TaskTool: created sub-agent session ${nextSession.id}, workspaceFolders=${JSON.stringify(nextSession.workspaceFolders)}`, { sessionID: nextSession.id })
 
       const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(Effect.orDie)
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
 
-      const model = next.model ?? {
+      const parentModel = {
         modelID: msg.info.modelID,
         providerID: msg.info.providerID,
       }
+      const model = Agent.resolveAgentModel(next.model, next.modelPreset, parentModel)
       const metadata = {
         parentSessionId: ctx.sessionID,
         sessionId: nextSession.id,

@@ -6,17 +6,21 @@ export interface InstanceContext {
   directory: string
   worktree: string
   project: Project.Info
+  workspaceFolders?: string[]
 }
 
 export const context = LocalContext.create<InstanceContext>("instance")
 
 /**
  * Check if a path is within the project boundary.
- * Returns true if path is inside ctx.directory OR ctx.worktree.
- * Paths within the worktree but outside the working directory should not trigger external_directory permission.
+ * Returns true if path is inside ctx.directory, any workspace folder, OR ctx.worktree.
+ * Paths within the worktree or workspace folders but outside the working directory should not trigger external_directory permission.
  */
 export function containsPath(filepath: string, ctx: InstanceContext): boolean {
   if (AppFileSystem.contains(ctx.directory, filepath)) return true
+  // Check workspace folders — paths in any workspace folder are project-internal
+  if (ctx.workspaceFolders?.some((folder) => AppFileSystem.contains(folder, filepath)))
+    return true
   // Non-git projects set worktree to "/" which would match ANY absolute path.
   // Skip worktree check in this case to preserve external_directory permissions.
   if (ctx.worktree === "/") return false

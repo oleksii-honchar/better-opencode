@@ -28,6 +28,7 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { LoopDetectorImpl, wrapWithLoopDetection, mergeConfig } from "../plugin/unstuck"
 
 const log = Log.create({ service: "provider" })
 
@@ -1722,6 +1723,15 @@ export const layer = Layer.effect(
       if (s.models.has(key)) return s.models.get(key)!
 
       const provider = s.providers[model.providerID]
+      const cfg = yield* config.get()
+      const unstuckConfig = mergeConfig(cfg.unstuck ?? {})
+      log.debug("getLanguage — unstuck config", {
+        modelKey: key,
+        enabled: unstuckConfig.enabled,
+        strategy: unstuckConfig.strategy,
+        maxNudges: unstuckConfig.maxNudges,
+        loopThreshold: unstuckConfig.loopThreshold,
+      })
       return yield* EffectPromise.refineRejection(
         async () => {
           const sdk = await resolveSDK(model, s, envs)
@@ -1731,8 +1741,14 @@ export const layer = Layer.effect(
                 ...model.options,
               })
             : sdk.languageModel(model.api.id)
-          s.models.set(key, language)
-          return language
+
+          // Wrap with loop detection (UnstuckPlugin)
+          const detector = new LoopDetectorImpl()
+          const wrapped = wrapWithLoopDetection(language, detector, unstuckConfig)
+
+          s.models.set(key, wrapped)
+          log.debug("getLanguage — model wrapped with unstuck", { modelKey: key })
+          return wrapped
         },
         (cause) =>
           cause instanceof NoSuchModelError

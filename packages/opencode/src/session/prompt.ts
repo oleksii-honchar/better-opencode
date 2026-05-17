@@ -53,6 +53,16 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { AgentAttachment, FileAttachment, ReferenceAttachment, Source } from "@opencode-ai/core/session-prompt"
 import { Reference } from "@/reference/reference"
+import { store as storeAttachment, trackForMessage, hasAttachments as hasMessageAttachments } from "@/session/attachment"
+
+const FILE_ATTACHMENTS_SYSTEM_PROMPT = `## File Attachments
+  You can see files that have been attached by the user.
+  When the user attaches a file, a reference to the file will be included in the conversation.
+  You can use these references to understand the file content.
+  The file references are in the format: opencode://attachment/<uuid>.<ext>
+  To use a file in a tool call, pass the opencode://attachment/ URI as the data parameter.
+  Example tool call:
+  extract_bytes(data: "opencode://attachment/d4b96841-f2f1-4b15-ba48-8bb4aeaa788d.png")`
 import * as DateTime from "effect/DateTime"
 import { eq } from "@/storage/db"
 import * as Database from "@/storage/db"
@@ -301,6 +311,55 @@ export const layer = Layer.effect(
         .pipe(Effect.catchCause((cause) => elog.error("failed to generate title", { error: Cause.squash(cause) })))
     })
 
+    /** Type for tool.execute.after hook output with the inject field that plugins may add. */
+    type ToolExecuteAfterOutput = {
+      title: string
+      output: string
+      metadata: any
+      inject?: Array<{ role: "user" | "system"; text: string }>
+    }
+
+    /**
+     * Flush synthetic user messages injected by tool.execute.after hooks.
+     * Persists messages via sessions API so they survive compaction.
+     * System-role injections are wrapped in <system-reminder> tags.
+     */
+    const flushInjectedMessages = Effect.fn("SessionPrompt.flushInjectedMessages")(function* (input: {
+      injected: Array<{ role: "user" | "system"; text: string }>
+      sessionID: SessionID
+      agent: string
+      providerID: ProviderID
+      modelID: ModelID
+    }) {
+      if (input.injected.length === 0) return
+
+      for (const injection of input.injected) {
+        const isSystem = injection.role === "system"
+        const wrapped = isSystem
+          ? `<system-reminder>${injection.text}</system-reminder>`
+          : injection.text
+
+        const userMsg: MessageV2.User = {
+          id: MessageID.ascending(),
+          sessionID: input.sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: input.agent,
+          model: { providerID: input.providerID, modelID: input.modelID },
+        }
+        yield* sessions.updateMessage(userMsg)
+
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: userMsg.id,
+          sessionID: input.sessionID,
+          type: "text",
+          text: wrapped,
+          synthetic: true,
+        } satisfies MessageV2.TextPart)
+      }
+    })
+
     const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
       task: MessageV2.SubtaskPart
       model: Provider.Model
@@ -432,11 +491,21 @@ export const layer = Layer.effect(
         messageID: assistantMessage.id,
       }))
 
-      yield* plugin.trigger(
+      const hookOutput = yield* plugin.trigger(
         "tool.execute.after",
         { tool: TaskTool.id, sessionID, callID: part.id, args: taskArgs },
         result,
       )
+      const hookOutputWithInject = hookOutput as ToolExecuteAfterOutput
+      if (hookOutputWithInject.inject && hookOutputWithInject.inject.length > 0) {
+        yield* flushInjectedMessages({
+          injected: hookOutputWithInject.inject,
+          sessionID,
+          agent: task.agent,
+          providerID: taskModel.providerID,
+          modelID: ModelID.make(taskModel.id),
+        })
+      }
 
       assistantMessage.finish = "tool-calls"
       assistantMessage.time.completed = Date.now()
@@ -868,7 +937,20 @@ export const layer = Layer.effect(
                   { ...part, messageID: info.id, sessionID: input.sessionID },
                 ]
               }
-              break
+              // For image/media files: store as temp file + inject URI reference
+              const { uri, path: attachmentPath } = storeAttachment(part.url, part.filename)
+              trackForMessage(info.id, attachmentPath)
+              const pieces: Draft<MessageV2.Part>[] = [
+                {
+                  messageID: info.id,
+                  sessionID: input.sessionID,
+                  type: "text",
+                  synthetic: true,
+                  text: `Attached file: ${part.filename ?? "unnamed"} — use "${uri}" as the data argument for tools like extract_bytes`,
+                },
+                { ...part, messageID: info.id, sessionID: input.sessionID },
+              ]
+              return pieces
             case "file:": {
               log.info("file", { mime: part.mime })
               const filepath = fileURLToPath(part.url)
@@ -1248,6 +1330,8 @@ export const layer = Layer.effect(
         const slog = elog.with({ sessionID })
         let structured: unknown
         let step = 0
+        const maxStoppingContinuations = 3
+        let stoppingContinuationCount = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
@@ -1287,6 +1371,50 @@ export const layer = Layer.effect(
                 callID: orphan.callID,
               })
             }
+
+            // Before exiting, check if plugin wants to continue
+            const stoppingResult: { stop: boolean; message?: string } = yield* plugin.trigger(
+              "session.stopping",
+              { sessionID, reason: "idle" },
+              { stop: true },
+            )
+
+            if (stoppingResult.stop === false) {
+              // Guard: enforce message requirement
+              if (!stoppingResult.message) {
+                yield* slog.warn(
+                  "session.stopping hook returned stop=false without message — ignoring",
+                )
+                yield* slog.info("exiting loop")
+                break
+              }
+
+              // Guard: enforce max continuation limit
+              if (stoppingContinuationCount >= maxStoppingContinuations) {
+                yield* slog.warn(
+                  `session.stopping hook prevented exit ${maxStoppingContinuations} times — forcing stop`,
+                )
+                yield* slog.info("exiting loop")
+                break
+              }
+
+              // Inject the message and continue the loop
+              stoppingContinuationCount++
+              yield* flushInjectedMessages({
+                injected: [{ role: "system", text: stoppingResult.message }],
+                sessionID,
+                agent: lastUser.agent,
+                providerID: lastUser.model.providerID,
+                modelID: lastUser.model.modelID,
+              })
+
+              yield* slog.info(
+                "session.stopping hook prevented exit",
+                { continuation: stoppingContinuationCount, max: maxStoppingContinuations },
+              )
+              continue  // Don't break — continue the loop
+            }
+
             yield* slog.info("exiting loop")
             break
           }
@@ -1435,11 +1563,11 @@ export const layer = Layer.effect(
 
             const [skills, env, instructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
-              sys.environment(model),
+              sys.environment(model, sessionID, session.parentID, session.workspaceFolders),
               instruction.system().pipe(Effect.orDie),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
-            const system = [...env, ...instructions, ...(skills ? [skills] : [])]
+            const system = [...env, ...instructions, ...(hasMessageAttachments(lastUser.id) ? [FILE_ATTACHMENTS_SYSTEM_PROMPT] : []), ...(skills ? [skills] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
