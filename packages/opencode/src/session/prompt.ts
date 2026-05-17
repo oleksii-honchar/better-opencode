@@ -1075,6 +1075,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // For image/media files: store as temp file + inject URI reference
               const { uri, path: filePath } = storeAttachment(part.url, part.filename)
               trackAttachmentForMessage(info.id, filePath)
+              log.info("stored attachment as temp file", {
+                messageID: info.id,
+                filename: part.filename ?? "unnamed",
+                mime: part.mime,
+                uri,
+              })
               return [
                 {
                   messageID: info.id,
@@ -1401,6 +1407,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           input.noReply === true ? message : yield* loop({ sessionID: input.sessionID })
         // Cleanup attachments AFTER the LLM loop completes — temp files are needed during
         // tool calls for URI resolution, so we can't clean up in createUserMessage's scope.
+        log.debug("cleaning up attachments", { messageID: message.info.id })
         cleanupAttachments(message.info.id)
         return result
       },
