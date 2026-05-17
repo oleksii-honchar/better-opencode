@@ -44,6 +44,7 @@ import { ShellID } from "@/tool/shell/id"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Truncate } from "@/tool/truncate"
 import { decodeDataUrl } from "@/util/data-url"
+import { store as storeAttachment, trackForMessage as trackAttachmentForMessage, cleanup as cleanupAttachments } from "@/session/attachment"
 import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import { zod } from "@/util/effect-zod"
@@ -1071,7 +1072,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   { ...part, messageID: info.id, sessionID: input.sessionID },
                 ]
               }
-              break
+              // For image/media files: store as temp file + inject URI reference
+              const { uri, path: filePath } = storeAttachment(part.url, part.filename)
+              trackAttachmentForMessage(info.id, filePath)
+              return [
+                {
+                  messageID: info.id,
+                  sessionID: input.sessionID,
+                  type: "text",
+                  synthetic: true,
+                  text: `Attached file: ${part.filename ?? "unnamed"} (${uri})`,
+                },
+                { ...part, messageID: info.id, sessionID: input.sessionID }, // FilePart for visual input
+              ]
             case "file:": {
               log.info("file", { mime: part.mime })
               const filepath = fileURLToPath(part.url)
@@ -1384,8 +1397,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
         }
 
-        if (input.noReply === true) return message
-        return yield* loop({ sessionID: input.sessionID })
+        const result =
+          input.noReply === true ? message : yield* loop({ sessionID: input.sessionID })
+        // Cleanup attachments AFTER the LLM loop completes — temp files are needed during
+        // tool calls for URI resolution, so we can't clean up in createUserMessage's scope.
+        cleanupAttachments(message.info.id)
+        return result
       },
     )
 

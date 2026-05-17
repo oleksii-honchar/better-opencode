@@ -28,6 +28,7 @@ import { TuiEvent } from "@/cli/cmd/tui/event"
 import open from "open"
 import { Effect, Exit, Layer, Option, Context, Schema, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
+import { resolve as resolveAttachment } from "@/session/attachment"
 import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -136,10 +137,12 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
     description: mcpTool.description ?? "",
     inputSchema: jsonSchema(schema),
     execute: async (args: unknown) => {
+      // Resolve opencode://attachment URIs in args before forwarding
+      const resolvedArgs = resolveAttachmentUris(args)
       return client.callTool(
         {
           name: mcpTool.name,
-          arguments: (args || {}) as Record<string, unknown>,
+          arguments: (resolvedArgs || {}) as Record<string, unknown>,
         },
         CallToolResultSchema,
         {
@@ -149,6 +152,37 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
       )
     },
   })
+}
+
+/**
+ * Recursively resolves opencode://attachment URIs in args to base64 strings.
+ * Walks the entire arg tree (objects, arrays) and replaces any URI string
+ * with its base64 content from the temp file store.
+ */
+function resolveAttachmentUris(args: unknown): unknown {
+  if (typeof args === "string") {
+    if (args.startsWith("opencode://attachment/")) {
+      const base64 = resolveAttachment(args)
+      if (base64) {
+        log.debug("resolved attachment URI", { uri: args, size: base64.length })
+        return base64
+      }
+      // If not found, keep original — the tool will handle the error
+      log.warn("attachment URI not resolved", { uri: args })
+    }
+    return args
+  }
+  if (Array.isArray(args)) {
+    return args.map(resolveAttachmentUris)
+  }
+  if (args !== null && typeof args === "object") {
+    const result: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+      result[key] = resolveAttachmentUris(value)
+    }
+    return result
+  }
+  return args // number, boolean, null — pass through
 }
 
 function defs(key: string, client: MCPClient, timeout?: number) {

@@ -144,3 +144,32 @@ allowedMcpCategories: [core, code, observability, browser]
 **Result:** Developer agent gets ~80 tools instead of 150+ — **47% context reduction**. Session-manager gets ~15 tools — **90% reduction**.
 
 **Filtering order:** Category filter → Tool filter. If category filter excludes the server, tool filter is not evaluated.
+
+---
+
+## 6. Attachment Resolution
+
+📋 [Detailed Spec](./spec/07-attachment-resolution.md)
+
+**Status:** ✅ Implemented
+
+**Problem:** Vision models can *see* attached images but cannot *extract* base64 data to construct tool call arguments. When the LLM calls `extract_bytes(data: ???)`, it has no way to pass the file data — the data URL is only in the FilePart for visual rendering, not accessible as text.
+
+**Solution:** Store attachments as temp files with `opencode://attachment/<uuid>.<ext>` URIs, inject URI references into the prompt as synthetic text parts, and intercept MCP tool execution to resolve URIs to base64 before forwarding.
+
+**Flow:**
+```
+User attaches image → resolvePart stores temp file + generates URI
+→ Prompt includes: FilePart(visual) + synthetic text("Attached: photo.png (opencode://attachment/abc123.png)")
+→ LLM calls extract_bytes(data: "opencode://attachment/abc123.png")
+→ convertMcpTool intercepts, resolves URI → base64
+→ Tool receives valid base64 → success
+```
+
+**Components:**
+- **`session/attachment.ts`** — `store()`, `resolve()`, `trackForMessage()`, `cleanup()` functions
+- **`session/prompt.ts`** — `resolvePart` stores non-text attachments, injects synthetic URI text parts
+- **`mcp/index.ts`** — `convertMcpTool` intercepts tool args, resolves `opencode://attachment/` URIs to base64
+- **Cleanup lifecycle** — Runs after LLM loop completes (not as a scope finalizer that fires before tool calls)
+
+**URI format:** `opencode://attachment/{uuid}.{ext}` — UUID-based filename with original extension, stored in `{os.tmpdir()}/opencode-attachments/`
