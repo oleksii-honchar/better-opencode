@@ -1,0 +1,535 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "search_code",
+        "description": "Search code across GitHub repositories",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "query": "language:TypeScript repo:vercel/next.js"
+        }
+      },
+      {
+        "name": "search_issues",
+        "description": "Search GitHub issues",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "list_issues",
+        "description": "List issues in a repository",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "list_pull_requests",
+        "description": "List pull requests in a repository",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "pull_request_read",
+        "description": "Read a pull request",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "pullNumber": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "owner",
+            "repo",
+            "pullNumber"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "issue_read",
+        "description": "Read an issue",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "issue_number": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "owner",
+            "repo",
+            "issue_number"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_file_contents",
+        "description": "Get file contents from a repository",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo",
+            "path"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "list_commits",
+        "description": "List commits in a repository",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_commit",
+        "description": "Get commit details",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "sha": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo",
+            "sha"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_repositories",
+        "description": "Search GitHub repositories",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "add_comment_to_pending_review",
+        "description": "Add a comment to a pending review",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "pullNumber": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "owner",
+            "repo",
+            "pullNumber"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "add_reply_to_pull_request_comment",
+        "description": "Reply to a pull request comment",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "commentId": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "owner",
+            "repo",
+            "commentId"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "list_branches",
+        "description": "List branches in a repository",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "fork_repository",
+        "description": "Fork a repository",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "create_repository",
+        "description": "Create a new repository",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_pull_requests",
+        "description": "Search pull requests",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "pull_request_review_write",
+        "description": "Write a pull request review",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "request_copilot_review",
+        "description": "Request a Copilot review",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "issue_write",
+        "description": "Write an issue",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "create_pull_request",
+        "description": "Create a pull request",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "merge_pull_request",
+        "description": "Merge a pull request",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "push_files",
+        "description": "Push files to a repository",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "search_users",
+        "description": "Search GitHub users",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "create_branch",
+        "description": "Create a branch",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "create_or_update_file",
+        "description": "Create or update a file",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "delete_file",
+        "description": "Delete a file",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo"
+          ]
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 26
+  }
+}

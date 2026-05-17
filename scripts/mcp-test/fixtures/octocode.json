@@ -1,0 +1,68 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "search_code",
+        "description": "Search code across repositories",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "query": "language:TypeScript"
+        }
+      },
+      {
+        "name": "list_repos",
+        "description": "List repositories",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            }
+          }
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "get_file",
+        "description": "Get file contents",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "owner": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "repo",
+            "path"
+          ]
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 3
+  }
+}

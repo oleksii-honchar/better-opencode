@@ -1,0 +1,73 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "execute_query",
+        "description": "Execute a Snowflake SQL query",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "query": "SELECT 1"
+        }
+      },
+      {
+        "name": "list_schemas",
+        "description": "List schemas in the database",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "list_tables",
+        "description": "List tables in a schema",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "schema"
+          ]
+        },
+        "shouldTest": false
+      },
+      {
+        "name": "describe_table",
+        "description": "Describe a table schema",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "table": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "table"
+          ]
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 4
+  }
+}

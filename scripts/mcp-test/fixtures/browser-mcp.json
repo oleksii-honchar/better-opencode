@@ -1,0 +1,41 @@
+{
+  "tools_list_response": {
+    "tools": [
+      {
+        "name": "browser_navigate",
+        "description": "Navigate to a URL",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        },
+        "shouldTest": true,
+        "queryPayload": {
+          "url": "https://example.com"
+        }
+      },
+      {
+        "name": "browser_snapshot",
+        "description": "Capture accessibility snapshot",
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        },
+        "shouldTest": false
+      }
+    ]
+  },
+  "expected": {
+    "server_startup": "passed",
+    "tools_list": "passed",
+    "response_validity": "passed",
+    "tool_count": 2
+  }
+}
