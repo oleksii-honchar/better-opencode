@@ -160,16 +160,24 @@ allowedMcpCategories: [core, code, observability, browser]
 **Flow:**
 ```
 User attaches image → resolvePart stores temp file + generates URI
-→ Prompt includes: FilePart(visual) + synthetic text("Attached: photo.png (opencode://attachment/abc123.png)")
+→ Prompt includes: FilePart(visual) + synthetic text("Attached file: photo.png — use \"opencode://attachment/abc123.png\" as the data argument for tools like extract_bytes")
+→ System prompt includes: "## File Attachments" (conditional, when attachments present)
 → LLM calls extract_bytes(data: "opencode://attachment/abc123.png")
 → convertMcpTool intercepts, resolves URI → base64
 → Tool receives valid base64 → success
 ```
 
 **Components:**
-- **`session/attachment.ts`** — `store()`, `resolve()`, `trackForMessage()`, `cleanup()` functions
-- **`session/prompt.ts`** — `resolvePart` stores non-text attachments, injects synthetic URI text parts
+- **`session/attachment.ts`** — `store()`, `resolve()`, `trackForMessage()`, `cleanup()`, `hasAttachments()` functions
+- **`session/prompt.ts`** — `resolvePart` stores non-text attachments, injects synthetic URI text parts (instructional format), conditionally injects `FILE_ATTACHMENTS_SYSTEM_PROMPT` into system array
 - **`mcp/index.ts`** — `convertMcpTool` intercepts tool args, resolves `opencode://attachment/` URIs to base64
 - **Cleanup lifecycle** — Runs after LLM loop completes (not as a scope finalizer that fires before tool calls)
 
 **URI format:** `opencode://attachment/{uuid}.{ext}` — UUID-based filename with original extension, stored in `{os.tmpdir()}/opencode-attachments/`
+
+**Two-Layer LLM Instruction (D24):** The LLM needs explicit instruction to use the URI scheme correctly. Without it, the model may treat URIs as file paths, URLs, or ignore them entirely.
+
+- **Layer 1 — System Prompt Injection:** A `## File Attachments` section is conditionally injected into the system prompt (between general instructions and skills) when the current message has tracked attachments. Explains the URI scheme, instructs the LLM to pass URIs as-is to tools like `extract_bytes`, and warns against treating URIs as file paths or URLs. ~100 tokens when present, 0 when absent.
+- **Layer 2 — Instructional Synthetic Text:** The synthetic text part uses an instructional format (not merely informational): `Attached file: photo.png — use "opencode://attachment/abc123.png" as the data argument for tools like extract_bytes`. The em dash and "use" directive make the action explicit at the point of reference.
+
+The system prompt gives the LLM the general rule; the synthetic text applies it to each specific attachment. Together they eliminate ambiguity — the LLM knows both the pattern (from the system prompt) and the concrete instance (from the synthetic text).
