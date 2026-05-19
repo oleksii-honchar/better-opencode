@@ -5,7 +5,7 @@
 A maintained fork of [opencode](https://github.com/anomalyco/opencode) that patches critical gaps in the AI coding agent:
 
 1. **Context loss after ~5 turns** — The agent forgets behavioral rules and workflow state after automatic compaction.
-2. **Repetitive loops** — The agent gets stuck repeating the same actions without making progress.
+2. **Repetitive loops** — The agent gets stuck repeating the same actions without making progress. Addressed by the **Unstuck plugin** which detects and breaks loops automatically.
 3. **Session opacity** — The agent has no awareness of its own session ID, making debugging and multi-session coordination difficult.
 
 This fork provides plugin hooks for behavioral enforcement and session awareness that survive compaction.
@@ -14,13 +14,14 @@ This fork provides plugin hooks for behavioral enforcement and session awareness
 
 ## Features
 
-The fork adds three core features:
+The fork adds several features to address context loss, repetitive loops, session opacity, and context pollution:
 
 - **`tool.execute.after` Inject (PR #19519)** — Plugins inject synthetic user messages after tool execution
 - **`session.stopping` Hook (PR #16598)** — Plugins intercept idle/stop state and inject follow-up messages
 - **Session ID in System Prompt** — `sessionID` and `parentSessionID` included in `<env>` block on every LLM call
+- **Unstuck Plugin** — Detects and breaks model loops (thinking→tool-call, sentence-level, tool-only) with nudge-and-prune recovery
 
-See **[FEATURES.md](./FEATURES.md)** for detailed descriptions and example plugins.
+See **[FEATURES.md](./FEATURES.md)** for detailed descriptions and configuration.
 
 ---
 

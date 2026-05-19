@@ -183,3 +183,36 @@ User attaches image → resolvePart stores temp file + generates URI
 The system prompt gives the LLM the general rule; the synthetic text applies it to each specific attachment. Together they eliminate ambiguity — the LLM knows both the pattern (from the system prompt) and the concrete instance (from the synthetic text).
 
 **Vision Flag Check (Step 2.3):** Before constructing a user message, opencode checks whether the active model has vision capability via `capabilities.input.image` (derived from models.dev `modalities.input.includes("image")`). Vision models receive both the `FilePart` (visual image) and the synthetic text URI. Non-vision models receive only the synthetic text URI — they cannot *see* the image but can still pass the URI to tools like `extract_bytes` for extraction. No new configuration property was introduced; the existing modalities array is used as the sole source of truth.
+
+---
+
+## 7. Unstuck Plugin — Loop Detection and Recovery
+
+📋 [Detailed Spec](./spec/08-unstuck-plugin.md)
+
+**Status:** ✅ Implemented
+
+**Problem:** The existing `doom_loop` mechanism only detects exact tool+input matches (same tool, same input, 3 consecutive times). It misses the most common loop pattern: same thinking → same tool call → same result → repeat, where the model slightly varies the tool input each time.
+
+**Solution:** The Unstuck plugin wraps the LLM stream to detect loops at three levels:
+
+1. **Step-level** — Same thinking→tool-call pattern repeating across steps
+2. **Sentence-level** — Same sentence repeating periodically within a single step
+3. **Tool-only** — Same tools repeating across steps, regardless of thinking differences
+
+When a loop is detected, the plugin performs **nudge-and-prune**: aborts the stream, prunes the looping assistant messages, injects a nudge message telling the model to break the loop, and restarts the stream. If nudge fails after `maxNudges` attempts, falls back to abort.
+
+**Configuration (opencode.json):**
+```json
+{
+  "unstuck": {
+    "enabled": true,
+    "loopThreshold": 3,
+    "strategy": "nudge-and-prune",
+    "maxNudges": 2,
+    "logLevel": "warn"
+  }
+}
+```
+
+All fields are optional with sensible defaults. Set `enabled: false` to disable.

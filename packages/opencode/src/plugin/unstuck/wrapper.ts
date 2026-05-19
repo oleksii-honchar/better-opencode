@@ -259,13 +259,13 @@ export function wrapWithLoopDetection(
           const originalPrompt = args.prompt as Message[]
           const prunedMessages = pruneLoopingMessages(originalPrompt, config.pruneCount)
 
-          // Inject nudge user message
+         // Inject nudge user message
           const nudgeMessage = config.nudgeMessage ?? defaultNudgeMessage(error.info)
           const nudgedMessages: Message[] = [
             ...prunedMessages,
             {
               role: "user",
-              content: nudgeMessage,
+              content: [{ type: "text" as const, text: nudgeMessage }],
               _unstuckNudge: true,
             },
           ]

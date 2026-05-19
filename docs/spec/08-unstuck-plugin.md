@@ -84,30 +84,19 @@ When a loop is detected, the plugin performs **nudge-and-prune**: aborts the cur
 
 ### Component Design
 
-#### 1. `UnstuckPlugin` — V2 Plugin Definition
+#### 1. Integration Point — `provider.ts`
+
+The Unstuck plugin is integrated directly in `provider.ts` at the `getLanguage()` method. The V2 `PluginV2.define()` approach was evaluated but not used — the `aisdk.language` hook is not wired up in the current codebase.
 
 ```typescript
-import { Effect } from "effect"
-import { PluginV2 } from "@opencode-ai/core/plugin"
-import { LoopDetector } from "./loop-detector"
-import { UnstuckConfig } from "./config"
-
-export const UnstuckPlugin = PluginV2.define({
-  id: PluginV2.ID.make("unstuck"),
-  effect: Effect.gen(function* () {
-    const config = yield* Effect.service(UnstuckConfig.Service)
-    const detector = new LoopDetector(config)
-
-    return {
-      "aisdk.language": Effect.fn(function* (evt) {
-        // Wrap the LanguageModelV3 to intercept every token
-        const original = evt.language ?? evt.sdk.languageModel(evt.model.apiID)
-        evt.language = wrapWithLoopDetection(original, detector, config)
-      }),
-    }
-  }),
-})
+// In provider.ts:
+const config = yield* Config.Service.get()
+const unstuckConfig = mergeConfig(config.unstuck ?? {})
+const detector = new LoopDetectorImpl()
+const wrapped = wrapWithLoopDetection(language, detector, unstuckConfig)
 ```
+
+The `LoopDetectorImpl` instance is cached per model (via `s.models.set(key, wrapped)`), which is correct — the detector persists across calls within the same model instance.
 
 #### 2. `wrapWithLoopDetection` — LanguageModelV3 Wrapper
 
@@ -377,6 +366,11 @@ interface UnstuckConfig {
   includeReasoning: boolean  // default: true
   includeText: boolean  // default: true
 
+  // Sentence-level loop detection
+  enableSentenceLoopDetection: boolean  // default: true
+  sentenceLoopThreshold: number         // default: 3
+  minSentenceLength: number             // default: 15
+
   // Nudge-and-prune settings
   strategy: "nudge-and-prune" | "abort" | "warn"  // default: "nudge-and-prune"
   maxNudges: number  // default: 2
@@ -390,18 +384,19 @@ interface UnstuckConfig {
 
 ```json
 {
-  "plugins": {
-    "unstuck": {
-      "enabled": true,
-      "loopThreshold": 3,
-      "detectToolOnlyLoops": true,
-      "toolLoopThreshold": 4,
-      "historySize": 10,
-      "minThinkingLength": 50,
-      "strategy": "nudge-and-prune",
-      "maxNudges": 2,
-      "pruneCount": 3
-    }
+  "unstuck": {
+    "enabled": true,
+    "loopThreshold": 3,
+    "detectToolOnlyLoops": true,
+    "toolLoopThreshold": 4,
+    "historySize": 10,
+    "minThinkingLength": 50,
+    "enableSentenceLoopDetection": true,
+    "sentenceLoopThreshold": 3,
+    "minSentenceLength": 15,
+    "strategy": "nudge-and-prune",
+    "maxNudges": 2,
+    "pruneCount": 3
   }
 }
 ```
@@ -464,6 +459,7 @@ interface UnstuckConfig {
 4. **Tool signature uses input keys, not values** — Handles input variations while still detecting same tool patterns
 5. **Nudge-and-prune over abort-only** — Gives model a chance to recover instead of just stopping; configurable `maxNudges` prevents infinite recovery attempts
 6. **Separate plugin over modifying existing `doom_loop`** — Different detection levels, complementary mechanisms, no risk of breaking existing behavior
+7. **`provider.ts` integration over V2 plugin hook** — The V2 `aisdk.language` hook is not wired up in the current codebase. `provider.ts` is the active hot path. The V2 plugin module remains as a library of utilities (config types, LoopDetectorImpl, wrapWithLoopDetection, etc.) that can be reused if the V2 system gets wired up in the future.
 
 ---
 
