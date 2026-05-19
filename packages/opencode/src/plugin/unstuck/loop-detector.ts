@@ -3,7 +3,7 @@ import type { UnstuckConfig } from "./config"
 import { LoopDetectedError, type LoopDetectedInfo, type StepRecord } from "./error"
 import { SentenceTracker } from "./sentence-tracker"
 
-const log = Log.create({ service: "unstuck" })
+const log = Log.create({ service: "unstuck", marker: "unstuck" })
 
 function arraysEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
   if (a.length !== b.length) return false
@@ -86,7 +86,7 @@ export class LoopDetectorImpl implements LoopDetector {
             return sentenceLoopInfo
           }
         }
-        log.debug("chunk processed", { type: "reasoning-delta", accumulatedLen: this.currentThinking.length })
+        log.debug("consumeChunk", { type: "reasoning-delta", accumulatedLen: this.currentThinking.length })
         break
       }
 
@@ -102,12 +102,12 @@ export class LoopDetectorImpl implements LoopDetector {
             return sentenceLoopInfo
           }
         }
-        log.debug("chunk processed", { type: "text-delta", accumulatedLen: this.currentThinking.length })
+        log.debug("consumeChunk", { type: "text-delta", accumulatedLen: this.currentThinking.length })
         break
       }
 
       case "tool-input-start": {
-        log.debug("chunk processed", { type: "tool-input-start", toolName: chunk.toolName })
+        log.debug("consumeChunk", { type: "tool-input-start", id: chunk.id, toolName: chunk.toolName })
         break
       }
 
@@ -119,28 +119,30 @@ export class LoopDetectorImpl implements LoopDetector {
       case "tool-input-end": {
         // Skip provider-executed tools — they don't follow the same loop pattern
         if (chunk.providerExecuted) {
-          log.debug("skipping provider-executed tool", { toolName: chunk.toolName })
+          log.debug("consumeChunk — skipping provider-executed tool", { type: "tool-input-end", toolName: chunk.toolName })
           break
         }
         const sig = computeToolSignature(chunk.toolName, chunk.input)
         this.currentTools.push(sig)
-        log.debug("chunk processed", { type: "tool-input-end", toolName: chunk.toolName, signature: sig })
+        log.debug("consumeChunk", { type: "tool-input-end", toolName: chunk.toolName, signature: sig, toolsInStep: this.currentTools.length })
         break
       }
 
       case "finish-step": {
+        log.debug("consumeChunk — finalizing step", { type: "finish-step", isCompaction: chunk.isCompaction })
         const result = this.finalizeStep(config)
         if (result) {
-          log.info("loop detected", { type: result.type, threshold: result.threshold, fingerprint: result.fingerprint })
+          log.info("loop detected at step boundary", { type: result.type, threshold: result.threshold, fingerprint: result.fingerprint })
         }
         return result
       }
 
       case "finish": {
         // Stream ended — finalize any partial step
+        log.debug("consumeChunk — stream finished, finalizing partial step", { type: "finish", finishReason: chunk.finishReason })
         const result = this.finalizeStep(config)
         if (result) {
-          log.info("loop detected", { type: result.type, threshold: result.threshold, fingerprint: result.fingerprint })
+          log.info("loop detected at stream end", { type: result.type, threshold: result.threshold, fingerprint: result.fingerprint })
         }
         return result
       }
@@ -173,8 +175,10 @@ export class LoopDetectorImpl implements LoopDetector {
       this.history.shift()
     }
 
-    log.debug("step finalized", {
+    log.debug("finalizeStep", {
       fingerprint: stepFp,
+      thinkingFingerprint: thinkingFp,
+      toolSignatures: this.currentTools,
       tools: this.currentTools.length,
       thinkingLen: this.currentThinking.length,
       historyLen: this.history.length,
@@ -183,6 +187,11 @@ export class LoopDetectorImpl implements LoopDetector {
     // Check for loop
     const loopInfo = this.detectLoop(config)
     if (loopInfo) {
+      log.info("finalizeStep — loop detected", {
+        type: loopInfo.type,
+        threshold: loopInfo.threshold,
+        fingerprint: stepFp,
+      })
       return loopInfo
     }
 
@@ -202,7 +211,15 @@ export class LoopDetectorImpl implements LoopDetector {
     if (this.history.length >= window) {
       const recent = this.history.slice(-window)
       const first = recent[0].stepFingerprint
-      if (recent.every((r) => r.stepFingerprint === first)) {
+      const allMatch = recent.every((r) => r.stepFingerprint === first)
+      log.debug("detectLoop — step check", {
+        window,
+        historyLen: this.history.length,
+        firstFingerprint: first,
+        allMatch,
+        recentFingerprints: recent.map((r) => r.stepFingerprint),
+      })
+      if (allMatch) {
         return {
           type: "step_loop",
           threshold: window,
@@ -220,6 +237,12 @@ export class LoopDetectorImpl implements LoopDetector {
         const firstTools = recentTools[0].toolSignatures
         if (firstTools.length > 0) {
           const allSameTools = recentTools.every((r) => arraysEqual(r.toolSignatures, firstTools))
+          log.debug("detectLoop — tool check", {
+            toolWindow,
+            historyLen: this.history.length,
+            firstTools,
+            allSameTools,
+          })
           if (allSameTools) {
             return {
               type: "tool_loop",
@@ -239,6 +262,7 @@ export class LoopDetectorImpl implements LoopDetector {
   }
 
   reset(): void {
+    log.debug("reset — clearing all detector state")
     this.currentThinking = ""
     this.currentTools = []
     this.currentToolInputAccum = {}

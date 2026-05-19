@@ -90,6 +90,7 @@ async function* streamWithDetection(
   // We need to get the underlying async iterable. The LanguageModelV3StreamResult
   // only exposes pipeThrough(TransformStream) -> ReadableStream.
   // To get an async iterable, we call pipeThrough with an identity transform.
+  log.debug("streamWithDetection starting", { modelId: model.modelId })
   const result = await model.doStream(args as LanguageModelV3CallOptions)
   const identityTransform = new TransformStream<LanguageModelV3StreamPart>()
   const readableStream = result.stream.pipeThrough(identityTransform)
@@ -97,24 +98,39 @@ async function* streamWithDetection(
 
   // Track tool name from tool-input-start to tool-input-end
   let currentToolName: string | undefined
+  let chunkCount = 0
 
   try {
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
+      chunkCount++
       const mappedChunk = mapStreamChunk(value, currentToolName)
       if (mappedChunk) {
         // Update currentToolName from tool-input-start
         if (mappedChunk.type === "tool-input-start") {
           currentToolName = mappedChunk.toolName
+          log.debug("tool-input-start", { id: mappedChunk.id, toolName: mappedChunk.toolName })
+        }
+        if (mappedChunk.type === "tool-input-end") {
+          log.debug("tool-input-end", { id: mappedChunk.id, toolName: mappedChunk.toolName })
+        }
+        if (mappedChunk.type === "finish") {
+          log.debug("finish chunk", { finishReason: mappedChunk.finishReason, chunkCount })
         }
         const loopInfo = detector.consumeChunk(mappedChunk, config)
         if (loopInfo) {
+          log.debug("loop detected by detector", {
+            type: loopInfo.type,
+            threshold: loopInfo.threshold,
+            chunkCount,
+          })
           throw new LoopDetectedError(loopInfo)
         }
       }
       yield value
     }
+    log.debug("streamWithDetection finished", { chunkCount })
   } finally {
     reader.releaseLock()
   }
@@ -125,21 +141,26 @@ class DetectedStreamResult {
 
   constructor(
     private readonly generator: AsyncGenerator<LanguageModelV3StreamPart, void, unknown>,
-  ) {}
+  ) {
+    log.debug("DetectedStreamResult created")
+  }
 
   get stream(): ReadableStream<LanguageModelV3StreamPart> {
     if (this._stream === null) {
+      log.debug("DetectedStreamResult — creating ReadableStream from generator")
       const self = this
       this._stream = new ReadableStream<LanguageModelV3StreamPart>({
         async pull(controller) {
           const { value, done } = await self.generator.next()
           if (done) {
+            log.debug("DetectedStreamResult — generator done, closing stream")
             controller.close()
             return
           }
           controller.enqueue(value)
         },
         async cancel() {
+          log.debug("DetectedStreamResult — stream cancelled")
           await self.generator.return()
         },
       })
@@ -148,6 +169,7 @@ class DetectedStreamResult {
   }
 
   pipeThrough(transform: TransformStream<LanguageModelV3StreamPart, LanguageModelV3StreamPart>): ReadableStream<LanguageModelV3StreamPart> {
+    log.debug("DetectedStreamResult — pipeThrough called")
     return this.stream.pipeThrough(transform)
   }
 }
@@ -159,41 +181,83 @@ export function wrapWithLoopDetection(
 ): LanguageModelV3 {
   let nudgeCount = 0
 
+  log.debug("wrapWithLoopDetection", {
+    modelId: model.modelId,
+    provider: model.provider,
+    enabled: config.enabled,
+    strategy: config.strategy,
+    maxNudges: config.maxNudges,
+    loopThreshold: config.loopThreshold,
+  })
+
   const wrapped: LanguageModelV3 = {
     ...model,
     doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+      log.debug("doStream called", {
+        promptLength: (args.prompt as any[]).length,
+        maxOutputTokens: args.maxOutputTokens,
+      })
+
       if (!config.enabled) {
+        log.debug("unstuck disabled, passing through")
         return model.doStream(args as any) as any
       }
 
       async function* wrappedStream(): AsyncGenerator<LanguageModelV3StreamPart, void, unknown> {
+        let chunkCount = 0
         try {
-          yield* streamWithDetection(model, detector, config, args)
+          for await (const chunk of streamWithDetection(model, detector, config, args)) {
+            chunkCount++
+            yield chunk
+          }
+          log.debug("stream completed normally", { chunkCount })
         } catch (error) {
           if (!(error instanceof LoopDetectedError)) throw error
 
+          log.debug("loop detected in stream", {
+            chunkCount,
+            type: error.info.type,
+            threshold: error.info.threshold,
+            strategy: config.strategy,
+            nudgeCount,
+          })
+
           // --- Warn mode: log and rethrow ---
           if (config.strategy === "warn") {
-            log.info("loop detected (warn mode)", { type: error.info.type, threshold: error.info.threshold })
+            log.info("loop detected (warn mode)", {
+              type: error.info.type,
+              threshold: error.info.threshold,
+              chunkCount,
+            })
             throw error
           }
 
           // --- Abort mode: log and rethrow ---
           if (config.strategy === "abort") {
-            log.info("loop detected (abort mode)", { type: error.info.type, threshold: error.info.threshold })
+            log.info("loop detected (abort mode)", {
+              type: error.info.type,
+              threshold: error.info.threshold,
+              chunkCount,
+            })
             throw error
           }
 
           // --- Nudge-and-prune mode ---
           if (nudgeCount >= config.maxNudges) {
-            log.warn("max nudges reached", { maxNudges: config.maxNudges, fallback: "abort" })
+            log.warn("max nudges reached, aborting", {
+              maxNudges: config.maxNudges,
+              fallback: "abort",
+              type: error.info.type,
+            })
             throw error
           }
 
           nudgeCount++
+          log.debug("applying nudge", { nudgeCount, maxNudges: config.maxNudges })
 
           // Prune looping assistant messages
-          const prunedMessages = pruneLoopingMessages(args.prompt as Message[], config.pruneCount)
+          const originalPrompt = args.prompt as Message[]
+          const prunedMessages = pruneLoopingMessages(originalPrompt, config.pruneCount)
 
           // Inject nudge user message
           const nudgeMessage = config.nudgeMessage ?? defaultNudgeMessage(error.info)
@@ -208,12 +272,16 @@ export function wrapWithLoopDetection(
 
           log.info("nudge applied", {
             nudgeCount,
-            prunedMsgs: args.prompt.length - prunedMessages.length,
+            originalPromptLen: originalPrompt.length,
+            prunedPromptLen: prunedMessages.length,
+            prunedMsgs: originalPrompt.length - prunedMessages.length,
             strategy: "nudge-and-prune",
+            loopType: error.info.type,
           })
 
           // Reset detector state for the new attempt
           detector.reset()
+          log.debug("detector reset for nudge attempt")
 
           // Restart with modified messages — goes through loop detection again
           yield* streamWithDetection(model, detector, config, { ...args, prompt: nudgedMessages as any })

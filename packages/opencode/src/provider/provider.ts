@@ -1686,6 +1686,13 @@ export const layer = Layer.effect(
       const provider = s.providers[model.providerID]
       const cfg = yield* config.get()
       const unstuckConfig = mergeConfig(cfg.unstuck ?? {})
+      log.debug("getLanguage — unstuck config", {
+        modelKey: key,
+        enabled: unstuckConfig.enabled,
+        strategy: unstuckConfig.strategy,
+        maxNudges: unstuckConfig.maxNudges,
+        loopThreshold: unstuckConfig.loopThreshold,
+      })
       return yield* EffectPromise.refineRejection(
         async () => {
           const sdk = await resolveSDK(model, s, envs)
@@ -1701,6 +1708,7 @@ export const layer = Layer.effect(
           const wrapped = wrapWithLoopDetection(language, detector, unstuckConfig)
 
           s.models.set(key, wrapped)
+          log.debug("getLanguage — model wrapped with unstuck", { modelKey: key })
           return wrapped
         },
         (cause) =>
