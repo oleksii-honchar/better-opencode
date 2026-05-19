@@ -3,7 +3,7 @@ import type { UnstuckConfig } from "./config"
 import { LoopDetectedError, type LoopDetectedInfo, type StepRecord } from "./error"
 import { SentenceTracker } from "./sentence-tracker"
 
-const log = Log.create({ service: "unstuck", marker: "unstuck" })
+const log = Log.create({ service: "unstuck" })
 
 function arraysEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
   if (a.length !== b.length) return false

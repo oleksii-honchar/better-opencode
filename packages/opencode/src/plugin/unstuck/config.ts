@@ -32,7 +32,7 @@ export const defaultConfig: UnstuckConfig = {
   strategy: "nudge-and-prune",
   maxNudges: 2,
   pruneCount: 3,
-  nudgeMessage: undefined,
+  nudgeMessage: "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction.",
   logLevel: "info",
 }
 
