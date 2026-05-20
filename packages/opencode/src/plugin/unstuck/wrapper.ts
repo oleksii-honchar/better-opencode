@@ -3,6 +3,7 @@ import * as Log from "@opencode-ai/core/util/log"
 import type { UnstuckConfig } from "./config"
 import { LoopDetectedError, type LoopDetectedInfo } from "./error"
 import type { LoopDetector, StreamChunk } from "./loop-detector"
+import { EvidenceAccumulatorImpl } from "./loop-detector"
 
 const log = Log.create({ service: "unstuck" })
 
@@ -180,6 +181,7 @@ export function wrapWithLoopDetection(
   config: UnstuckConfig,
 ): LanguageModelV3 {
   let nudgeCount = 0
+  const evidence = new EvidenceAccumulatorImpl()
 
   log.debug("wrapWithLoopDetection", {
     modelId: model.modelId,
@@ -205,86 +207,127 @@ export function wrapWithLoopDetection(
 
       async function* wrappedStream(): AsyncGenerator<LanguageModelV3StreamPart, void, unknown> {
         let chunkCount = 0
-        try {
-          for await (const chunk of streamWithDetection(model, detector, config, args)) {
-            chunkCount++
-            yield chunk
-          }
-          log.debug("stream completed normally", { chunkCount })
-        } catch (error) {
-          if (!(error instanceof LoopDetectedError)) throw error
+        let currentArgs: LanguageModelV3CallOptions = args
 
-          log.debug("loop detected in stream", {
-            chunkCount,
-            type: error.info.type,
-            threshold: error.info.threshold,
-            strategy: config.strategy,
-            nudgeCount,
-          })
+        while (true) {
+          try {
+            for await (const chunk of streamWithDetection(model, detector, config, currentArgs)) {
+              chunkCount++
+              yield chunk
+            }
+            // Clean finish — clear evidence and detector state
+            evidence.clear()
+            detector.clear()
+            log.debug("stream completed normally, evidence cleared", { chunkCount })
+            return
+          } catch (error) {
+            if (!(error instanceof LoopDetectedError)) throw error
 
-          // --- Warn mode: log and rethrow ---
-          if (config.strategy === "warn") {
-            log.info("loop detected (warn mode)", {
+            log.debug("loop detected in stream", {
+              chunkCount,
               type: error.info.type,
               threshold: error.info.threshold,
-              chunkCount,
+              strategy: config.strategy,
+              nudgeCount,
             })
-            throw error
-          }
 
-          // --- Abort mode: log and rethrow ---
-          if (config.strategy === "abort") {
-            log.info("loop detected (abort mode)", {
-              type: error.info.type,
-              threshold: error.info.threshold,
-              chunkCount,
+            // --- Warn mode: log and rethrow ---
+            if (config.strategy === "warn") {
+              log.info("loop detected (warn mode)", {
+                type: error.info.type,
+                threshold: error.info.threshold,
+                chunkCount,
+              })
+              throw error
+            }
+
+            // --- Abort mode: log and rethrow ---
+            if (config.strategy === "abort") {
+              log.info("loop detected (abort mode)", {
+                type: error.info.type,
+                threshold: error.info.threshold,
+                chunkCount,
+              })
+              throw error
+            }
+
+            // --- Nudge-and-prune with evidence accumulation ---
+
+            // Record this detection as evidence
+            evidence.add(error.info, chunkCount, config)
+
+            log.debug("evidence accumulated", {
+              totalEvidence: evidence.count,
+              byType: {
+                stepLoop: evidence.countByType("step_loop"),
+                toolLoop: evidence.countByType("tool_loop"),
+                sentenceLoop: evidence.countByType("sentence_loop"),
+              },
             })
-            throw error
-          }
 
-          // --- Nudge-and-prune mode ---
-          if (nudgeCount >= config.maxNudges) {
-            log.warn("max nudges reached, aborting", {
-              maxNudges: config.maxNudges,
-              fallback: "abort",
-              type: error.info.type,
+            // Check if threshold is met for intervention
+            const thresholdResult = evidence.isThresholdMet(config)
+            if (!thresholdResult.met) {
+              const thresholdKey = error.info.type === "step_loop" ? "stepLoop" : error.info.type === "tool_loop" ? "toolLoop" : "sentenceLoop"
+              log.info("loop detected but evidence below threshold — continuing stream", {
+                type: error.info.type,
+                evidenceCount: evidence.countByType(error.info.type),
+                threshold: config.evidenceThresholds[thresholdKey],
+              })
+
+              // Reset streaming state but keep evidence and history
+              detector.reset()
+
+              // Loop back to top — restart stream with original args
+              continue
+            }
+
+            // Threshold met — intervene with nudge
+            if (nudgeCount >= config.maxNudges) {
+              log.warn("max nudges reached, aborting", {
+                maxNudges: config.maxNudges,
+                fallback: "abort",
+                type: error.info.type,
+              })
+              throw error
+            }
+
+            nudgeCount++
+            log.debug("applying nudge", { nudgeCount, maxNudges: config.maxNudges })
+
+            // Prune looping assistant messages
+            const originalPrompt = currentArgs.prompt as Message[]
+            const prunedMessages = pruneLoopingMessages(originalPrompt, config.pruneCount)
+
+           // Inject nudge user message
+            const nudgeMessage = config.nudgeMessage ?? defaultNudgeMessage(error.info)
+            const nudgedMessages: Message[] = [
+              ...prunedMessages,
+              {
+                role: "user",
+                content: [{ type: "text" as const, text: nudgeMessage }],
+                _unstuckNudge: true,
+              },
+            ]
+
+            log.info("nudge applied", {
+              nudgeCount,
+              originalPromptLen: originalPrompt.length,
+              prunedPromptLen: prunedMessages.length,
+              prunedMsgs: originalPrompt.length - prunedMessages.length,
+              strategy: "nudge-and-prune",
+              loopType: error.info.type,
             })
-            throw error
+
+            // Clear evidence and detector for fresh start
+            evidence.clear()
+            detector.clear()
+            log.debug("evidence and detector cleared for nudge attempt")
+
+            // Loop back to top — restart with nudged messages
+            currentArgs = { ...currentArgs, prompt: nudgedMessages as any }
+            continue
           }
-
-          nudgeCount++
-          log.debug("applying nudge", { nudgeCount, maxNudges: config.maxNudges })
-
-          // Prune looping assistant messages
-          const originalPrompt = args.prompt as Message[]
-          const prunedMessages = pruneLoopingMessages(originalPrompt, config.pruneCount)
-
-         // Inject nudge user message
-          const nudgeMessage = config.nudgeMessage ?? defaultNudgeMessage(error.info)
-          const nudgedMessages: Message[] = [
-            ...prunedMessages,
-            {
-              role: "user",
-              content: [{ type: "text" as const, text: nudgeMessage }],
-              _unstuckNudge: true,
-            },
-          ]
-
-          log.info("nudge applied", {
-            nudgeCount,
-            originalPromptLen: originalPrompt.length,
-            prunedPromptLen: prunedMessages.length,
-            prunedMsgs: originalPrompt.length - prunedMessages.length,
-            strategy: "nudge-and-prune",
-            loopType: error.info.type,
-          })
-
-          // Reset detector state for the new attempt
-          detector.reset()
-          log.debug("detector reset for nudge attempt")
-
-          // Restart with modified messages — goes through loop detection again
-          yield* streamWithDetection(model, detector, config, { ...args, prompt: nudgedMessages as any })
         }
       }
 

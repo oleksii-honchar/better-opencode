@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { LoopDetectorImpl, normalizeAndFingerprint, computeToolSignature, type StreamChunk } from "./loop-detector"
+import { LoopDetectorImpl, normalizeAndFingerprint, computeToolSignature, EvidenceAccumulatorImpl, type StreamChunk } from "./loop-detector"
 import { defaultConfig, type UnstuckConfig } from "./config"
+import type { LoopDetectedInfo } from "./error"
 
 function createDetector(_config?: Partial<UnstuckConfig>) {
   return new LoopDetectorImpl()
@@ -311,7 +312,7 @@ describe("LoopDetector — tool-only loop", () => {
 })
 
 describe("LoopDetector — reset", () => {
-  test("clears all state after reset", () => {
+  test("clears streaming state but preserves history", () => {
     const detector = createDetector()
     const chunks: StreamChunk[] = [
       { type: "text-delta", text: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." },
@@ -325,11 +326,172 @@ describe("LoopDetector — reset", () => {
 
     expect(detector.getState().historyLength).toBe(1)
 
+    // Simulate partial streaming state
+    detector.consumeChunk({ type: "text-delta", text: "Partial thinking" }, defaultConfig)
+    expect(detector.getState().currentThinkingLength).toBeGreaterThan(0)
+
     detector.reset()
 
+    // History is preserved
+    expect(detector.getState().historyLength).toBe(1)
+    // Streaming state is cleared
+    expect(detector.getState().currentThinkingLength).toBe(0)
+    expect(detector.getState().currentToolsCount).toBe(0)
+  })
+})
+
+describe("LoopDetector — clear", () => {
+  test("clears all state including history", () => {
+    const detector = createDetector()
+    const chunks: StreamChunk[] = [
+      { type: "text-delta", text: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." },
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      { type: "finish-step" },
+    ]
+
+    for (const chunk of chunks) {
+      detector.consumeChunk(chunk, defaultConfig)
+    }
+
+    expect(detector.getState().historyLength).toBe(1)
+
+    // Simulate partial streaming state
+    detector.consumeChunk({ type: "text-delta", text: "Partial thinking" }, defaultConfig)
+
+    detector.clear()
+
+    // Everything is cleared
     expect(detector.getState().historyLength).toBe(0)
     expect(detector.getState().currentThinkingLength).toBe(0)
     expect(detector.getState().currentToolsCount).toBe(0)
+  })
+})
+
+describe("EvidenceAccumulator", () => {
+  function createInfo(type: "step_loop" | "tool_loop" | "sentence_loop", threshold: number = 3): LoopDetectedInfo {
+    if (type === "sentence_loop") {
+      return { type, threshold, sentence: "repeated sentence" }
+    }
+    return { type, threshold, fingerprint: "fp-123" }
+  }
+
+  test("adds and counts records correctly", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add(createInfo("step_loop"), 1)
+    acc.add(createInfo("step_loop"), 2)
+    acc.add(createInfo("step_loop"), 3)
+
+    expect(acc.count).toBe(3)
+    expect(acc.countByType("step_loop")).toBe(3)
+    expect(acc.countByType("tool_loop")).toBe(0)
+    expect(acc.countByType("sentence_loop")).toBe(0)
+  })
+
+  test("isThresholdMet returns false when below threshold", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add(createInfo("step_loop"), 1)
+
+    const result = acc.isThresholdMet(defaultConfig)
+    expect(result.met).toBe(false)
+  })
+
+  test("isThresholdMet returns true when at threshold", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add(createInfo("step_loop"), 1)
+    acc.add(createInfo("step_loop"), 2)
+
+    const result = acc.isThresholdMet(defaultConfig)
+    expect(result.met).toBe(true)
+    expect((result as { met: true; type: string }).type).toBe("step_loop")
+  })
+
+  test("isThresholdMet checks each type independently", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add(createInfo("step_loop"), 1)
+    acc.add(createInfo("tool_loop"), 2)
+
+    // Neither meets threshold (both need 2)
+    const result = acc.isThresholdMet(defaultConfig)
+    expect(result.met).toBe(false)
+  })
+
+  test("isThresholdMet sentence_loop threshold is 1 by default", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add(createInfo("sentence_loop"), 1)
+
+    const result = acc.isThresholdMet(defaultConfig)
+    expect(result.met).toBe(true)
+    expect((result as { met: true; type: string }).type).toBe("sentence_loop")
+  })
+
+  test("evidenceWindow evicts oldest records", () => {
+    const config: UnstuckConfig = { ...defaultConfig, evidenceWindow: 3 }
+    const acc = new EvidenceAccumulatorImpl()
+
+    acc.add(createInfo("step_loop"), 1, config)
+    acc.add(createInfo("step_loop"), 2, config)
+    acc.add(createInfo("step_loop"), 3, config)
+    acc.add(createInfo("step_loop"), 4, config)
+    acc.add(createInfo("step_loop"), 5, config)
+
+    expect(acc.count).toBe(3)
+    // Only last 3 should remain (chunks 3, 4, 5)
+    expect(acc.records[0].detectedAtChunk).toBe(3)
+    expect(acc.records[1].detectedAtChunk).toBe(4)
+    expect(acc.records[2].detectedAtChunk).toBe(5)
+  })
+
+  test("evidenceWindow Infinity does not evict", () => {
+    const acc = new EvidenceAccumulatorImpl()
+
+    acc.add(createInfo("step_loop"), 1, defaultConfig)
+    acc.add(createInfo("step_loop"), 2, defaultConfig)
+    acc.add(createInfo("step_loop"), 3, defaultConfig)
+    acc.add(createInfo("step_loop"), 4, defaultConfig)
+
+    expect(acc.count).toBe(4)
+  })
+
+  test("clear removes all records", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add(createInfo("step_loop"), 1)
+    acc.add(createInfo("tool_loop"), 2)
+
+    expect(acc.count).toBe(2)
+    acc.clear()
+    expect(acc.count).toBe(0)
+  })
+
+  test("records include all detection info", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    const info: LoopDetectedInfo = {
+      type: "step_loop",
+      threshold: 3,
+      fingerprint: "fp-456",
+      steps: [{ thinkingFingerprint: "fp1", toolSignatures: ["readfile:path=/foo"], stepFingerprint: "fp1|readfile:path=/foo" }],
+    }
+    acc.add(info, 42)
+
+    expect(acc.count).toBe(1)
+    const record = acc.records[0]
+    expect(record.type).toBe("step_loop")
+    expect(record.fingerprint).toBe("fp-456")
+    expect(record.threshold).toBe(3)
+    expect(record.detectedAtChunk).toBe(42)
+    expect(record.steps).toBeDefined()
+    expect(record.timestamp).toBeGreaterThan(0)
+  })
+
+  test("custom thresholds override defaults", () => {
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      evidenceThresholds: { stepLoop: 1, toolLoop: 1, sentenceLoop: 1 },
+    }
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add(createInfo("step_loop"), 1)
+
+    const result = acc.isThresholdMet(config)
+    expect(result.met).toBe(true)
   })
 })
 

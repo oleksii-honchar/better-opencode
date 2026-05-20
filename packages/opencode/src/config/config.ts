@@ -342,6 +342,24 @@ export const Info = Schema.Struct({
       ).annotate({
         description: "Log level for unstuck events (default: 'info')",
       }),
+      evidenceThresholds: Schema.optional(
+        Schema.Struct({
+          stepLoop: Schema.optional(PositiveInt).annotate({
+            description: "Number of step_loop detections before intervention (default: 2)",
+          }),
+          toolLoop: Schema.optional(PositiveInt).annotate({
+            description: "Number of tool_loop detections before intervention (default: 2)",
+          }),
+          sentenceLoop: Schema.optional(PositiveInt).annotate({
+            description: "Number of sentence_loop detections before intervention (default: 1)",
+          }),
+        }),
+      ).annotate({
+        description: "Evidence thresholds for each loop type before nudge-and-prune intervention is triggered",
+      }),
+      evidenceWindow: Schema.optional(PositiveInt).annotate({
+        description: "Maximum age of evidence records before they expire (in seconds, default: Infinity — no eviction)",
+      }),
     }),
   ).annotate({
     description: "Loop detection configuration — detects and breaks model loops during streaming",

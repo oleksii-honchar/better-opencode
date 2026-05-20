@@ -1,3 +1,11 @@
+import type { EvidenceThresholds } from "./error"
+
+export const defaultEvidenceThresholds: EvidenceThresholds = {
+  stepLoop: 2,
+  toolLoop: 2,
+  sentenceLoop: 1,
+}
+
 export interface UnstuckConfig {
   enabled: boolean
   loopThreshold: number
@@ -15,6 +23,8 @@ export interface UnstuckConfig {
   pruneCount: number
   nudgeMessage?: string
   logLevel: "debug" | "info" | "warn"
+  evidenceThresholds: EvidenceThresholds
+  evidenceWindow: number
 }
 
 export const defaultConfig: UnstuckConfig = {
@@ -34,8 +44,16 @@ export const defaultConfig: UnstuckConfig = {
   pruneCount: 3,
   nudgeMessage: "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction.",
   logLevel: "info",
+  evidenceThresholds: defaultEvidenceThresholds,
+  evidenceWindow: Infinity,
 }
 
 export function mergeConfig(partial: Partial<UnstuckConfig>): UnstuckConfig {
-  return { ...defaultConfig, ...partial }
+  return {
+    ...defaultConfig,
+    ...partial,
+    evidenceThresholds: partial.evidenceThresholds
+      ? { ...defaultConfig.evidenceThresholds, ...partial.evidenceThresholds }
+      : defaultConfig.evidenceThresholds,
+  }
 }

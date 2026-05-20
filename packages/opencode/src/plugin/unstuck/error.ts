@@ -13,6 +13,36 @@ export interface LoopDetectedInfo {
   firstIndex?: number
 }
 
+export interface EvidenceThresholds {
+  stepLoop?: number
+  toolLoop?: number
+  sentenceLoop?: number
+}
+
+export interface EvidenceRecord {
+  type: "step_loop" | "tool_loop" | "sentence_loop"
+  fingerprint?: string
+  sentence?: string
+  threshold: number
+  detectedAtChunk: number
+  steps?: StepRecord[]
+  timestamp: number
+}
+
+export interface EvidenceAccumulator {
+  readonly records: readonly EvidenceRecord[]
+
+  get count(): number
+  countByType(type: "step_loop" | "tool_loop" | "sentence_loop"): number
+  isThresholdMet(config: UnstuckConfig): { met: true; type: string } | { met: false }
+  add(info: LoopDetectedInfo, chunkCount: number, config?: UnstuckConfig): void
+  clear(): void
+}
+
+// Note: UnstuckConfig is imported from config.ts to avoid circular dependency issues.
+// The EvidenceAccumulator interface references it for isThresholdMet.
+import type { UnstuckConfig } from "./config"
+
 export class LoopDetectedError extends Error {
   public readonly info: LoopDetectedInfo
 

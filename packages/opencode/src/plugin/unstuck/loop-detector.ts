@@ -1,6 +1,6 @@
 import * as Log from "@opencode-ai/core/util/log"
-import type { UnstuckConfig } from "./config"
-import { LoopDetectedError, type LoopDetectedInfo, type StepRecord } from "./error"
+import { defaultEvidenceThresholds, type UnstuckConfig } from "./config"
+import { LoopDetectedError, type EvidenceAccumulator, type EvidenceRecord, type LoopDetectedInfo, type StepRecord } from "./error"
 import { SentenceTracker } from "./sentence-tracker"
 
 const log = Log.create({ service: "unstuck" })
@@ -60,7 +60,10 @@ export function computeToolSignature(
 export interface LoopDetector {
   consumeChunk(chunk: StreamChunk, config: UnstuckConfig): LoopDetectedInfo | undefined
   finalizeStep(config: UnstuckConfig): LoopDetectedInfo | undefined
+  // reset() — only clears streaming state, preserves history
   reset(): void
+  // clear() — clears everything (used after clean completion or after nudge)
+  clear(): void
   getState(): DetectorState
 }
 
@@ -295,7 +298,17 @@ export class LoopDetectorImpl implements LoopDetector {
   }
 
   reset(): void {
-    log.debug("reset — clearing all detector state")
+    log.debug("reset — clearing streaming state only")
+    this.currentThinking = ""
+    this.currentTools = []
+    this.currentToolInputAccum = {}
+    // history is preserved for evidence accumulation within the same stream episode
+    this.inReasoning = false
+    this.sentenceTracker.reset()
+  }
+
+  clear(): void {
+    log.debug("clear — clearing all detector state")
     this.currentThinking = ""
     this.currentTools = []
     this.currentToolInputAccum = {}
@@ -311,5 +324,60 @@ export class LoopDetectorImpl implements LoopDetector {
       historyLength: this.history.length,
       inReasoning: this.inReasoning,
     }
+  }
+}
+
+export class EvidenceAccumulatorImpl implements EvidenceAccumulator {
+  private _records: EvidenceRecord[] = []
+
+  get records(): readonly EvidenceRecord[] {
+    return this._records
+  }
+
+  get count(): number {
+    return this._records.length
+  }
+
+  countByType(type: "step_loop" | "tool_loop" | "sentence_loop"): number {
+    return this._records.filter((r) => r.type === type).length
+  }
+
+  isThresholdMet(config: UnstuckConfig): { met: true; type: string } | { met: false } {
+    const thresholds = config.evidenceThresholds ?? defaultEvidenceThresholds
+
+    if (this.countByType("step_loop") >= (thresholds.stepLoop ?? 2)) {
+      return { met: true, type: "step_loop" }
+    }
+    if (this.countByType("tool_loop") >= (thresholds.toolLoop ?? 2)) {
+      return { met: true, type: "tool_loop" }
+    }
+    if (this.countByType("sentence_loop") >= (thresholds.sentenceLoop ?? 1)) {
+      return { met: true, type: "sentence_loop" }
+    }
+    return { met: false }
+  }
+
+  add(info: LoopDetectedInfo, chunkCount: number, config?: UnstuckConfig): void {
+    const record: EvidenceRecord = {
+      type: info.type,
+      fingerprint: info.fingerprint,
+      sentence: info.sentence,
+      threshold: info.threshold,
+      detectedAtChunk: chunkCount,
+      steps: info.steps,
+      timestamp: Date.now(),
+    }
+
+    this._records.push(record)
+
+    // Apply evidence window if configured
+    const window = config?.evidenceWindow
+    if (typeof window === "number" && isFinite(window) && window > 0 && this._records.length > window) {
+      this._records = this._records.slice(-window)
+    }
+  }
+
+  clear(): void {
+    this._records = []
   }
 }
