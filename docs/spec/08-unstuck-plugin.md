@@ -380,6 +380,30 @@ interface UnstuckConfig {
 }
 ```
 
+### Config Key Reference
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | boolean | `true` | Master switch. When `false`, the plugin does not wrap the model stream at all. Set to `false` to disable loop detection without removing the config. |
+| `loopThreshold` | number | `3` | Number of consecutive steps with identical step fingerprints that trigger a **step_loop** detection. A step fingerprint combines the normalized thinking text hash and the sequence of tool call signatures. |
+| `detectToolOnlyLoops` | boolean | `true` | When `true`, also detects **tool_loop** events where the same tool call sequence repeats across steps, even if the thinking text differs. Set to `false` to disable tool-only detection (reduces false positives). |
+| `toolLoopThreshold` | number | `4` | Number of consecutive steps with identical tool call signatures that trigger a **tool_loop** detection. Higher than `loopThreshold` because tool-only detection is more prone to false positives (the model may legitimately call the same tool with different reasoning). |
+| `historySize` | number | `10` | Size of the ring buffer that stores recent step records. The detector only looks at the last N steps for loop patterns. Larger values allow detection of longer loops but use slightly more memory. |
+| `minThinkingLength` | number | `50` | Minimum number of characters in the thinking/reasoning text before the step is considered for fingerprinting. Steps with very short thinking (e.g., "OK", "Sure") are skipped to avoid false positives from trivial responses. |
+| `includeReasoning` | boolean | `true` | When `true`, include reasoning-delta (reasoning text) chunks in the step fingerprint. Set to `false` to only use text-delta chunks — useful if you only want to detect loops in the visible output, not the internal reasoning. |
+| `includeText` | boolean | `true` | When `true`, include text-delta (visible output) chunks in the step fingerprint. Set to `false` to only use reasoning text. In practice, keep this `true` — the model's visible output is what matters for loop detection. |
+| `enableSentenceLoopDetection` | boolean | `true` | When `true`, detect **sentence_loop** events where the same sentence repeats every 1–5 sentences within a single step (e.g., "Let me check the file" appearing 3+ times with periodic spacing). Set to `false` to disable sentence-level detection. |
+| `sentenceLoopThreshold` | number | `3` | Number of periodic repetitions of the same sentence that triggers a **sentence_loop** detection. The sentence must repeat with consistent spacing (within ±1 sentence of the previous gap). |
+| `minSentenceLength` | number | `15` | Minimum number of characters in a sentence before it is considered for loop detection. Short fragments (e.g., "OK", "Hmm") are excluded to avoid false positives from common words. |
+| `strategy` | `"nudge-and-prune" \| "abort" \| "warn"` | `"nudge-and-prune"` | What to do when a loop is detected: |
+| | | | - **`nudge-and-prune`** (default): Abort the stream, prune the last N looping assistant messages from the conversation, inject a nudge user message telling the model to break the loop, and restart the stream. |
+| | | | - **`abort`**: Abort the stream immediately. No recovery attempt. The session turns red with an error. |
+| | | | - **`warn`**: Log a warning about the loop but do **not** abort or nudge. Useful for debugging or when you want manual review before intervention. |
+| `maxNudges` | number | `2` | Maximum number of nudge-and-prune recovery attempts before falling back to abort. If the model re-enters the same loop after a nudge, the plugin will try again up to this limit. After `maxNudges` failures, the stream is aborted. |
+| `pruneCount` | number | `3` | Number of recent assistant messages to remove from the conversation when performing nudge-and-prune. These are the looping messages that are likely causing the model to repeat. |
+| `nudgeMessage` | string | auto-generated | Custom nudge message injected as a synthetic user message when a loop is detected. The auto-generated message is: "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction." Set a custom value to match your team's communication style. |
+| `logLevel` | `"debug" \| "info" \| "warn"` | `"info"` | Log level for unstuck plugin events. Use `debug` for per-chunk state tracking (text accumulated, fingerprints computed, sentence splits) — useful for diagnosing false positives. Use `info` for loop detection events and nudge-and-prune actions. Use `warn` to only see warnings (max nudges reached). |
+
 ### Configuration via opencode config
 
 ```json
@@ -400,6 +424,133 @@ interface UnstuckConfig {
   }
 }
 ```
+
+### Log Filtering
+
+The unstuck plugin emits structured logs tagged with `service: "unstuck"`. Use `grep` or `rg` to filter logs for loop detection events.
+
+#### Log Levels and What They Emit
+
+| Level | What is logged | Example |
+|-------|---------------|---------|
+| DEBUG | Per-chunk state: text accumulated, tool call received, sentence split result, fingerprint value | `log.debug("chunk processed", { type: "text-delta", accumulatedLen: 234 })` |
+| DEBUG | Sentence-level detection: sentence added to history, periodic pattern check | `log.debug("sentence tracked", { index: 5, hash: "a1b2c3", window: 7 })` |
+| INFO | Loop detected: type, threshold, fingerprint (or repeating sentence for sentence_loop) | `log.info("loop detected", { type: "step_loop", threshold: 3, fingerprint: "..." })` or `log.info("loop detected", { type: "sentence_loop", threshold: 3, sentence: "Let me check..." })` |
+| INFO | Nudge-and-prune event: nudge number, messages pruned, restart | `log.info("nudge applied", { nudgeCount: 1, prunedMsgs: 3, strategy: "nudge-and-prune" })` |
+| WARN | Max nudges reached, falling back to abort | `log.warn("max nudges reached", { maxNudges: 2, fallback: "abort" })` |
+| ERROR | Unexpected error during stream interception | `log.error("stream wrap error", { error: e.message })` |
+
+#### Log Commands
+
+```bash
+# Show all unstuck logs (any level)
+grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null || \
+  grep -i "service.*unstuck" ~/.opencode/opencode.log 2>/dev/null
+
+# Show only loop detection events (INFO level)
+./scripts/start-dev.sh --server-logs | grep -i "service.*unstuck" | grep -i "loop detected"
+grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
+  grep -i "loop detected"
+
+# Show only nudge-and-prune events
+grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
+  grep -i "nudge"
+
+# Show warnings (max nudges reached)
+grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
+  grep -i "max nudges"
+
+# Show only debug logs (requires logLevel: "debug" in config)
+grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
+  grep -i "debug"
+```
+
+#### Configuring Log Verbosity
+
+Set `logLevel` in the `unstuck` config section of `opencode.json`:
+
+```json
+{
+  "unstuck": {
+    "logLevel": "debug"  // Options: "debug" | "info" | "warn"
+  }
+}
+```
+
+- **`info`** (default): Only loop detection events and nudge-and-prune actions. Quiet in production.
+- **`debug`**: Per-chunk state tracking (text accumulated, fingerprints computed, sentence splits). Useful for diagnosing false positives.
+- **`warn`**: Only warnings (max nudges reached). Most quiet.
+
+#### Troubleshooting with Logs
+
+**Scenario 1: Loop not detected**
+
+```bash
+# Enable debug logging
+grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
+  grep -i "chunk processed"
+
+# Check: is the plugin seeing the chunks?
+# If no "chunk processed" logs, the plugin may be disabled or not wrapping the stream.
+# Check: "unstuck disabled, passing through" in the logs.
+
+# Check: are fingerprints being computed?
+grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
+  grep -i "finalizeStep"
+
+# If fingerprints are computed but no loop detected, the threshold may be too high.
+# Lower `loopThreshold` or `historySize` and retry.
+```
+
+**Scenario 2: False positive — legitimate response aborted**
+
+```bash
+# Enable debug logging
+grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
+  grep -i "loop detected"
+
+# Check: what type of loop was detected?
+# If "sentence_loop" was triggered, the model may be legitimately repeating a sentence.
+# Increase `sentenceLoopThreshold` (e.g., from 3 to 5) or disable sentence detection.
+
+# If "step_loop" was triggered, the model may be making legitimate progress with similar steps.
+# Increase `loopThreshold` (e.g., from 3 to 4) or increase `minThinkingLength` to require more thinking text.
+```
+
+**Scenario 3: Nudge-and-prune not recovering**
+
+```bash
+# Check nudge events
+grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
+  grep -i "nudge"
+
+# Check: how many nudge attempts were made?
+# If `maxNudges` was reached, the model is not recovering.
+# Consider: increasing `maxNudges`, or switching `strategy` to "abort" to fail fast.
+
+# Check: what message was pruned?
+# The nudge message is injected as a synthetic user message in the conversation.
+# Look for `"_unstuckNudge": true` in the conversation history to see what was injected.
+```
+
+#### Log Format
+
+All unstuck logs are emitted via `@opencode-ai/core/util/log` with:
+
+```typescript
+Log.create({ service: "unstuck" })
+```
+
+This produces logs tagged with `"service": "unstuck"` in the service field, making it easy to filter:
+
+```bash
+# Using ripgrep (rg) for structured log filtering
+rg 'service.*"unstuck"' ~/.opencode/logs/* 2>/dev/null
+```
+
+The global log level is controlled via opencode config (`logLevel: "DEBUG" | "INFO" | "WARN" | "ERROR"`) or CLI flag (`--log-level DEBUG`). The `logLevel` field in `UnstuckConfig` acts as a **local override** — even if the global log level is DEBUG, the plugin can choose to log at its own level.
+
+---
 
 ### Error Handling and Edge Cases
 
