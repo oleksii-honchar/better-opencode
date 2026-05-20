@@ -7,9 +7,9 @@ function createDetector(_config?: Partial<UnstuckConfig>) {
 }
 
 describe("computeToolSignature", () => {
-  test("returns tool name with sorted input keys", () => {
+  test("returns tool name with sorted key=value pairs", () => {
     const sig = computeToolSignature("ReadFile", { path: "/foo", mode: "r" })
-    expect(sig).toBe("readfile:mode,path")
+    expect(sig).toBe("readfile:mode=r;path=/foo")
   })
 
   test("returns tool name with empty keys when no input", () => {
@@ -20,6 +20,23 @@ describe("computeToolSignature", () => {
   test("normalizes tool name to lowercase", () => {
     const sig = computeToolSignature("ReadFile")
     expect(sig).toBe("readfile:")
+  })
+
+  test("normalizes values — lowercase, collapse whitespace, strip quotes", () => {
+    const sig = computeToolSignature("bash", { command: "ls -la '/Path/To File'" })
+    expect(sig).toBe("bash:command=ls -la /path/to file")
+  })
+
+  test("different bash commands produce different signatures", () => {
+    const sig1 = computeToolSignature("bash", { command: "./script.sh" })
+    const sig2 = computeToolSignature("bash", { command: "ls -la" })
+    expect(sig1).not.toBe(sig2)
+  })
+
+  test("different file paths produce different signatures", () => {
+    const sig1 = computeToolSignature("edit", { filePath: "/file1.ts" })
+    const sig2 = computeToolSignature("edit", { filePath: "/file2.ts" })
+    expect(sig1).not.toBe(sig2)
   })
 })
 
@@ -164,7 +181,7 @@ describe("LoopDetector — step-level loop", () => {
 })
 
 describe("LoopDetector — tool-only loop", () => {
-  test("detects tool-only loop with different thinking", () => {
+  test("detects tool-only loop with same tool+input and different thinking", () => {
     const detector = createDetector()
     const config: UnstuckConfig = { ...defaultConfig, detectToolOnlyLoops: true, toolLoopThreshold: 3 }
     const chunks: StreamChunk[] = [
@@ -172,10 +189,10 @@ describe("LoopDetector — tool-only loop", () => {
       { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
       { type: "finish-step" },
       { type: "text-delta", text: "Second thinking that is completely different from the first one and long enough for detection." },
-      { type: "tool-input-end", id: "call-1", toolName: "ReadFile", input: { path: "/bar" } },
+      { type: "tool-input-end", id: "call-1", toolName: "ReadFile", input: { path: "/foo" } },
       { type: "finish-step" },
       { type: "text-delta", text: "Third thinking that is also different from the previous ones and long enough for detection." },
-      { type: "tool-input-end", id: "call-2", toolName: "ReadFile", input: { path: "/baz" } },
+      { type: "tool-input-end", id: "call-2", toolName: "ReadFile", input: { path: "/foo" } },
       { type: "finish-step" },
     ]
 
@@ -189,18 +206,98 @@ describe("LoopDetector — tool-only loop", () => {
     expect(loopInfo?.threshold).toBe(3)
   })
 
+  test("does NOT detect tool-only loop with different bash commands (false positive fix)", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = { ...defaultConfig, detectToolOnlyLoops: true, toolLoopThreshold: 3 }
+    // Simulates a debugging session: run script, ls, run again, run with -x
+    const chunks: StreamChunk[] = [
+      { type: "text-delta", text: "Let me try running the script." },
+      { type: "tool-input-end", id: "call-0", toolName: "bash", input: { command: "./script.sh" } },
+      { type: "finish-step" },
+      { type: "text-delta", text: "It failed, let me check if the file exists." },
+      { type: "tool-input-end", id: "call-1", toolName: "bash", input: { command: "ls -la script.sh" } },
+      { type: "finish-step" },
+      { type: "text-delta", text: "File exists, let me try with stderr." },
+      { type: "tool-input-end", id: "call-2", toolName: "bash", input: { command: "./script.sh 2>&1" } },
+      { type: "finish-step" },
+    ]
+
+    let loopInfo = undefined
+    for (const chunk of chunks) {
+      loopInfo = detector.consumeChunk(chunk, config)
+    }
+
+    expect(loopInfo).toBeUndefined()
+  })
+
+  test("does NOT detect tool-only loop with different file edits (false positive fix)", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = { ...defaultConfig, detectToolOnlyLoops: true, toolLoopThreshold: 3 }
+    // Simulates editing multiple files in sequence
+    const chunks: StreamChunk[] = [
+      { type: "text-delta", text: "Let me edit the first file." },
+      { type: "tool-input-end", id: "call-0", toolName: "edit", input: { filePath: "/file1.ts" } },
+      { type: "finish-step" },
+      { type: "text-delta", text: "Now edit the second file." },
+      { type: "tool-input-end", id: "call-1", toolName: "edit", input: { filePath: "/file2.ts" } },
+      { type: "finish-step" },
+      { type: "text-delta", text: "Now edit the third file." },
+      { type: "tool-input-end", id: "call-2", toolName: "edit", input: { filePath: "/file3.ts" } },
+      { type: "finish-step" },
+    ]
+
+    let loopInfo = undefined
+    for (const chunk of chunks) {
+      loopInfo = detector.consumeChunk(chunk, config)
+    }
+
+    expect(loopInfo).toBeUndefined()
+  })
+
+  test("parses input from delta when chunk.input is empty", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = { ...defaultConfig, detectToolOnlyLoops: true, toolLoopThreshold: 3 }
+    // Simulates AI SDK not providing input in tool-input-end (real-world case)
+    const chunks: StreamChunk[] = [
+      { type: "text-delta", text: "First thinking that is long enough to pass the minThinkingLength threshold for proper detection." },
+      { type: "tool-input-start", id: "call-0", toolName: "ReadFile" },
+      { type: "tool-input-delta", id: "call-0", text: '{"path":"/foo"}' },
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: {} },
+      { type: "finish-step" },
+      { type: "text-delta", text: "Second thinking that is completely different from the first one and long enough for detection." },
+      { type: "tool-input-start", id: "call-1", toolName: "ReadFile" },
+      { type: "tool-input-delta", id: "call-1", text: '{"path":"/foo"}' },
+      { type: "tool-input-end", id: "call-1", toolName: "ReadFile", input: {} },
+      { type: "finish-step" },
+      { type: "text-delta", text: "Third thinking that is also different from the previous ones and long enough for detection." },
+      { type: "tool-input-start", id: "call-2", toolName: "ReadFile" },
+      { type: "tool-input-delta", id: "call-2", text: '{"path":"/foo"}' },
+      { type: "tool-input-end", id: "call-2", toolName: "ReadFile", input: {} },
+      { type: "finish-step" },
+    ]
+
+    let loopInfo = undefined
+    for (const chunk of chunks) {
+      loopInfo = detector.consumeChunk(chunk, config)
+    }
+
+    expect(loopInfo).toBeDefined()
+    expect(loopInfo?.type).toBe("tool_loop")
+  })
+
   test("does not detect tool-only loop when disabled", () => {
     const detector = createDetector()
-    const config: UnstuckConfig = { ...defaultConfig, detectToolOnlyLoops: false }
+    const config: UnstuckConfig = { ...defaultConfig, detectToolOnlyLoops: false, toolLoopThreshold: 3 }
+    // Same tool+input but different thinking — would be caught by tool-only if enabled
     const chunks: StreamChunk[] = [
       { type: "text-delta", text: "First thinking that is long enough to pass the minThinkingLength threshold for proper detection." },
       { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
       { type: "finish-step" },
       { type: "text-delta", text: "Second thinking that is completely different from the first one and long enough for detection." },
-      { type: "tool-input-end", id: "call-1", toolName: "ReadFile", input: { path: "/bar" } },
+      { type: "tool-input-end", id: "call-1", toolName: "ReadFile", input: { path: "/foo" } },
       { type: "finish-step" },
       { type: "text-delta", text: "Third thinking that is also different from the previous ones and long enough for detection." },
-      { type: "tool-input-end", id: "call-2", toolName: "ReadFile", input: { path: "/baz" } },
+      { type: "tool-input-end", id: "call-2", toolName: "ReadFile", input: { path: "/foo" } },
       { type: "finish-step" },
     ]
 

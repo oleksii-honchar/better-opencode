@@ -244,7 +244,8 @@ describe("wrapWithLoopDetection — nudge-and-prune", () => {
     // Should have pruned 2 assistant messages and injected nudge
     expect(receivedPrompt.length).toBe(initialMessages.length - 2 + 1) // -2 pruned + 1 nudge
     expect(receivedPrompt[receivedPrompt.length - 1].role).toBe("user")
-    expect(String(receivedPrompt[receivedPrompt.length - 1].content)).toContain("stuck in a loop")
+    const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>
+    expect(lastContent[0]?.text).toContain("stuck in a loop")
   })
 })
 

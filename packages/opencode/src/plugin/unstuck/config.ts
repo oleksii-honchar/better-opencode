@@ -21,7 +21,7 @@ export const defaultConfig: UnstuckConfig = {
   enabled: true,
   loopThreshold: 3,
   detectToolOnlyLoops: true,
-  toolLoopThreshold: 4,
+  toolLoopThreshold: 6,
   historySize: 10,
   minThinkingLength: 50,
   includeReasoning: true,

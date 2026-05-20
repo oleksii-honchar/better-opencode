@@ -37,8 +37,24 @@ export function computeToolSignature(
   input?: Record<string, unknown>,
 ): string {
   const name = toolName.toLowerCase()
-  const inputKeys = input ? Object.keys(input).sort().join(",") : ""
-  return `${name}:${inputKeys}`
+
+  if (!input || Object.keys(input).length === 0) {
+    return `${name}:`
+  }
+
+  // Include both keys AND normalized values to avoid false positives.
+  // Without values, "bash:command" matches ANY bash call (different commands = false positive).
+  // Without values, "edit:filePath,newString,oldString" matches ANY edit (different files = false positive).
+  const kvPairs = Object.entries(input)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => {
+      const val = typeof v === "string" ? v : JSON.stringify(v)
+      // Normalize: lowercase, collapse whitespace, strip quotes
+      return `${k}=${val.toLowerCase().replace(/[\s]+/g, " ").replace(/["']/g, "")}`
+    })
+    .join(";")
+
+  return `${name}:${kvPairs}`
 }
 
 export interface LoopDetector {
@@ -122,7 +138,24 @@ export class LoopDetectorImpl implements LoopDetector {
           log.debug("consumeChunk — skipping provider-executed tool", { type: "tool-input-end", toolName: chunk.toolName })
           break
         }
-        const sig = computeToolSignature(chunk.toolName, chunk.input)
+
+        // The AI SDK's tool-input-end chunk may not include `input` (or it may be empty).
+        // Fall back to the accumulated delta text, which is the raw JSON streamed via
+        // tool-input-delta chunks. Parse it to get the actual input for signature computation.
+        let resolvedInput = chunk.input
+        if (!resolvedInput || Object.keys(resolvedInput).length === 0) {
+          const raw = this.currentToolInputAccum[chunk.id]
+          if (raw) {
+            try {
+              resolvedInput = JSON.parse(raw) as Record<string, unknown>
+              log.debug("consumeChunk — parsed input from delta", { type: "tool-input-end", toolName: chunk.toolName, keys: Object.keys(resolvedInput) })
+            } catch {
+              log.warn("consumeChunk — failed to parse delta as JSON", { type: "tool-input-end", toolName: chunk.toolName, rawLength: raw.length })
+            }
+          }
+        }
+
+        const sig = computeToolSignature(chunk.toolName, resolvedInput)
         this.currentTools.push(sig)
         log.debug("consumeChunk", { type: "tool-input-end", toolName: chunk.toolName, signature: sig, toolsInStep: this.currentTools.length })
         break
