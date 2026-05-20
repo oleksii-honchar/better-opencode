@@ -1,10 +1,12 @@
 ---
 feature: tool-execute-after-inject
 version: 1.0.0
-status: spec
+status: implemented
 source: architect/spec.md (Patch 1, PR #19519)
 pr: anomalyco/opencode#19519
-implementation: pending
+implementation: done
+implementedAt: "2026-05-20"
+reviewedAt: "2026-05-20"
 ---
 
 # Spec: tool.execute.after inject
@@ -13,10 +15,10 @@ implementation: pending
 
 | Status | Description |
 |--------|-------------|
-| **Status** | ⏳ **Pending** — Not yet implemented |
+| **Status** | ✅ **Implemented** — Feature complete, reviewed, typecheck + build pass |
 | **Source** | PR #19519 (unmerged upstream) |
-| **PR Ref** | `pr-19519` (local branch) |
-| **Next Step** | Cherry-pick from PR ref or manually apply |
+| **Implemented** | 2026-05-20 |
+| **Review** | Approved with 2 low-severity comments (no blockers) |
 
 ## Problem Statement
 
@@ -36,14 +38,23 @@ Plugins cannot inject synthetic user messages after tool execution. These messag
 
 | File | Lines Added | Lines Removed |
 |------|-------------|---------------|
-| `packages/plugin/src/index.ts` | +12 | 0 |
-| `packages/opencode/src/session/prompt.ts` | ~50 | 0 |
+| `packages/plugin/src/index.ts` | +3 | 0 |
+| `packages/opencode/src/session/prompt.ts` | ~60 | 0 |
 
 ## Implementation Details
 
+### Architect Corrections
+
+The original spec proposed pushing synthetic messages to the in-memory `msgs` array. This was corrected during planning: **messages must be persisted via `sessions.updateMessage` + `sessions.updatePart`** to survive session compaction (compaction reads from the database, not the in-memory array). This follows the pattern used by all other synthetic messages in the codebase (e.g., subtask summary injection at L890-905).
+
+Additionally:
+- Line numbers corrected: actual call sites are **L611** (registry), **L655** (MCP), **L847** (subtask) — not ~433/~468/~660
+- Collection pattern simplified: just check `output.inject` after `plugin.trigger` (no separate collection array needed)
+- `flushInjectedMessages` is an **Effect generator** (`Effect.fn`) since it calls `sessions.updatePart`
+
 ### 1. `packages/plugin/src/index.ts` — Add inject type to hook output
 
-**Location:** Lines 273-280
+**Location:** Lines 273-282
 
 ```typescript
 // Before
@@ -71,54 +82,66 @@ Plugins cannot inject synthetic user messages after tool execution. These messag
 
 ### 2. `packages/opencode/src/session/prompt.ts` — Add flushInjectedMessages() and call sites
 
-**Add helper function** (near other message flush helpers):
+**Add Effect helper** (near other message helpers):
 
 ```typescript
-/**
- * Flush any synthetic user messages injected by tool.execute.after hooks.
- * These messages are persisted and visible to the AI on the next loop iteration.
- */
-function flushInjectedMessages(
-  injected: Array<{ role: "user" | "system"; text: string }>,
-  msgs: Array<{ info: Message; parts: Part[] }>,
-) {
-  if (injected.length === 0) return
-  for (const injection of injected) {
+const flushInjectedMessages = Effect.fn("flushInjectedMessages")(function* (input: {
+  injected: Array<{ role: "user" | "system"; text: string }>
+  sessionID: string
+  agent: string
+  providerID: string
+  modelID: string
+}) {
+  if (input.injected.length === 0) return
+  for (const injection of input.injected) {
     const isSystem = injection.role === "system"
     const wrapped = isSystem
       ? `<system-reminder>${injection.text}</system-reminder>`
       : injection.text
-    msgs.push({
-      info: {
-        role: "user",
-        type: "text",
-        content: wrapped,
-        synthetic: true,
-      },
-      parts: [{ type: "text", text: wrapped }],
+
+    // Persist synthetic message to database (survives compaction)
+    const syntheticMsg = yield* sessions.updateMessage({
+      id: MessageID.ascending(),
+      sessionID: input.sessionID,
+      role: "user",
+      time: { created: Date.now() },
+      agent: input.agent,
+      model: input.modelID,
+    })
+    yield* sessions.updatePart({
+      id: PartID.ascending(),
+      messageID: syntheticMsg.id,
+      sessionID: input.sessionID,
+      type: "text",
+      text: wrapped,
+      synthetic: true,
     })
   }
-}
+})
 ```
 
 **Add call sites** at three locations where `tool.execute.after` hooks are triggered:
 
-1. **Registry tools** (line ~433)
-2. **MCP tools** (line ~468)
-3. **Subtask tools** (line ~660)
+1. **Registry tools** (line ~611)
+2. **MCP tools** (line ~655)
+3. **Subtask tools** (line ~847)
 
 After each hook invocation:
 
 ```typescript
-// Collect injected messages
-const injected: Array<{ role: "user" | "system"; text: string }> = []
-// ... hook invocation code ...
-if (output.inject) {
-  injected.push(...output.inject)
-}
-// ... after all hooks for this tool ...
-if (injected.length > 0) {
-  flushInjectedMessages(injected, msgs)
+const hookOutput = yield* plugin.trigger(
+  "tool.execute.after",
+  { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
+  output,
+)
+if (hookOutput?.inject) {
+  yield* flushInjectedMessages({
+    injected: hookOutput.inject,
+    sessionID: ctx.sessionID,
+    agent: input.agent.name,
+    providerID: input.model.providerID,
+    modelID: ModelID.make(input.model.api.id),
+  })
 }
 ```
 
@@ -147,9 +170,9 @@ if (injected.length > 0) {
 
 ## Success Criteria
 
-- [ ] Plugin can return `output.inject` from `tool.execute.after`
-- [ ] Injected messages appear in conversation on next loop iteration
-- [ ] Injected messages survive session compaction
-- [ ] System-role injections are wrapped in `<system-reminder>` tags
-- [ ] OpenChamber type-check passes
-- [ ] OpenChamber build succeeds
+- [x] Plugin can return `output.inject` from `tool.execute.after`
+- [x] Injected messages appear in conversation on next loop iteration
+- [x] Injected messages survive session compaction
+- [x] System-role injections are wrapped in `<system-reminder>` tags
+- [x] OpenChamber type-check passes
+- [x] OpenChamber build succeeds

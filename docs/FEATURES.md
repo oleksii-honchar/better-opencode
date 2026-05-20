@@ -20,12 +20,14 @@ Plugins can inject synthetic user messages after tool execution. These messages 
 "tool.execute.after": async (input, output) => {
   if (input.tool === "edit") {
     output.inject = [{
-      type: "text",
-      text: "<system-reminder>Remember: update progress.md after file changes.</system-reminder>"
+      role: "system",
+      text: "Remember: update progress.md after file changes."
     }];
   }
 }
 ```
+
+> **Note:** `role: "system"` injections are automatically wrapped in `<system-reminder>` tags by the framework. Use `role: "user"` for plain user messages.
 
 ---
 

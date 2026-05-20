@@ -276,6 +276,8 @@ export interface Hooks {
       title: string
       output: string
       metadata: any
+      /** Messages to inject into the conversation after this tool call. */
+      inject?: Array<{ role: "user" | "system"; text: string }>
     },
   ) => Promise<void>
   "experimental.chat.messages.transform"?: (
