@@ -332,4 +332,24 @@ export interface Hooks {
    * Modify tool definitions (description and parameters) sent to LLM
    */
   "tool.definition"?: (input: { toolID: string }, output: { description: string; parameters: any }) => Promise<void>
+  /**
+   * Called before the agent loop exits. Set `output.stop = false` and
+   * provide `output.message` to inject a user message and continue the loop.
+   *
+   * - `reason`: Why the session is stopping ("idle" = natural completion)
+   * - `stop`: Defaults to `true`. Set to `false` to prevent exit.
+   * - `message`: Required when `stop = false`. Injected as a synthetic
+   *   user message wrapped in `<system-reminder>` tags.
+   */
+  "session.stopping"?: (
+    input: {
+      sessionID: string
+      reason: "idle"
+    },
+    output: {
+      stop: boolean
+      /** Required when stop = false. Injected as synthetic user message. */
+      message?: string
+    },
+  ) => Promise<void>
 }

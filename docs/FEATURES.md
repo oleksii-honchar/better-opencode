@@ -35,9 +35,9 @@ Plugins can inject synthetic user messages after tool execution. These messages 
 
 📋 [Detailed Spec](./spec/03-session-stopping-hook.md)
 
-**Status:** ⏳ Pending — PR #16598 is unmerged upstream
+**Status:** ✅ Implemented
 
-Plugins can intercept the agent's idle/stop state and inject a follow-up message instead of stopping.
+Plugins can intercept the agent's idle/stop state and inject a follow-up message instead of stopping. The hook fires in `prompt.ts`'s `runLoop` before the loop exits. Two safeguards prevent abuse: `stop: false` requires a message, and a max continuation counter (3) prevents infinite loops.
 
 **Example plugin:**
 ```typescript
@@ -46,15 +46,14 @@ Plugins can intercept the agent's idle/stop state and inject a follow-up message
   if (input.reason === "idle") {
     const progressExists = await fileExists("progress.md");
     if (!progressExists) {
-      output.continue = true;
-      output.message = {
-        type: "text",
-        text: "<system-reminder>You haven't updated progress.md yet — continue working.</system-reminder>"
-      };
+      output.stop = false;
+      output.message = "You haven't updated progress.md yet — continue working.";
     }
   }
 }
 ```
+
+> **Note:** `output.message` is required when `output.stop = false`. The framework automatically wraps the message in `<system-reminder>` tags via `flushInjectedMessages` with `role: "system"`.
 
 ---
 
