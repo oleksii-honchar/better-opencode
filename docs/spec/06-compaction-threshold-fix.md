@@ -4,7 +4,7 @@ version: 1.0.0
 status: implemented
 source: session/260517-1432-compaction-threshold/spec.md
 pr: N/A (developer implementation)
-implementation: https://github.com/oleksii-honchar/better-opencode/commit/[TODO-add-commit]
+implementation: https://github.com/oleksii-honchar/better-opencode/commit/921b74686
 ---
 
 # Compaction Threshold Fix (Double-Trigger Bug)

@@ -1,6 +1,6 @@
 # better-opencode Features
 
-This document describes the five core features added by the `better-opencode` fork.
+This document describes the nine features added by the `better-opencode` fork.
 
 For an overview of the fork's purpose and installation, see [BETTER-OPENCODE.md](./BETTER-OPENCODE.md).
 
@@ -217,3 +217,47 @@ When a loop is detected, the plugin performs **nudge-and-prune**: aborts the str
 ```
 
 All fields are optional with sensible defaults. Set `enabled: false` to disable.
+
+---
+
+## 8. Compaction Threshold Fix — Double-Trigger Bug
+
+📋 [Detailed Spec](./spec/06-compaction-threshold-fix.md)
+
+**Status:** ✅ Implemented
+
+**Problem:** The `/compact` command fired **twice immediately in succession** and sometimes triggered at **~75% capacity** instead of the configured 99% threshold, wasting tokens and confusing users.
+
+**Root cause:** After `compaction.create()` creates an entry, the loop continues but `lastFinished.tokens` remains stale — it still reflects the PREVIOUS message's token count. This causes `isOverflow` to re-fire on the next iteration with outdated data.
+
+**Fix:** After `compaction.create()`, immediately clear the stale token reference:
+
+```typescript
+Object.assign(lastFinished.tokens, { input: 0, output: 0, reasoning: 0, total: 0, cache: { read: 0, write: 0 } })
+```
+
+**Result:** Compaction fires exactly once per overflow event. The ~75% threshold is correct math (threshold applies to input-capacity, not full window).
+
+---
+
+## 9. Agent LLM Params Per Agent (`modelPreset`)
+
+📋 [Detailed Spec](./spec/09-agent-llm-params-per-agent.md)
+
+**Status:** ✅ Implemented
+
+**Problem:** Users cannot define per-agent LLM parameters beyond `temperature` and `top_p`. Forces them to either define separate model IDs in llama-swap for each parameter combination, or use the same model for all agents.
+
+**Solution:** The `modelPreset` field appends a known suffix (`-precise`, `-instruct`) to the inherited session model ID, then looks up the suffixed model in the provider (e.g., llama-swap). All parameter tuning lives in llama-swap — opencode only selects the model variant.
+
+**Agent config example:**
+```yaml
+name: precise-coder
+modelPreset: "precise"
+---
+You are a precise coding agent. Generate code directly without reasoning.
+```
+
+**Precedence:** `agent.model` (explicit) → `agent.modelPreset + parentModel` (suffixed) → `parentModel` (fallback if suffixed not found)
+
+**Fallback:** If suffixed model not found in provider, logs a warning and falls back to the base (parent) model. Does NOT error — prevents workflow breaks.
