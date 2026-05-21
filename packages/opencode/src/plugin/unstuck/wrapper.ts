@@ -43,9 +43,9 @@ function pruneLoopingMessages(
   return messages.filter((_, i) => !indicesToRemove.has(i))
 }
 
-function mapStreamChunk(chunk: LanguageModelV3StreamPart, currentToolName: string | undefined): StreamChunk | undefined {
+function mapStreamChunk(chunk: LanguageModelV3StreamPart, toolNameMap: Map<string, string>): StreamChunk | undefined {
   // Map the AI SDK LanguageModelV3StreamPart to our StreamChunk type
-  // currentToolName tracks the tool name from tool-input-start to tool-input-end
+  // toolNameMap tracks tool names keyed by id from tool-input-start to tool-input-end
   switch (chunk.type) {
     case "reasoning-delta": {
       return { type: "reasoning-delta" as const, text: chunk.delta }
@@ -68,7 +68,7 @@ function mapStreamChunk(chunk: LanguageModelV3StreamPart, currentToolName: strin
       return {
         type: "tool-input-end" as const,
         id: chunk.id,
-        toolName: currentToolName ?? (chunk as any).toolName ?? "unknown",
+        toolName: toolNameMap.get(chunk.id) ?? (chunk as any).toolName ?? "unknown",
         input: (chunk as any).input ?? {},
         providerExecuted: (chunk as any).providerExecuted ?? false,
       }
@@ -97,8 +97,8 @@ async function* streamWithDetection(
   const readableStream = result.stream.pipeThrough(identityTransform)
   const reader = readableStream.getReader()
 
-  // Track tool name from tool-input-start to tool-input-end
-  let currentToolName: string | undefined
+  // Track tool name from tool-input-start to tool-input-end, keyed by id
+  const toolNameMap = new Map<string, string>()
   let chunkCount = 0
 
   try {
@@ -106,15 +106,17 @@ async function* streamWithDetection(
       const { done, value } = await reader.read()
       if (done) break
       chunkCount++
-      const mappedChunk = mapStreamChunk(value, currentToolName)
+      const mappedChunk = mapStreamChunk(value, toolNameMap)
       if (mappedChunk) {
-        // Update currentToolName from tool-input-start
+        // Track tool name from tool-input-start
         if (mappedChunk.type === "tool-input-start") {
-          currentToolName = mappedChunk.toolName
+          toolNameMap.set(mappedChunk.id, mappedChunk.toolName)
           log.debug("tool-input-start", { id: mappedChunk.id, toolName: mappedChunk.toolName })
         }
         if (mappedChunk.type === "tool-input-end") {
           log.debug("tool-input-end", { id: mappedChunk.id, toolName: mappedChunk.toolName })
+          // Cleanup after processing
+          toolNameMap.delete(mappedChunk.id)
         }
         if (mappedChunk.type === "finish") {
           log.debug("finish chunk", { finishReason: mappedChunk.finishReason, chunkCount })

@@ -165,6 +165,7 @@ describe("wrapWithLoopDetection — disabled", () => {
 
     for (let i = 0; i < 3; i++) {
       chunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
+      chunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       chunks.push({
         type: "tool-input-end",
         id: `call-${i}`,
@@ -191,6 +192,7 @@ describe("wrapWithLoopDetection — nudge-and-prune", () => {
     const loopingChunks: LanguageModelV3StreamPart[] = []
     for (let i = 0; i < 3; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
+      loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
         type: "tool-input-end",
         id: `call-${i}`,
@@ -260,6 +262,7 @@ describe("wrapWithLoopDetection — max nudges exceeded", () => {
     const loopingChunks: LanguageModelV3StreamPart[] = []
     for (let i = 0; i < 3; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
+      loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
         type: "tool-input-end",
         id: `call-${i}`,
@@ -306,6 +309,7 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
     const loopingChunks: LanguageModelV3StreamPart[] = []
     for (let i = 0; i < 3; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
+      loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
         type: "tool-input-end",
         id: `call-${i}`,
@@ -363,6 +367,7 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
     const loopingChunks: LanguageModelV3StreamPart[] = []
     for (let i = 0; i < 3; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
+      loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
         type: "tool-input-end",
         id: `call-${i}`,
@@ -470,6 +475,7 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
     const loopingChunks: LanguageModelV3StreamPart[] = []
     for (let i = 0; i < 3; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
+      loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
         type: "tool-input-end",
         id: `call-${i}`,
@@ -512,6 +518,7 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
     const loopingChunks: LanguageModelV3StreamPart[] = []
     for (let i = 0; i < 3; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
+      loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
         type: "tool-input-end",
         id: `call-${i}`,

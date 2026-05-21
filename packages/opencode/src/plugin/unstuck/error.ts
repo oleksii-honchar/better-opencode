@@ -1,4 +1,6 @@
 export interface StepRecord {
+  reasoningFingerprint: string
+  textFingerprint: string
   thinkingFingerprint: string
   toolSignatures: string[]
   stepFingerprint: string

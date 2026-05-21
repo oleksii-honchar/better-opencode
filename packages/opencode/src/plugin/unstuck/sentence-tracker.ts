@@ -25,6 +25,7 @@ export class SentenceTracker {
         if (sentence.trim().length < config.minSentenceLength) continue
 
         const fp = this.normalizeAndFingerprint(sentence)
+        if (fp === undefined) continue  // Skip structural patterns (no letter content)
 
         this.history.push({ text: sentence, fingerprint: fp })
 
@@ -96,13 +97,20 @@ export class SentenceTracker {
       .filter((s) => s.trim().length > 10)
   }
 
-  private normalizeAndFingerprint(text: string): string {
-    return text
+  private normalizeAndFingerprint(text: string): string | undefined {
+    const normalized = text
       .toLowerCase()
       .replace(/[\s]+/g, " ")
       .replace(/[.,!?;:()\[\]{}"']/g, "")
       .trim()
       .slice(0, 100)
+
+    // Skip structural patterns: dashes, asterisks, bullets, etc. (no letter content)
+    if (!/[a-z]/.test(normalized)) {
+      return undefined
+    }
+
+    return normalized
   }
 
   private splitCodeBlocks(text: string): Array<{ type: "code" | "text"; text: string }> {

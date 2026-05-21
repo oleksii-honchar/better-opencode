@@ -464,7 +464,7 @@ interface UnstuckConfig {
   enabled: boolean
   loopThreshold: number  // default: 3
   detectToolOnlyLoops: boolean  // default: true
-  toolLoopThreshold: number  // default: 8
+  toolLoopThreshold: number  // default: 6
   historySize: number  // default: 10
   minThinkingLength: number  // default: 50
   includeReasoning: boolean  // default: true
@@ -497,7 +497,7 @@ interface UnstuckConfig {
 | `enabled` | boolean | `true` | Master switch. When `false`, the plugin does not wrap the model stream at all. Set to `false` to disable loop detection without removing the config. |
 | `loopThreshold` | number | `3` | Number of consecutive steps with identical step fingerprints that trigger a **step_loop** detection. A step fingerprint combines the normalized thinking text hash and the sequence of tool call signatures. |
 | `detectToolOnlyLoops` | boolean | `true` | When `true`, also detects **tool_loop** events where the same tool call sequence repeats across steps, even if the thinking text differs. Set to `false` to disable tool-only detection (reduces false positives). |
-| `toolLoopThreshold` | number | `8` | Number of consecutive steps with identical tool call signatures that trigger a **tool_loop** detection. This is the **detection threshold** — how many matching steps the detector must see before it fires a single `LoopDetectedInfo`. Higher than `loopThreshold` because tool-only detection is more prone to false positives (the model may legitimately call the same tool with different reasoning). **Distinct from `evidenceThresholds.toolLoop`**: `toolLoopThreshold` controls *detection sensitivity* (how many steps to flag as a loop); `evidenceThresholds.toolLoop` controls *intervention confidence* (how many detected loops before nudging). |
+| `toolLoopThreshold` | number | `6` | Number of consecutive steps with identical tool call signatures that trigger a **tool_loop** detection. This is the **detection threshold** — how many matching steps the detector must see before it fires a single `LoopDetectedInfo`. Higher than `loopThreshold` because tool-only detection is more prone to false positives (the model may legitimately call the same tool with different reasoning). **Distinct from `evidenceThresholds.toolLoop`**: `toolLoopThreshold` controls *detection sensitivity* (how many steps to flag as a loop); `evidenceThresholds.toolLoop` controls *intervention confidence* (how many detected loops before nudging). |
 | `historySize` | number | `10` | Size of the ring buffer that stores recent step records. The detector only looks at the last N steps for loop patterns. Larger values allow detection of longer loops but use slightly more memory. |
 | `minThinkingLength` | number | `50` | Minimum number of characters in the thinking/reasoning text before the step is considered for fingerprinting. Steps with very short thinking (e.g., "OK", "Sure") are skipped to avoid false positives from trivial responses. |
 | `includeReasoning` | boolean | `true` | When `true`, include reasoning-delta (reasoning text) chunks in the step fingerprint. Set to `false` to only use text-delta chunks — useful if you only want to detect loops in the visible output, not the internal reasoning. |
@@ -528,7 +528,7 @@ interface UnstuckConfig {
     "enabled": true,
     "loopThreshold": 3,
     "detectToolOnlyLoops": true,
-    "toolLoopThreshold": 8,
+    "toolLoopThreshold": 6,
     "historySize": 10,
     "minThinkingLength": 50,
     "enableSentenceLoopDetection": true,
@@ -553,7 +553,7 @@ These two settings work together in a **two-stage gating** pattern:
 
 ```
 Stage 1 — Detection (toolLoopThreshold):
-  8 consecutive steps with same tool signatures → 1 detection event
+  6 consecutive steps with same tool signatures → 1 detection event
 
 Stage 2 — Intervention (evidenceThresholds.toolLoop):
   2 detection events accumulated → nudge fires
@@ -562,7 +562,7 @@ Stage 2 — Intervention (evidenceThresholds.toolLoop):
 **`toolLoopThreshold`** (detection sensitivity):
 - Controls how many consecutive matching steps the detector must see before it fires a single `LoopDetectedInfo` of type `tool_loop`.
 - Higher value = fewer detections (less sensitive). Lower value = more detections (more sensitive).
-- Default: `8` (raised from `4` to reduce false positives from legitimate multi-step workflows like editing multiple files or running different bash commands).
+- Default: `6` (a reasonable middle ground between `4` and `8`, reduces false positives while maintaining sensitivity).
 
 **`evidenceThresholds.toolLoop`** (intervention confidence):
 - Controls how many `tool_loop` detection events must accumulate before a nudge fires.
@@ -574,11 +574,11 @@ Stage 2 — Intervention (evidenceThresholds.toolLoop):
 **Example scenario:**
 
 ```
-toolLoopThreshold: 8, evidenceThresholds.toolLoop: 2
+toolLoopThreshold: 6, evidenceThresholds.toolLoop: 2
 
-Steps 1-7: model edits 7 different files (different signatures, no match)
-Steps 8-15: model enters a real loop (same edit, 8 steps → detection #1, evidence=1)
-Steps 16-23: model continues looping (8 more steps → detection #2, evidence=2 → threshold met → nudge fires)
+Steps 1-5: model edits 5 different files (different signatures, no match)
+Steps 6-11: model enters a real loop (same edit, 6 steps → detection #1, evidence=1)
+Steps 12-17: model continues looping (6 more steps → detection #2, evidence=2 → threshold met → nudge fires)
 ```
 
 **To restore old immediate-nudge behavior:**

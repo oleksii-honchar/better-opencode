@@ -38,7 +38,11 @@ export function computeToolSignature(
 ): string {
   const name = toolName.toLowerCase()
 
-  if (!input || Object.keys(input).length === 0) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return `${name}:`
+  }
+
+  if (Object.keys(input).length === 0) {
     return `${name}:`
   }
 
@@ -59,7 +63,7 @@ export function computeToolSignature(
 
 export interface LoopDetector {
   consumeChunk(chunk: StreamChunk, config: UnstuckConfig): LoopDetectedInfo | undefined
-  finalizeStep(config: UnstuckConfig): LoopDetectedInfo | undefined
+  finalizeStep(config: UnstuckConfig, finishReason?: string): LoopDetectedInfo | undefined
   // reset() — only clears streaming state, preserves history
   reset(): void
   // clear() — clears everything (used after clean completion or after nudge)
@@ -68,6 +72,8 @@ export interface LoopDetector {
 }
 
 export interface DetectorState {
+  currentReasoningLength: number
+  currentTextLength: number
   currentThinkingLength: number
   currentToolsCount: number
   historyLength: number
@@ -80,11 +86,11 @@ export type StreamChunk =
   | { type: "tool-input-start"; id: string; toolName: string; providerExecuted?: boolean }
   | { type: "tool-input-delta"; id: string; text: string }
   | { type: "tool-input-end"; id: string; toolName: string; input: Record<string, unknown>; providerExecuted?: boolean }
-  | { type: "finish-step"; isCompaction?: boolean }
   | { type: "finish"; finishReason: string }
 
 export class LoopDetectorImpl implements LoopDetector {
-  private currentThinking = ""
+  private currentReasoning = ""
+  private currentText = ""
   private currentTools: string[] = []
   private history: StepRecord[] = []
   private inReasoning = false
@@ -96,7 +102,7 @@ export class LoopDetectorImpl implements LoopDetector {
       case "reasoning-delta": {
         this.inReasoning = true
         if (config.includeReasoning) {
-          this.currentThinking += chunk.text
+          this.currentReasoning += chunk.text
         }
         if (config.enableSentenceLoopDetection) {
           const sentenceLoopInfo = this.sentenceTracker.consumeText(chunk.text, config)
@@ -105,14 +111,14 @@ export class LoopDetectorImpl implements LoopDetector {
             return sentenceLoopInfo
           }
         }
-        log.debug("consumeChunk", { type: "reasoning-delta", accumulatedLen: this.currentThinking.length })
+        log.debug("consumeChunk", { type: "reasoning-delta", reasoningLen: this.currentReasoning.length })
         break
       }
 
       case "text-delta": {
         this.inReasoning = false
         if (config.includeText) {
-          this.currentThinking += chunk.text
+          this.currentText += chunk.text
         }
         if (config.enableSentenceLoopDetection) {
           const sentenceLoopInfo = this.sentenceTracker.consumeText(chunk.text, config)
@@ -121,7 +127,7 @@ export class LoopDetectorImpl implements LoopDetector {
             return sentenceLoopInfo
           }
         }
-        log.debug("consumeChunk", { type: "text-delta", accumulatedLen: this.currentThinking.length })
+        log.debug("consumeChunk", { type: "text-delta", textLen: this.currentText.length })
         break
       }
 
@@ -150,12 +156,23 @@ export class LoopDetectorImpl implements LoopDetector {
           const raw = this.currentToolInputAccum[chunk.id]
           if (raw) {
             try {
-              resolvedInput = JSON.parse(raw) as Record<string, unknown>
-              log.debug("consumeChunk — parsed input from delta", { type: "tool-input-end", toolName: chunk.toolName, keys: Object.keys(resolvedInput) })
+              const parsed = JSON.parse(raw)
+              // Validate: must be a plain object (not null, not array, not primitive)
+              if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                resolvedInput = parsed as Record<string, unknown>
+                log.debug("consumeChunk — parsed input from delta", { type: "tool-input-end", toolName: chunk.toolName, keys: Object.keys(resolvedInput) })
+              } else {
+                log.warn("consumeChunk — parsed delta is not a plain object", { type: "tool-input-end", toolName: chunk.toolName, parsedType: typeof parsed })
+              }
             } catch {
               log.warn("consumeChunk — failed to parse delta as JSON", { type: "tool-input-end", toolName: chunk.toolName, rawLength: raw.length })
             }
           }
+        }
+
+        // If input resolution failed completely, mark it to prevent false positives
+        if (!resolvedInput || Object.keys(resolvedInput).length === 0) {
+          resolvedInput = { _missing: true }
         }
 
         const sig = computeToolSignature(chunk.toolName, resolvedInput)
@@ -164,21 +181,13 @@ export class LoopDetectorImpl implements LoopDetector {
         break
       }
 
-      case "finish-step": {
-        log.debug("consumeChunk — finalizing step", { type: "finish-step", isCompaction: chunk.isCompaction })
-        const result = this.finalizeStep(config)
-        if (result) {
-          log.info("loop detected at step boundary", { type: result.type, threshold: result.threshold, fingerprint: result.fingerprint })
-        }
-        return result
-      }
-
       case "finish": {
-        // Stream ended — finalize any partial step
-        log.debug("consumeChunk — stream finished, finalizing partial step", { type: "finish", finishReason: chunk.finishReason })
-        const result = this.finalizeStep(config)
+        // finish with finishReason "tool-calls" signals step boundary
+        // finish with finishReason "stop" (or other) signals stream end
+        log.debug("consumeChunk — finish chunk", { type: "finish", finishReason: chunk.finishReason })
+        const result = this.finalizeStep(config, chunk.finishReason)
         if (result) {
-          log.info("loop detected at stream end", { type: result.type, threshold: result.threshold, fingerprint: result.fingerprint })
+          log.info("loop detected at finish", { type: result.type, threshold: result.threshold, fingerprint: result.fingerprint, finishReason: chunk.finishReason })
         }
         return result
       }
@@ -186,19 +195,27 @@ export class LoopDetectorImpl implements LoopDetector {
     return undefined
   }
 
-  finalizeStep(config: UnstuckConfig): LoopDetectedInfo | undefined {
-    // Skip compaction steps — they have a different purpose
-    // This is handled by the caller passing isCompaction, but we check here too
-    // by checking if thinking is empty and no tools
+  finalizeStep(config: UnstuckConfig, finishReason?: string): LoopDetectedInfo | undefined {
+    log.debug("finalizeStep", { finishReason })
 
-    const thinkingFp =
-      this.currentThinking.length >= config.minThinkingLength
-        ? normalizeAndFingerprint(this.currentThinking)
+    const reasoningFp =
+      this.currentReasoning.length >= config.minThinkingLength
+        ? normalizeAndFingerprint(this.currentReasoning)
         : ""
 
-    const stepFp = this.computeStepFingerprint(thinkingFp, this.currentTools)
+    const textFp =
+      this.currentText.length >= config.minThinkingLength
+        ? normalizeAndFingerprint(this.currentText)
+        : ""
+
+    // Combined fingerprint for backward compatibility
+    const thinkingFp = `${reasoningFp}|${textFp}`
+
+    const stepFp = this.computeStepFingerprint(reasoningFp, textFp, this.currentTools)
 
     const record: StepRecord = {
+      reasoningFingerprint: reasoningFp,
+      textFingerprint: textFp,
       thinkingFingerprint: thinkingFp,
       toolSignatures: [...this.currentTools],
       stepFingerprint: stepFp,
@@ -213,10 +230,13 @@ export class LoopDetectorImpl implements LoopDetector {
 
     log.debug("finalizeStep", {
       fingerprint: stepFp,
+      reasoningFingerprint: reasoningFp,
+      textFingerprint: textFp,
       thinkingFingerprint: thinkingFp,
       toolSignatures: this.currentTools,
       tools: this.currentTools.length,
-      thinkingLen: this.currentThinking.length,
+      reasoningLen: this.currentReasoning.length,
+      textLen: this.currentText.length,
       historyLen: this.history.length,
     })
 
@@ -232,7 +252,8 @@ export class LoopDetectorImpl implements LoopDetector {
     }
 
     // Reset for next step
-    this.currentThinking = ""
+    this.currentReasoning = ""
+    this.currentText = ""
     this.currentTools = []
     this.currentToolInputAccum = {}
     this.inReasoning = false
@@ -293,13 +314,14 @@ export class LoopDetectorImpl implements LoopDetector {
     return undefined
   }
 
-  private computeStepFingerprint(thinkingFp: string, toolSigs: string[]): string {
-    return `${thinkingFp}|${toolSigs.join(";")}`
+  private computeStepFingerprint(reasoningFp: string, textFp: string, toolSigs: string[]): string {
+    return `${reasoningFp}|${textFp}|${toolSigs.join(";")}`
   }
 
   reset(): void {
     log.debug("reset — clearing streaming state only")
-    this.currentThinking = ""
+    this.currentReasoning = ""
+    this.currentText = ""
     this.currentTools = []
     this.currentToolInputAccum = {}
     // history is preserved for evidence accumulation within the same stream episode
@@ -309,7 +331,8 @@ export class LoopDetectorImpl implements LoopDetector {
 
   clear(): void {
     log.debug("clear — clearing all detector state")
-    this.currentThinking = ""
+    this.currentReasoning = ""
+    this.currentText = ""
     this.currentTools = []
     this.currentToolInputAccum = {}
     this.history = []
@@ -319,7 +342,9 @@ export class LoopDetectorImpl implements LoopDetector {
 
   getState(): DetectorState {
     return {
-      currentThinkingLength: this.currentThinking.length,
+      currentReasoningLength: this.currentReasoning.length,
+      currentTextLength: this.currentText.length,
+      currentThinkingLength: this.currentReasoning.length + this.currentText.length,
       currentToolsCount: this.currentTools.length,
       historyLength: this.history.length,
       inReasoning: this.inReasoning,
