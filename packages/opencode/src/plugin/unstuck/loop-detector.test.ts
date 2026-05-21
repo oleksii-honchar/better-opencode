@@ -468,7 +468,7 @@ describe("EvidenceAccumulator", () => {
       type: "step_loop",
       threshold: 3,
       fingerprint: "fp-456",
-      steps: [{ thinkingFingerprint: "fp1", toolSignatures: ["readfile:path=/foo"], stepFingerprint: "fp1|readfile:path=/foo" }],
+      steps: [{ reasoningFingerprint: "rfp1", textFingerprint: "tfp1", thinkingFingerprint: "fp1", toolSignatures: ["readfile:path=/foo"], stepFingerprint: "fp1|readfile:path=/foo" }],
     }
     acc.add(info, 42)
 
