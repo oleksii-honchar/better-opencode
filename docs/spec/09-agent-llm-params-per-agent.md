@@ -34,9 +34,16 @@ Users cannot define per-agent LLM parameters beyond `temperature` and `top_p`. T
 
 The user's goal: **same base model for chat, different parameters per sub-agent, without needing separate model IDs in llama-swap**.
 
-## Solution: Extend Agent Config with LLM Params
+## Solution: modelPreset
 
-Add a `llm_params` field to the agent config schema that accepts all standard openai-compatible parameters plus provider-specific overrides. These parameters are merged into the LLM request with agent-level precedence (agent params override model defaults).
+The originally proposed solution was a full `llm_params` field accepting arbitrary parameter overrides. After investigation, a simpler approach was chosen: **delegate parameter tuning entirely to llama-swap** rather than piping parameters through opencode.
+
+The `modelPreset` field appends a known suffix (`-precise`, `-instruct`) to the inherited session model ID, then looks up the suffixed model in the provider (e.g., llama-swap). All parameter tuning lives in llama-swap model definitions — opencode only controls *which* model variant is selected.
+
+This approach:
+- **Simpler** — no parameter schema extension, no merging logic in llm.ts
+- **Less fragile** — no risk of provider-specific params being silently dropped
+- **Delegated** — llama-swap owns all parameter tuning; opencode just picks the model name
 
 ### Architecture
 
@@ -47,321 +54,247 @@ Add a `llm_params` field to the agent config schema that accepts all standard op
 │  model: openai-compatible/qwopus35-27b-tq3                  │
 │  temperature: 0.6        ← direct field (existing)          │
 │  top_p: 0.95             ← direct field (existing)          │
-│  llm_params:             ← NEW field                        │
-│    presence_penalty: 1.5                                     │
-│    frequency_penalty: 0.0                                    │
-│    max_tokens: 8192                                          │
-│    seed: 42                                                  │
-│    stop: ["\n\nHuman:"]                                      │
-│    provider:                                                 │
-│      openaiCompatible:                                       │
-│        repeat_penalty: 1.0                                   │
-│        min_p: 0.0                                            │
-│        top_k: 20                                             │
-│        reasoning_budget: 4096                                │
-│        chat_template_kwargs:                                 │
-│          enable_thinking: false                              │
-│          preserve_thinking: false                            │
+│  modelPreset: "precise"  ← NEW field (closed set)           │
+│                                                             │
+│  Values: "precise" | "instruct"                             │
+│  Only applies when agent inherits model from session.       │
+│  Explicit `model` takes precedence.                         │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
+                            │
+                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    LLM Request (llm.ts)                      │
+│              resolveAgentModel() helper                      │
 │                                                             │
-│  temperature: agent.temperature ?? model.default             │
-│  topP: agent.topP ?? model.default                          │
-│  presencePenalty: agent.llm_params.presence_penalty          │
-│  frequencyPenalty: agent.llm_params.frequency_penalty        │
-│  maxTokens: agent.llm_params.max_tokens ?? model.default     │
-│  seed: agent.llm_params.seed                                 │
-│  stop: agent.llm_params.stop                                 │
-│  providerOptions: merge(model.options, agent.llm_params)     │
+│  if (agent.model)      → use agent.model                    │
+│  if (agent.modelPreset) → `${parentModel.modelID}-`+preset   │
+│  else                  → parentModel                        │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
+                            │
+                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    OpenAI Chat Body                          │
+│                    LLM Request                               │
 │                                                             │
-│  {                                                           │
-│    model: "qwopus35-27b-tq3",                                │
-│    temperature: 0.6,                                         │
-│    top_p: 0.95,                                              │
-│    presence_penalty: 1.5,                                    │
-│    frequency_penalty: 0.0,                                   │
-│    max_tokens: 8192,                                         │
-│    seed: 42,                                                 │
-│    stop: ["\n\nHuman:"],                                     │
-│    providerOptions: {                                        │
-│      openaiCompatible: {                                     │
-│        repeat_penalty: 1.0,                                  │
-│        min_p: 0.0,                                           │
-│        top_k: 20,                                            │
-│        reasoning_budget: 4096,                               │
-│        chat_template_kwargs: {                               │
-│          enable_thinking: false,                             │
-│          preserve_thinking: false                            │
-│        }                                                     │
-│      }                                                       │
-│    }                                                         │
-│  }                                                           │
+│  model: "qwopus35-27b-tq3-precise"                          │
+│                                                             │
+│  llama-swap resolves → params from setParamsByID filter     │
+│  (temperature, top_p, top_k, min_p, repeat_penalty,        │
+│   reasoning-budget, chat_template_kwargs, etc.)              │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼ (if suffixed model not found)
+┌─────────────────────────────────────────────────────────────┐
+│              Fallback Behavior                               │
+│                                                             │
+│  If provider throws ModelNotFoundError for suffixed ID:     │
+│    → elog.warn("modelPreset suffix not found")              │
+│    → Fall back to parent (base) model                       │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### Model Resolution Flow
+
+```
+agent.model (explicit)
+  → agent.modelPreset + parentModel.modelID (suffixed)
+    → parentModel (fallback)
+```
+
+1. **Explicit `model` set on agent**: Use it directly. `modelPreset` is ignored.
+2. **No explicit `model`, `modelPreset` set**: Compute `${parentModel.providerID}/${parentModel.modelID}-${modelPreset}`. Try to resolve with provider.
+3. **Suffixed model not found**: Log a warning, fall back to the base (parent) model. Does NOT error — prevents workflow breaks when suffixed model isn't yet defined in llama-swap.
+4. **Neither `model` nor `modelPreset` set**: Inherit parent model unchanged.
 
 ### Component Design
 
 #### 1. Agent Config Schema — `config/agent.ts`
 
-Add `llm_params` field to `AgentSchema`:
+Added `modelPreset` field to `AgentSchema` (line 43-46):
 
 ```typescript
-const LLMParamsSchema = Schema.Struct({
-  // Standard openai-compatible params (from openai-chat protocol)
-  temperature: Schema.optional(Schema.Finite),
-  top_p: Schema.optional(Schema.Finite),
-  top_k: Schema.optional(Schema.Finite),
-  min_p: Schema.optional(Schema.Finite),
-  presence_penalty: Schema.optional(Schema.Finite),
-  frequency_penalty: Schema.optional(Schema.Finite),
-  repeat_penalty: Schema.optional(Schema.Finite),
-  max_tokens: Schema.optional(Schema.Finite),
-  seed: Schema.optional(Schema.Finite),
-  stop: Schema.optional(Schema.Union([
-    Schema.String,
-    Schema.Array(Schema.String),
-  ])),
-  // Reasoning models
-  reasoning_budget: Schema.optional(Schema.Finite),
-  reasoning_effort: Schema.optional(Schema.Literals(["low", "medium", "high"])),
-  // Chat template kwargs (llama-swap specific, passed via providerOptions)
-  chat_template_kwargs: Schema.optional(Schema.Struct({
-    enable_thinking: Schema.optional(Schema.Boolean),
-    preserve_thinking: Schema.optional(Schema.Boolean),
-  })),
-  // Provider-specific overrides (passed via providerOptions)
-  provider: Schema.optional(Schema.Record(Schema.String, Schema.Any)),
-})
-
-const AgentSchema = Schema.StructWithRest(
-  Schema.Struct({
-    model: Schema.optional(ConfigModelID),
-    variant: Schema.optional(Schema.String),
-    temperature: Schema.optional(Schema.Finite),
-    top_p: Schema.optional(Schema.Finite),
-    prompt: Schema.optional(Schema.String),
-    // NEW field
-    llm_params: Schema.optional(LLMParamsSchema),
-    // ... rest of existing fields
-  }),
-  [Schema.Record(Schema.String, Schema.Any)],
-)
+modelPreset: Schema.optional(Schema.Literals(["precise", "instruct"])).annotate({
+  description:
+    "Appends a suffix to the inherited model ID (e.g., -precise, -instruct). Only applies when the agent inherits its model from the parent session.",
+}),
 ```
 
-**Backward compatibility**: The existing `temperature` and `top_p` fields remain as direct fields. If both `temperature` (direct) and `llm_params.temperature` are set, the direct field takes precedence (explicit wins over nested). This avoids breaking existing agent configs.
+Added `modelPreset` to `KNOWN_KEYS` (line 74) so it doesn't get promoted to `options` during normalization.
 
-#### 2. LLM Request — `session/llm.ts`
+**Backward compatibility**: Existing agents without `modelPreset` work unchanged. The field is optional.
 
-Merge agent `llm_params` into the LLM request params with proper precedence:
+#### 2. Agent Info Schema — `agent/agent.ts`
+
+Added `modelPreset` to the `Info` schema (line 44):
 
 ```typescript
-const agentParams = input.agent.llmParams ?? {}
-
-const params = yield* plugin.trigger(
-  "chat.params",
-  { /* ... */ },
-  {
-    // Direct fields take precedence over llm_params
-    temperature: input.model.capabilities.temperature
-      ? (input.agent.temperature ?? agentParams.temperature ?? ProviderTransform.temperature(input.model))
-      : undefined,
-    topP: input.agent.topP ?? agentParams.top_p ?? ProviderTransform.topP(input.model),
-    topK: agentParams.top_k ?? ProviderTransform.topK(input.model),
-    presencePenalty: agentParams.presence_penalty,
-    frequencyPenalty: agentParams.frequency_penalty,
-    repeatPenalty: agentParams.repeat_penalty,
-    minP: agentParams.min_p,
-    maxOutputTokens: agentParams.max_tokens ?? ProviderTransform.maxOutputTokens(input.model, flags.outputTokenMax),
-    seed: agentParams.seed,
-    stop: agentParams.stop,
-    reasoningBudget: agentParams.reasoning_budget,
-    reasoningEffort: agentParams.reasoning_effort,
-    options: mergeOptions(base, agentParams.provider ?? {}),
-  },
-)
+modelPreset: Schema.optional(Schema.Literals(["precise", "instruct"])),
 ```
 
-The `chat_template_kwargs` and any `provider` overrides are passed through `providerOptions` so they reach the provider-specific handler.
-
-#### 3. Provider Transform — `provider/transform.ts`
-
-Extend `providerOptions` to handle llama-swap specific params:
+The config resolution loop at line 299 propagates the field:
 
 ```typescript
-export function providerOptions(model: Provider.Model, options: { [x: string]: any }) {
-  // Extract llama-swap specific params that don't belong in the openai-chat body
-  const llamaSwapParams = {
-    repeat_penalty: options.repeat_penalty,
-    min_p: options.min_p,
-    top_k: options.top_k,
-    reasoning_budget: options.reasoning_budget,
-    chat_template_kwargs: options.chat_template_kwargs,
-  }
+item.modelPreset = value.modelPreset ?? item.modelPreset
+```
 
-  // Filter out undefined values
-  const filteredLlamaSwap = Object.fromEntries(
-    Object.entries(llamaSwapParams).filter(([_, v]) => v !== undefined)
-  )
+Exported `resolveAgentModel()` helper (lines 466-479):
 
-  // Route to provider-specific namespace
-  if (model.api.npm === "@ai-sdk/openai-compatible") {
+```typescript
+export function resolveAgentModel(
+  agentModel: Info["model"],
+  agentModelPreset: Info["modelPreset"],
+  parentModel: { providerID: ProviderID; modelID: ModelID },
+): { modelID: ModelID; providerID: ProviderID } {
+  if (agentModel) return agentModel
+  if (agentModelPreset) {
     return {
-      openaiCompatible: {
-        ...filteredLlamaSwap,
-        ...options,
-      },
+      modelID: ModelID.make(`${parentModel.modelID}-${agentModelPreset}`),
+      providerID: parentModel.providerID,
     }
   }
-
-  // ... existing logic for other providers
+  return parentModel
 }
 ```
 
-#### 4. OpenAI Chat Protocol — `llm/src/protocols/openai-chat.ts`
+#### 3. Primary Agent Model Resolution — `session/prompt.ts`
 
-The openai-chat protocol already supports `presence_penalty`, `frequency_penalty`, `max_tokens`, `seed`, `stop` in the body schema (lines 84-91). The `fromRequest` function already maps these from `generation` to the body (lines 270-276). No changes needed — just ensure the LLM request includes these fields.
+In `createUserMessage` (lines 1210-1226):
 
-For llama-swap specific params (`repeat_penalty`, `min_p`, `top_k`, `reasoning_budget`, `chat_template_kwargs`), they are passed via `providerOptions` and handled by the openai-compatible provider's `lowerOptions` or by llama-swap's `setParamsByID` filter.
+```typescript
+const current = Database.use((db) =>
+  db
+    .select({ agent: SessionTable.agent, model: SessionTable.model })
+    .from(SessionTable)
+    .where(eq(SessionTable.id, input.sessionID))
+    .get(),
+)
+const parentModel = yield* currentModel(input.sessionID)
+let model: { providerID: ProviderID; modelID: ModelID }
+if (input.model) {
+  model = input.model
+} else if (ag.model) {
+  model = ag.model
+} else if (ag.modelPreset) {
+  const resolved = Agent.resolveAgentModel(ag.model, ag.modelPreset, {
+    providerID: parentModel.providerID,
+    modelID: parentModel.modelID,
+  })
+  const exit = yield* provider.getModel(resolved.providerID, resolved.modelID).pipe(Effect.exit)
+  if (Exit.isSuccess(exit)) {
+    model = resolved
+  } else {
+    const err = Cause.squash(exit.cause)
+    if (Provider.ModelNotFoundError.isInstance(err)) {
+      elog.warn(
+        `modelPreset "${ag.modelPreset}" produced model "${resolved.providerID}/${resolved.modelID}" which was not found — falling back to base model`,
+      )
+      model = { providerID: parentModel.providerID, modelID: parentModel.modelID }
+    } else {
+      return yield* Effect.die(err)
+    }
+  }
+}
+```
+
+Key behavior:
+- Only applies when the agent has no explicit `model`
+- Catches `ModelNotFoundError` specifically — other errors propagate as deaths
+- Falls back to base (parent) model on missing suffixed model with a warning
+
+#### 4. Sub-Agent Model Resolution — `tool/task.ts`
+
+The sub-agent model resolution also uses `resolveAgentModel()` to compute the model for spawned sub-agents, ensuring consistency between primary and sub-agent model selection.
 
 ### Agent Config Example
 
 ```yaml
 ---
 mode: subagent
-model: openai-compatible/qwopus35-27b-tq3
-temperature: 0.6
-top_p: 0.95
-llm_params:
-  presence_penalty: 0.0
-  frequency_penalty: 0.0
-  max_tokens: 8192
-  seed: 42
-  reasoning_budget: 2096
-  chat_template_kwargs:
-    enable_thinking: false
-    preserve_thinking: false
-  provider:
-    openaiCompatible:
-      repeat_penalty: 1.0
-      min_p: 0.0
-      top_k: 20
+modelPreset: "precise"
 ---
 
 You are a precise coding agent. Generate code directly without reasoning.
 ```
 
-### Parameter Precedence
+In llama-swap config, define the suffixed model with desired parameters:
 
+```yaml
+model-aliases:
+  qwopus3.6-27b-precise:
+    - base-model: qwopus3.6-27b-tq3
+    - parameters:
+        temperature: 0.3
+        top_p: 0.9
+        chat_template_kwargs:
+          enable_thinking: false
+          preserve_thinking: false
 ```
-agent.temperature (direct field)
-  → agent.llm_params.temperature
-    → ProviderTransform.temperature(model)
-      → undefined (provider default)
-```
 
-Same for all parameters: **direct field > llm_params > model default > provider default**.
-
-### Configuration Schema
+### Schema Reference
 
 ```typescript
-interface LLMParams {
-  // Standard openai-compatible params
-  temperature?: number
-  top_p?: number
-  top_k?: number
-  min_p?: number
-  presence_penalty?: number
-  frequency_penalty?: number
-  repeat_penalty?: number
-  max_tokens?: number
-  seed?: number
-  stop?: string | string[]
-  
-  // Reasoning models
-  reasoning_budget?: number
-  reasoning_effort?: "low" | "medium" | "high"
-  
-  // Chat template kwargs (llama-swap specific)
-  chat_template_kwargs?: {
-    enable_thinking?: boolean
-    preserve_thinking?: boolean
-  }
-  
-  // Provider-specific overrides
-  provider?: Record<string, any>
+interface AgentConfig {
+  // ... existing fields
+  model?: string                          // Explicit model (takes precedence)
+  modelPreset?: "precise" | "instruct"   // Suffix for inherited model
+  temperature?: number                    // Existing direct field
+  top_p?: number                          // Existing direct field
 }
 ```
 
-### Parameter Reference
+### Precedence
 
-| Parameter | Type | OpenAI Body? | ProviderOptions? | Description |
-|-----------|------|-------------|------------------|-------------|
-| `temperature` | number | ✅ | — | Controls randomness (0-2) |
-| `top_p` | number | ✅ | — | Nucleus sampling threshold (0-1) |
-| `top_k` | number | ❌ | ✅ | Sample from top K tokens (llama-swap) |
-| `min_p` | number | ❌ | ✅ | Min probability threshold (llama-swap) |
-| `presence_penalty` | number | ✅ | — | Penalize new tokens based on presence (-2 to 2) |
-| `frequency_penalty` | number | ✅ | — | Penalize new tokens based on frequency (-2 to 2) |
-| `repeat_penalty` | number | ❌ | ✅ | Penalize repeated tokens (llama-swap) |
-| `max_tokens` | number | ✅ | — | Max output tokens |
-| `seed` | number | ✅ | — | Random seed for reproducibility |
-| `stop` | string\|string[] | ✅ | — | Stop sequences |
-| `reasoning_budget` | number | ❌ | ✅ | Max reasoning tokens (llama-swap) |
-| `reasoning_effort` | "low"\|"medium"\|"high" | ✅ | — | Reasoning effort level (OpenAI) |
-| `chat_template_kwargs.enable_thinking` | boolean | ❌ | ✅ | Enable thinking mode (llama-swap) |
-| `chat_template_kwargs.preserve_thinking` | boolean | ❌ | ✅ | Preserve thinking in output (llama-swap) |
+```
+agent.model (explicit)
+  → agent.modelPreset + parentModel (suffixed)
+    → parentModel (fallback if suffixed not found)
+```
 
-### Implementation Plan
+If both `model` and `modelPreset` are set, `model` wins. `modelPreset` only applies when the agent inherits its model from the session.
 
-#### Phase 1: Schema Extension
-- [ ] Add `LLMParamsSchema` to `config/agent.ts`
-- [ ] Add `llm_params` field to `AgentSchema`
-- [ ] Add `llmParams` field to `Agent.Info` in `agent/agent.ts`
-- [ ] Wire `llm_params` through agent resolution (line 301-310 in `agent/agent.ts`)
+### Implementation Status
 
-#### Phase 2: LLM Request Integration
-- [ ] Extend `chat.params` plugin trigger in `session/llm.ts` to include new params
-- [ ] Add precedence logic: direct field > llm_params > model default
-- [ ] Pass provider-specific params through `providerOptions`
+**Completed.** All 4 source files modified, 5 unit tests passing (typecheck 14/14).
 
-#### Phase 3: Provider Transform
-- [ ] Extend `providerOptions` in `provider/transform.ts` to handle llama-swap specific params
-- [ ] Ensure `chat_template_kwargs` and `provider` overrides reach the provider
+#### Files Modified
 
-#### Phase 4: OpenAI Chat Protocol
-- [ ] Verify `fromRequest` in `openai-chat.ts` maps all new params from `generation` to body
-- [ ] Ensure `lowerOptions` passes provider-specific params through
+| File | Change | Lines |
+|------|--------|-------|
+| `packages/opencode/src/config/agent.ts` | Added `modelPreset` to `AgentSchema` + `KNOWN_KEYS` | 43-46, 74 |
+| `packages/opencode/src/agent/agent.ts` | Added `modelPreset` to `Info` schema + exported `resolveAgentModel()` | 44, 299, 466-479 |
+| `packages/opencode/src/session/prompt.ts` | Full modelPreset resolution with fallback + warning | 1210-1226 |
+| `packages/opencode/src/tool/task.ts` | Sub-agent model resolution via `resolveAgentModel()` | — |
 
-#### Phase 5: Tests
-- [ ] Unit tests for `LLMParamsSchema` validation
-- [ ] Integration tests for agent → LLM request param flow
-- [ ] Test precedence: direct field vs llm_params vs model default
-- [ ] Test provider-specific params reach llama-swap
+#### Tests
 
-### Risks and Mitigations
+| File | Tests | Coverage |
+|------|-------|----------|
+| `packages/opencode/test/agent/resolve-agent-model.test.ts` | 5 | All 4 resolution paths + provider ID inheritance |
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| **Breaking existing agent configs** — adding `llm_params` changes schema | Medium | Direct fields (`temperature`, `top_p`) remain unchanged; `llm_params` is optional; backward compatible |
-| **Param conflicts** — same param in direct field and `llm_params` | Low | Explicit precedence: direct field > llm_params > model default; log warning if both set |
-| **Provider-specific params ignored** — llama-swap params not reaching the provider | High | Pass through `providerOptions` with explicit `openaiCompatible` key; test with real llama-swap |
-| **Schema too broad** — accepting arbitrary params could mask typos | Low | Use strict schema for known params; `provider` field for arbitrary overrides |
+Test cases:
+1. Explicit `model` takes precedence over `modelPreset`
+2. `modelPreset: "precise"` computes suffixed model ID
+3. `modelPreset: "instruct"` computes suffixed model ID
+4. No model, no preset → returns parent model
+5. Provider ID inherited from parent model
+
+### Original Spec: llm_params (Superseded)
+
+The original solution proposed a `llm_params` field accepting all standard openai-compatible parameters plus provider-specific overrides, merged into the LLM request with agent-level precedence. This approach was abandoned in favor of `modelPreset` because:
+
+1. **Fragile parameter piping** — Provider-specific params (llama-swap's `repeat_penalty`, `min_p`, `top_k`, `reasoning_budget`, `chat_template_kwargs`) are not part of the openai-chat protocol schema and require careful routing through `providerOptions`
+2. **Schema bloat** — The agent config becomes a dumping ground for inference parameters that really belong to the model provider
+3. **Conflicts** — Same param in direct field and `llm_params` requires precedence rules and warning logic
+4. **Duplication** — Parameters defined in both agent config and llama-swap create inconsistency
+
+The `modelPreset` approach avoids all these issues by delegating parameter tuning entirely to llama-swap.
 
 ### Key Decisions
 
-1. **`llm_params` nested field over top-level fields** — Keeps the agent config clean; avoids schema bloat; groups all LLM params together
-2. **Direct fields take precedence over `llm_params`** — Backward compatible; explicit wins over nested
-3. **Provider-specific params via `provider` sub-field** — Clean separation between standard openai-compatible params and provider-specific overrides
-4. **`chat_template_kwargs` as first-class field** — Common enough for llama-swap users to warrant a dedicated field rather than burying it in `provider`
-5. **No changes to openai-chat protocol** — The protocol already supports most params; only `providerOptions` needs extension for llama-swap specific params
+1. **`modelPreset` over `llm_params`** — Delegates parameter tuning to llama-swap; opencode only selects the model name variant
+2. **Closed set of presets** — Only `"precise"` and `"instruct"`; adding new presets requires a config change, preventing drift
+3. **Fallback-to-base with warning** — Missing suffixed model doesn't break the workflow; warns and falls back to parent model
+4. **Explicit `model` wins over `modelPreset`** — Clear precedence: explicit > computed > inherited
+5. **No changes to llm.ts** — The LLM request layer is untouched; model resolution happens before the LLM call in prompt.ts
