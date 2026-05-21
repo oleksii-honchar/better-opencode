@@ -171,10 +171,11 @@ export const TaskTool = Tool.define(
       const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(Effect.orDie)
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
 
-      const model = next.model ?? {
+      const parentModel = {
         modelID: msg.info.modelID,
         providerID: msg.info.providerID,
       }
+      const model = Agent.resolveAgentModel(next.model, next.modelPreset, parentModel)
       const metadata = {
         parentSessionId: ctx.sessionID,
         sessionId: nextSession.id,

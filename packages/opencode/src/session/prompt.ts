@@ -1201,7 +1201,33 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           .where(eq(SessionTable.id, input.sessionID))
           .get(),
       )
-      const model = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
+      const parentModel = yield* currentModel(input.sessionID)
+      let model: { providerID: ProviderID; modelID: ModelID }
+      if (input.model) {
+        model = input.model
+      } else if (ag.model) {
+        model = ag.model
+      } else if (ag.modelPreset) {
+        const resolved = Agent.resolveAgentModel(ag.model, ag.modelPreset, {
+          providerID: parentModel.providerID,
+          modelID: parentModel.modelID,
+        })
+        const exit = yield* provider.getModel(resolved.providerID, resolved.modelID).pipe(Effect.exit)
+        if (Exit.isSuccess(exit)) {
+          model = resolved
+        } else {
+          const err = Cause.squash(exit.cause)
+          if (Provider.ModelNotFoundError.isInstance(err)) {
+            elog.warn(
+              `modelPreset "${resolved.modelID}" not found for agent "${ag.name}", falling back to "${parentModel.modelID}"`,
+              { agent: ag.name, attempted: resolved, fallback: parentModel, session: input.sessionID },
+            )
+          }
+          model = { providerID: parentModel.providerID, modelID: parentModel.modelID }
+        }
+      } else {
+        model = parentModel
+      }
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
         !input.variant && ag.variant && same
