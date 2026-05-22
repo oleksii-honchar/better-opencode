@@ -4530,6 +4530,12 @@
                   "workspaceID": {
                     "type": "string",
                     "pattern": "^wrk"
+                  },
+                  "workspaceFolders": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "additionalProperties": false
@@ -11376,6 +11382,12 @@
             },
             "required": ["messageID"],
             "additionalProperties": false
+          },
+          "workspaceFolders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
@@ -12014,11 +12026,21 @@
             "type": "string",
             "enum": ["subagent", "primary", "all"]
           },
+          "allowedMcpCategories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "hidden": {
             "type": "boolean"
           },
           "options": {
             "type": "object"
+          },
+          "modelPreset": {
+            "type": "string",
+            "enum": ["precise", "instruct"]
           },
           "color": {
             "anyOf": [
@@ -12313,6 +12335,21 @@
           "timeout": {
             "type": "integer",
             "exclusiveMinimum": 0
+          },
+          "category": {
+            "type": "string"
+          },
+          "enabledTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disabledTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": ["type", "command"],
@@ -12372,6 +12409,21 @@
           "timeout": {
             "type": "integer",
             "exclusiveMinimum": 0
+          },
+          "category": {
+            "type": "string"
+          },
+          "enabledTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disabledTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": ["type", "url"],
@@ -12814,6 +12866,92 @@
                 "type": "boolean"
               },
               "mcp_timeout": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "unstuck": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "loopThreshold": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "detectToolOnlyLoops": {
+                "type": "boolean"
+              },
+              "toolLoopThreshold": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "historySize": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "minThinkingLength": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "includeReasoning": {
+                "type": "boolean"
+              },
+              "includeText": {
+                "type": "boolean"
+              },
+              "enableSentenceLoopDetection": {
+                "type": "boolean"
+              },
+              "sentenceLoopThreshold": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "minSentenceLength": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "strategy": {
+                "type": "string",
+                "enum": ["nudge-and-prune", "abort", "warn"]
+              },
+              "maxNudges": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "pruneCount": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "nudgeMessage": {
+                "type": "string"
+              },
+              "logLevel": {
+                "type": "string",
+                "enum": ["debug", "info", "warn"]
+              },
+              "evidenceThresholds": {
+                "type": "object",
+                "properties": {
+                  "stepLoop": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "toolLoop": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "sentenceLoop": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "additionalProperties": false
+              },
+              "evidenceWindow": {
                 "type": "integer",
                 "exclusiveMinimum": 0
               }
@@ -13432,6 +13570,12 @@
             "required": ["messageID"],
             "additionalProperties": false
           },
+          "workspaceFolders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "project": {
             "anyOf": [
               {
@@ -13799,6 +13943,10 @@
             "required": ["modelID", "providerID"],
             "additionalProperties": false
           },
+          "modelPreset": {
+            "type": "string",
+            "enum": ["precise", "instruct"]
+          },
           "variant": {
             "type": "string"
           },
@@ -13810,6 +13958,12 @@
           },
           "steps": {
             "type": "number"
+          },
+          "allowedMcpCategories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": ["name", "mode", "permission", "options"],

@@ -1,4 +1,4 @@
-# 09-agent-llm-params-per-agent
+# 09-agent-model-preset
 
 ## Context
 

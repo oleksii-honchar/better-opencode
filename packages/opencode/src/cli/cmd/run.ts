@@ -433,7 +433,8 @@ export const RunCommand = effectCmd({
         const result = await sdk.session.create({
           title: name,
           permission: rules,
-        })
+          ...(localInstance?.workspaceFolders !== undefined && { workspaceFolders: localInstance.workspaceFolders }),
+        } as { title?: string; permission?: Permission.Ruleset; workspaceFolders?: string[] })
         const id = result.data?.id
         if (!id) {
           return
@@ -476,7 +477,8 @@ export const RunCommand = effectCmd({
               }
             : undefined,
           permission: rules,
-        })
+          ...(localInstance?.workspaceFolders !== undefined && { workspaceFolders: localInstance.workspaceFolders }),
+        } as Record<string, unknown>)
         const id = result.data?.id
         if (!id) {
           throw new Error("Failed to create session")

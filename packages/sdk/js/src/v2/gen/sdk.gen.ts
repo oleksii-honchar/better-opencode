@@ -3013,6 +3013,7 @@ export class Session2 extends HeyApiClient {
       }
       permission?: PermissionRuleset
       workspaceID?: string
+      workspaceFolders?: Array<string>
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3029,6 +3030,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "model" },
             { in: "body", key: "permission" },
             { in: "body", key: "workspaceID" },
+            { in: "body", key: "workspaceFolders" },
           ],
         },
       ],

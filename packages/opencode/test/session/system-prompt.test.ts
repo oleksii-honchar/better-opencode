@@ -144,6 +144,57 @@ describe("session.system-prompt", () => {
     expect(lines[envStartIndex + 8]).toBe("</env>")
   })
 
+  test("environment includes workspace folders when provided", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+    })
+
+    const runEnv = Effect.gen(function* () {
+      const svc = yield* SystemPrompt.Service
+      return yield* svc.environment(makeModel(), "ses_test", undefined, ["/path/to/folder1", "/path/to/folder2"])
+    }).pipe(provideInstance(tmp.path), Effect.provide(SystemPrompt.defaultLayer))
+
+    const result = await Effect.runPromise(runEnv)
+    const envBlock = result[0]
+
+    expect(envBlock).toContain("VS Code workspace folders:")
+    expect(envBlock).toContain("/path/to/folder1")
+    expect(envBlock).toContain("/path/to/folder2")
+  })
+
+  test("environment includes single workspace folder with singular label", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+    })
+
+    const runEnv = Effect.gen(function* () {
+      const svc = yield* SystemPrompt.Service
+      return yield* svc.environment(makeModel(), "ses_test", undefined, ["/path/to/single/folder"])
+    }).pipe(provideInstance(tmp.path), Effect.provide(SystemPrompt.defaultLayer))
+
+    const result = await Effect.runPromise(runEnv)
+    const envBlock = result[0]
+
+    expect(envBlock).toContain("VS Code workspace folder:")
+    expect(envBlock).not.toContain("workspace folders:")
+  })
+
+  test("environment omits workspace folders line when empty or undefined", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+    })
+
+    const runEnv = Effect.gen(function* () {
+      const svc = yield* SystemPrompt.Service
+      return yield* svc.environment(makeModel(), undefined, undefined, [])
+    }).pipe(provideInstance(tmp.path), Effect.provide(SystemPrompt.defaultLayer))
+
+    const result = await Effect.runPromise(runEnv)
+    const envBlock = result[0]
+
+    expect(envBlock).not.toContain("VS Code workspace")
+  })
+
   test("environment includes model information in first line", async () => {
     await using tmp = await tmpdir({
       git: true,

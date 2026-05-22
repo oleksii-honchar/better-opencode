@@ -776,6 +776,7 @@ export type Session = {
     snapshot?: string
     diff?: string
   }
+  workspaceFolders?: Array<string>
 }
 
 export type Prompt = {
@@ -977,10 +978,12 @@ export type AgentConfig = {
   disable?: boolean
   description?: string
   mode?: "subagent" | "primary" | "all"
+  allowedMcpCategories?: Array<string>
   hidden?: boolean
   options?: {
     [key: string]: unknown
   }
+  modelPreset?: "precise" | "instruct"
   /**
    * Hex color code (e.g., #FF5733) or theme color (e.g., primary)
    */
@@ -999,9 +1002,12 @@ export type AgentConfig = {
     | "subagent"
     | "primary"
     | "all"
+    | Array<string>
     | {
         [key: string]: unknown
       }
+    | "precise"
+    | "instruct"
     | string
     | "primary"
     | "secondary"
@@ -1110,6 +1116,9 @@ export type McpLocalConfig = {
   }
   enabled?: boolean
   timeout?: number
+  category?: string
+  enabledTools?: Array<string>
+  disabledTools?: Array<string>
 }
 
 export type McpOAuthConfig = {
@@ -1137,6 +1146,9 @@ export type McpRemoteConfig = {
    */
   oauth?: McpOAuthConfig | false
   timeout?: number
+  category?: string
+  enabledTools?: Array<string>
+  disabledTools?: Array<string>
 }
 
 /**
@@ -1291,6 +1303,30 @@ export type Config = {
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
     mcp_timeout?: number
+  }
+  unstuck?: {
+    enabled?: boolean
+    loopThreshold?: number
+    detectToolOnlyLoops?: boolean
+    toolLoopThreshold?: number
+    historySize?: number
+    minThinkingLength?: number
+    includeReasoning?: boolean
+    includeText?: boolean
+    enableSentenceLoopDetection?: boolean
+    sentenceLoopThreshold?: number
+    minSentenceLength?: number
+    strategy?: "nudge-and-prune" | "abort" | "warn"
+    maxNudges?: number
+    pruneCount?: number
+    nudgeMessage?: string
+    logLevel?: "debug" | "info" | "warn"
+    evidenceThresholds?: {
+      stepLoop?: number
+      toolLoop?: number
+      sentenceLoop?: number
+    }
+    evidenceWindow?: number
   }
 }
 
@@ -1501,6 +1537,7 @@ export type GlobalSession = {
     snapshot?: string
     diff?: string
   }
+  workspaceFolders?: Array<string>
   project: ProjectSummary | null
 }
 
@@ -1619,12 +1656,14 @@ export type Agent = {
     modelID: string
     providerID: string
   }
+  modelPreset?: "precise" | "instruct"
   variant?: string
   prompt?: string
   options: {
     [key: string]: unknown
   }
   steps?: number
+  allowedMcpCategories?: Array<string>
 }
 
 export type LspStatus = {
@@ -5532,6 +5571,7 @@ export type SessionCreateData = {
     }
     permission?: PermissionRuleset
     workspaceID?: string
+    workspaceFolders?: Array<string>
   }
   path?: never
   query?: {

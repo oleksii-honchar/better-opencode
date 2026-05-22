@@ -2002,7 +2002,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             const [skills, env, instructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
-              sys.environment(model, sessionID, session.parentID),
+               sys.environment(model, sessionID, session.parentID, session?.workspaceFolders ?? undefined),
               instruction.system().pipe(Effect.orDie),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])

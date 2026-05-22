@@ -33,7 +33,7 @@ export function provider(model: Provider.Model) {
 }
 
 export interface Interface {
-  readonly environment: (model: Provider.Model, sessionID?: string, parentSessionID?: string) => Effect.Effect<string[]>
+  readonly environment: (model: Provider.Model, sessionID?: string, parentSessionID?: string, workspaceFolders?: string[]) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
 }
 
@@ -45,7 +45,7 @@ export const layer = Layer.effect(
     const skill = yield* Skill.Service
 
     return Service.of({
-      environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model, sessionID?: string, parentSessionID?: string) {
+      environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model, sessionID?: string, parentSessionID?: string, workspaceFolders?: string[]) {
         const ctx = yield* InstanceState.context
         return [
           [
@@ -54,6 +54,7 @@ export const layer = Layer.effect(
             `<env>`,
             `  Working directory: ${ctx.directory}`,
             `  Workspace root folder: ${ctx.worktree}`,
+            ...(workspaceFolders && workspaceFolders.length > 0 ? [`${  workspaceFolders.length === 1 ? `  VS Code workspace folder:` : `  VS Code workspace folders:`} ${workspaceFolders.join(", ")}`] : []),
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,
