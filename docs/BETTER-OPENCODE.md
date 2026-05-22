@@ -20,6 +20,7 @@ The fork adds several features to address context loss, repetitive loops, sessio
 - **`session.stopping` Hook (PR #16598)** — Plugins intercept idle/stop state and inject follow-up messages
 - **Session ID in System Prompt** — `sessionID` and `parentSessionID` included in `<env>` block on every LLM call
 - **Unstuck Plugin** — Detects and breaks model loops (thinking→tool-call, sentence-level, tool-only) with nudge-and-prune recovery
+- **`supportedUrls` fallback** — Fixes `Object.entries(undefined)` crash when attaching images with models that don't define `supportedUrls` (defaults to `{}` via `overrideSupportedUrls` in `wrapLanguageModel`)
 
 See **[FEATURES.md](./FEATURES.md)** for detailed descriptions and configuration.
 
