@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect"
 
 import { InstanceState } from "@/effect/instance-state"
+import * as Log from "@opencode-ai/core/util/log"
 
 import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_DEFAULT from "./prompt/default.txt"
@@ -38,6 +39,7 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") { }
+const log = Log.create({ service: "system-prompt" })
 
 export const layer = Layer.effect(
   Service,
@@ -46,6 +48,7 @@ export const layer = Layer.effect(
 
     return Service.of({
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model, sessionID?: string, parentSessionID?: string, workspaceFolders?: string[]) {
+        log.info(`workspaceFolders=${JSON.stringify(workspaceFolders)}`, { sessionID })
         const ctx = yield* InstanceState.context
         return [
           [
@@ -54,7 +57,7 @@ export const layer = Layer.effect(
             `<env>`,
             `  Working directory: ${ctx.directory}`,
             `  Workspace root folder: ${ctx.worktree}`,
-            ...(workspaceFolders && workspaceFolders.length > 0 ? [`${  workspaceFolders.length === 1 ? `  VS Code workspace folder:` : `  VS Code workspace folders:`} ${workspaceFolders.join(", ")}`] : []),
+            ...(workspaceFolders && workspaceFolders.length > 0 ? [`  ${  workspaceFolders.length === 1 ? `VS Code workspace folder:` : `VS Code workspace folders:`} ${workspaceFolders.join(", ")}`] : []),
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,

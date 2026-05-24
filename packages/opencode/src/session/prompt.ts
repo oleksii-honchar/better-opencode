@@ -2000,6 +2000,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
+                        log.info(`workspaceFolders=${JSON.stringify(session?.workspaceFolders)}`, { sessionID })
             const [skills, env, instructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
                sys.environment(model, sessionID, session.parentID, session?.workspaceFolders ?? undefined),

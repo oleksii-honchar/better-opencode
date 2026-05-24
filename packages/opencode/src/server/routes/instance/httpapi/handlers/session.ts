@@ -13,6 +13,7 @@ import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
+import * as Log from "@opencode-ai/core/util/log"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
@@ -148,7 +149,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       )
     })
 
+    const log = Log.create({ service: "session.http" })
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
+      log.info(`workspaceFolders=${JSON.stringify(ctx.payload?.workspaceFolders)}`, `create`)
       return yield* shareSvc.create(ctx.payload)
     })
 

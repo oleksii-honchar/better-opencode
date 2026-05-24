@@ -69,7 +69,7 @@ export function fromRow(row: SessionRow): Info {
       : undefined
   const share = row.share_url ? { url: row.share_url } : undefined
   const revert = row.revert ?? undefined
-  return {
+  const result = {
     id: row.id,
     slug: row.slug,
     projectID: row.project_id,
@@ -109,10 +109,12 @@ export function fromRow(row: SessionRow): Info {
       archived: row.time_archived ?? undefined,
     },
   }
+  log.info(`fromRow workspace_folders=${JSON.stringify(row.workspace_folders)}`, { id: row.id })
+  return result
 }
 
 export function toRow(info: Info) {
-  return {
+  const row = {
     id: info.id,
     project_id: info.projectID,
     workspace_id: info.workspaceID,
@@ -143,6 +145,8 @@ export function toRow(info: Info) {
     time_compacting: info.time.compacting,
     time_archived: info.time.archived,
   }
+  log.info(`toRow workspaceFolders=${JSON.stringify(info.workspaceFolders)}`, { id: info.id })
+  return row
 }
 
 function getForkedTitle(title: string): string {
@@ -558,6 +562,7 @@ export const layer: Layer.Layer<
         },
       }
       log.info("created", result)
+      log.info(`workspaceFolders=${JSON.stringify(result.workspaceFolders)}`, { id: result.id })
 
       yield* sync.run(Event.Created, { sessionID: result.id, info: result })
 
