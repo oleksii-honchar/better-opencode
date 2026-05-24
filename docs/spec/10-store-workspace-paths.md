@@ -1,10 +1,11 @@
 ---
 feature: store-workspace-paths
-version: 1.0.0
-status: spec
+version: 1.1.0
+status: implemented
 source: session/260522-1601-store-workspace-paths/spec.md
 pr: TBD
-implementation: pending
+implementation: complete
+client-side: better-openchamber/docs/spec/02-workspace-folders-multi-root.md
 ---
 
 # Spec: Store VS Code Workspace Paths in Session and `<env>`
@@ -113,6 +114,8 @@ interface InstanceContext {
   Parent Session ID: ses_yyy
 </env>
 ```
+
+*(Single folder shows as "VS Code workspace folder:"; multiple as "VS Code workspace folders:")*
 
 ## Implementation Details
 
@@ -241,27 +244,51 @@ sys.environment(
 )
 ```
 
-### 7. Openchamber Extension
+### 7. Openchamber Extension (Client-Side)
 
-**Change:** Pass `workspaceFolders` in session create API calls.
+**Implemented in:** [02-workspace-folders-multi-root.md](../../better-openchamber/docs/spec/02-workspace-folders-multi-root.md)
+
+**Change:** Pass `workspaceFolders` in session create API calls from VS Code extension through webview to SDK.
+
+**Data flow:**
+```
+vscode.workspace.workspaceFolders
+  → webviewHtml.ts (compute array, normalize paths, inject into __VSCODE_CONFIG__)
+    → webview (read from __VSCODE_CONFIG__)
+      → session-actions.ts (SDK call with $body_ prefix)
+        → server (CreateInput.body.workspaceFolders)
+```
+
+**SDK limitation:** The SDK v2's `Session2.create` uses `buildClientParams` with a field definition that does not include `workspaceFolders`. Unknown keys are silently dropped. The `$body_` prefix workaround forces the key into the request body:
 
 ```typescript
-// In extension.ts or bridge, pass workspaceFolders in session create:
-// When creating session via API:
-// POST /session { workspaceFolders: [path1, path2, ...] }
-//
-// Extension has access to:
-// vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath)
+// session-actions.ts
+const result = await sdk().session.create({
+  directory: directoryOverride ?? dir(),
+  title,
+  parentID: parentID ?? undefined,
+  ...(workspaceFolders ? { $body_workspaceFolders: workspaceFolders } : {}),
+} as Record<string, unknown>)
 ```
+
+The `$body_` prefix is recognized by `buildClientParams` (`$body_: "body"` in `params.gen.js`), which strips the prefix and places the value in `params.body`.
+
+**Extension implementation:**
+- `ChatViewProvider.ts`, `AgentManagerPanelProvider.ts`, `SessionEditorPanelProvider.ts` — compute `workspaceFolders` array with `normalizeWindowsDriveLetter`, pass to `getWebviewHtml()`
+- `webviewHtml.ts` — `workspaceFolders` in `WebviewHtmlOptions`, injected into `__VSCODE_CONFIG__` as `JSON.stringify(workspaceFolders || [])`
+- `session-ui-store.ts` — reads `workspaceFolders` from `__VSCODE_CONFIG__` in `sendMessage` and `createSessionFromAssistantMessage` handlers
+- `desktop.d.ts` — `__VSCODE_CONFIG__` type declaration with `workspaceFolders?: string[]`
+
+**Backward compatibility:** `workspaceFolder` (singular) preserved alongside `workspaceFolders` (plural). Empty array produces no body field.
 
 ## Success Criteria
 
-- [ ] VS Code workspace folder paths are stored in session data and survive session compaction
-- [ ] `<env>` block in system prompt includes workspace folder paths
-- [ ] Solution works with multi-folder workspaces (e.g., openchamber + opencode)
-- [ ] Backwards compatible with existing sessions (NULL column)
-- [ ] OpenChamber type-check passes
-- [ ] OpenChamber build succeeds
+- [x] VS Code workspace folder paths are stored in session data and survive session compaction
+- [x] `<env>` block in system prompt includes workspace folder paths
+- [x] Solution works with multi-folder workspaces (e.g., openchamber + opencode)
+- [x] Backwards compatible with existing sessions (NULL column)
+- [x] OpenChamber type-check passes
+- [x] OpenChamber build succeeds
 
 ## Open Decisions
 
@@ -273,15 +300,28 @@ sys.environment(
 
 ## Files Modified
 
+### Server-side (better-opencode)
+
 | File | Change |
 |------|--------|
 | `packages/opencode/src/session/session.sql.ts` | Add `workspace_folders` column |
-| `packages/opencode/src/session/session.ts` | Add field to Session table row and fromRow() |
+| `packages/opencode/src/session/session.ts` | Add field to Session table row, fromRow(), toRow(), CreateInput schema |
 | `packages/opencode/src/project/instance-context.ts` | Add `workspaceFolders` to InstanceContext |
 | `packages/opencode/src/project/instance-store.ts` | Add `workspaceFolders` to LoadInput, pass through boot() |
 | `packages/opencode/src/session/system.ts` | Add param, inject into env block |
 | `packages/opencode/src/session/prompt.ts` | Pass session.workspaceFolders to environment() |
-| Openchamber extension | Pass workspaceFolders in session create |
+
+### Client-side (better-openchamber)
+
+| File | Change |
+|------|--------|
+| `packages/vscode/src/webviewHtml.ts` | `workspaceFolders` in options, injected into `__VSCODE_CONFIG__` |
+| `packages/vscode/src/ChatViewProvider.ts` | Compute and pass `workspaceFolders` |
+| `packages/vscode/src/AgentManagerPanelProvider.ts` | Compute and pass `workspaceFolders` |
+| `packages/vscode/src/SessionEditorPanelProvider.ts` | Compute and pass `workspaceFolders` |
+| `packages/ui/src/sync/session-actions.ts` | `createSession` accepts `workspaceFolders`, `$body_` prefix for SDK body |
+| `packages/ui/src/sync/session-ui-store.ts` | Read from `__VSCODE_CONFIG__`, pass to `createSession` |
+| `packages/ui/src/types/desktop.d.ts` | `__VSCODE_CONFIG__` type with `workspaceFolders` |
 
 ## Risks and Mitigations
 
@@ -295,5 +335,5 @@ sys.environment(
 
 ## Session
 
-- **Session:** 260522-1601-store-workspace-paths
-- **Date:** May 22, 2026
+- **Server-side session:** 260522-1601-store-workspace-paths (May 22, 2026)
+- **Client-side session:** ses_1a67a3079ffeslu3O06tl8RZM4 (May 24, 2026)
