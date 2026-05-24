@@ -151,7 +151,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const log = Log.create({ service: "session.http" })
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
-      log.info(`workspaceFolders=${JSON.stringify(ctx.payload?.workspaceFolders)}`, `create`)
+      log.info(`workspaceFolders=${JSON.stringify(ctx.payload?.workspaceFolders)}`, { action: "create" })
       return yield* shareSvc.create(ctx.payload)
     })
 
