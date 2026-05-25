@@ -1,6 +1,6 @@
 ---
 feature: store-workspace-paths
-version: 1.1.0
+version: 1.2.0
 status: implemented
 source: session/260522-1601-store-workspace-paths/spec.md
 pr: TBD
@@ -280,6 +280,25 @@ The `$body_` prefix is recognized by `buildClientParams` (`$body_: "body"` in `p
 - `desktop.d.ts` — `__VSCODE_CONFIG__` type declaration with `workspaceFolders?: string[]`
 
 **Backward compatibility:** `workspaceFolder` (singular) preserved alongside `workspaceFolders` (plural). Empty array produces no body field.
+
+### 8. Auto-Allow Workspace Folders in `external_directory` Permissions
+
+**What:** Any path inside a VS Code workspace folder is auto-allowed for `external_directory` permission — no agent-level `external_directory` rules needed.
+
+**How:** In `packages/opencode/src/agent/agent.ts`, the `whitelistedDirs` array is extended with workspace folder paths:
+
+```typescript
+const whitelistedDirs = [
+  Truncate.GLOB,
+  path.join(Global.Path.tmp, "*"),
+  ...skillDirs.map((dir) => path.join(dir, "*")),
+  ...(ctx.workspaceFolders ?? []).map((dir) => path.join(dir, "*")),
+]
+```
+
+**Result:** If `~/.agents/skills` is in the workspace folders, the agent never asks permission for files inside it — no `external_directory` rule needed in agent config.
+
+**Risk:** None — the existing `external_directory` deny rules still take precedence. This only adds auto-allow rules.
 
 ## Success Criteria
 
