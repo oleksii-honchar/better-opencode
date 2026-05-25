@@ -1330,6 +1330,8 @@ export const layer = Layer.effect(
         const slog = elog.with({ sessionID })
         let structured: unknown
         let step = 0
+        const maxStoppingContinuations = 3
+        let stoppingContinuationCount = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
@@ -1369,6 +1371,50 @@ export const layer = Layer.effect(
                 callID: orphan.callID,
               })
             }
+
+            // Before exiting, check if plugin wants to continue
+            const stoppingResult: { stop: boolean; message?: string } = yield* plugin.trigger(
+              "session.stopping",
+              { sessionID, reason: "idle" },
+              { stop: true },
+            )
+
+            if (stoppingResult.stop === false) {
+              // Guard: enforce message requirement
+              if (!stoppingResult.message) {
+                yield* slog.warn(
+                  "session.stopping hook returned stop=false without message — ignoring",
+                )
+                yield* slog.info("exiting loop")
+                break
+              }
+
+              // Guard: enforce max continuation limit
+              if (stoppingContinuationCount >= maxStoppingContinuations) {
+                yield* slog.warn(
+                  `session.stopping hook prevented exit ${maxStoppingContinuations} times — forcing stop`,
+                )
+                yield* slog.info("exiting loop")
+                break
+              }
+
+              // Inject the message and continue the loop
+              stoppingContinuationCount++
+              yield* flushInjectedMessages({
+                injected: [{ role: "system", text: stoppingResult.message }],
+                sessionID,
+                agent: lastUser.agent,
+                providerID: lastUser.model.providerID,
+                modelID: lastUser.model.modelID,
+              })
+
+              yield* slog.info(
+                "session.stopping hook prevented exit",
+                { continuation: stoppingContinuationCount, max: maxStoppingContinuations },
+              )
+              continue  // Don't break — continue the loop
+            }
+
             yield* slog.info("exiting loop")
             break
           }
@@ -1517,7 +1563,7 @@ export const layer = Layer.effect(
 
             const [skills, env, instructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
-              sys.environment(model),
+              sys.environment(model, sessionID, session.parentID, session.workspaceFolders),
               instruction.system().pipe(Effect.orDie),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
