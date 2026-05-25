@@ -20,7 +20,8 @@ import path from "path"
 import { Plugin } from "@/plugin"
 import { Skill } from "../skill"
 import { Effect, Context, Layer, Schema } from "effect"
-import { InstanceState } from "@/effect/instance-state"
+import { InstanceRef } from "@/effect/instance-ref"
+import { WorkspaceFoldersRef } from "@/effect/instance-ref"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
@@ -93,15 +94,16 @@ export const layer = Layer.effect(
     const provider = yield* Provider.Service
     const flags = yield* RuntimeFlags.Service
 
-    const state = yield* InstanceState.make<State>(
-      Effect.fn("Agent.state")(function* (ctx) {
+    const state = Effect.fn("Agent.state")(function* () {
+        const ctx = yield* InstanceRef
         const cfg = yield* config.get()
         const skillDirs = yield* skill.dirs()
+        const workspaceFolders = (yield* WorkspaceFoldersRef) ?? ctx?.workspaceFolders
         const whitelistedDirs = [
           Truncate.GLOB,
           path.join(Global.Path.tmp, "*"),
           ...skillDirs.map((dir) => path.join(dir, "*")),
-          ...(ctx.workspaceFolders ?? []).map((dir) => path.join(dir, "*")),
+          ...(workspaceFolders ?? []).map((dir: string) => path.join(dir, "*")),
         ]
         const readonlyExternalDirectory = {
           "*": "ask",
@@ -162,7 +164,7 @@ export const layer = Layer.effect(
                 edit: {
                   "*": "deny",
                   [path.join(".opencode", "plans", "*.md")]: "allow",
-                  [path.relative(ctx.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
+                  [path.relative(ctx?.worktree ?? "/", path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
                 },
               }),
               user,
@@ -372,21 +374,24 @@ export const layer = Layer.effect(
           defaultInfo,
           defaultAgent,
         } satisfies State
-      }),
-    )
+      })
 
     return Service.of({
       get: Effect.fn("Agent.get")(function* (agent: string) {
-        return yield* InstanceState.useEffect(state, (s) => s.get(agent))
+        const s = yield* state()
+        return yield* s.get(agent)
       }),
       list: Effect.fn("Agent.list")(function* () {
-        return yield* InstanceState.useEffect(state, (s) => s.list())
+        const s = yield* state()
+        return yield* s.list()
       }),
       defaultInfo: Effect.fn("Agent.defaultInfo")(function* () {
-        return yield* InstanceState.useEffect(state, (s) => s.defaultInfo())
+        const s = yield* state()
+        return yield* s.defaultInfo()
       }),
       defaultAgent: Effect.fn("Agent.defaultAgent")(function* () {
-        return yield* InstanceState.useEffect(state, (s) => s.defaultAgent())
+        const s = yield* state()
+        return yield* s.defaultAgent()
       }),
       generate: Effect.fn("Agent.generate")(function* (input: {
         description: string
@@ -402,7 +407,7 @@ export const layer = Layer.effect(
 
         const system = [PROMPT_GENERATE]
         yield* plugin.trigger("experimental.chat.system.transform", { model: resolved }, { system })
-        const existing = yield* InstanceState.useEffect(state, (s) => s.list())
+        const existing = yield* (yield* state()).list()
 
         // TODO: clean this up so provider specific logic doesnt bleed over
         const authInfo = yield* auth.get(model.providerID).pipe(Effect.orDie)
