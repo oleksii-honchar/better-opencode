@@ -26,7 +26,10 @@ function provideInstanceContext<E>(
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, WorkspaceRouteContext> {
   return Effect.gen(function* () {
     const route = yield* WorkspaceRouteContext
-    const ctx = yield* store.load({ directory: decode(route.directory) })
+    const ctx = yield* store.load({
+      directory: decode(route.directory),
+      workspaceFolders: route.workspaceFolders,
+    })
     return yield* effect.pipe(
       Effect.provideService(InstanceRef, ctx),
       Effect.provideService(WorkspaceRef, route.workspaceID),

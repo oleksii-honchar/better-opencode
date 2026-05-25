@@ -31,7 +31,7 @@ type RemoteTarget = Extract<Target, { type: "remote" }>
 type RequestPlan = Data.TaggedEnum<{
   InvalidWorkspace: {}
   MissingWorkspace: { readonly workspaceID: WorkspaceID }
-  Local: { readonly directory: string; readonly workspaceID?: WorkspaceID }
+  Local: { readonly directory: string; readonly workspaceID?: WorkspaceID; readonly workspaceFolders?: string[] }
   Remote: {
     readonly request: HttpServerRequest.HttpServerRequest
     readonly workspace: Workspace.Info
@@ -47,6 +47,7 @@ export class WorkspaceRouteContext extends Context.Service<
   {
     readonly directory: string
     readonly workspaceID?: WorkspaceID
+    readonly workspaceFolders?: string[]
   }
 >()("@opencode/ExperimentalHttpApiWorkspaceRouteContext") {}
 
@@ -160,6 +161,7 @@ function planWorkspaceRequest(
 function planRequest(
   request: HttpServerRequest.HttpServerRequest,
   sessionWorkspaceID?: WorkspaceID,
+  workspaceFolders?: string[],
 ): Effect.Effect<RequestPlan, never, Workspace.Service> {
   return Effect.gen(function* () {
     const url = requestURL(request)
@@ -178,7 +180,7 @@ function planRequest(
       return yield* planWorkspaceRequest(request, url, workspace)
     }
 
-    return RequestPlan.Local({ directory: defaultDirectory(request, url), workspaceID: envWorkspaceID ?? workspaceID })
+    return RequestPlan.Local({ directory: defaultDirectory(request, url), workspaceID: envWorkspaceID ?? workspaceID, workspaceFolders })
   })
 }
 
@@ -201,8 +203,8 @@ function routeWorkspace<E>(
       ),
     MissingWorkspace: ({ workspaceID }) => Effect.succeed(missingWorkspaceResponse(workspaceID)),
     Remote: ({ request, workspace, target, url }) => proxyRemote(client, request, workspace, target, url),
-    Local: ({ directory, workspaceID }) =>
-      effect.pipe(Effect.provideService(WorkspaceRouteContext, WorkspaceRouteContext.of({ directory, workspaceID }))),
+    Local: ({ directory, workspaceID, workspaceFolders }) =>
+      effect.pipe(Effect.provideService(WorkspaceRouteContext, WorkspaceRouteContext.of({ directory, workspaceID, workspaceFolders }))),
   })
 }
 
@@ -223,7 +225,7 @@ function routeHttpApiWorkspace<E>(
           Effect.catchDefect(() => Effect.succeed(undefined)),
         )
       : undefined
-    const plan = yield* planRequest(request, session?.workspaceID)
+    const plan = yield* planRequest(request, session?.workspaceID, session?.workspaceFolders)
     return yield* routeWorkspace(client, effect, plan)
   })
 }
@@ -251,7 +253,7 @@ export const workspaceRouterMiddleware = HttpRouter.middleware<{ provides: Works
     return (effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
-        const plan = yield* planRequest(request)
+        const plan = yield* planRequest(request, undefined, undefined)
         return yield* routeWorkspace(client, effect, plan)
       }).pipe(
         Effect.provideService(Socket.WebSocketConstructor, makeWebSocket),
