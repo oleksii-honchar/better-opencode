@@ -285,7 +285,19 @@ The `$body_` prefix is recognized by `buildClientParams` (`$body_: "body"` in `p
 
 **What:** Any path inside a VS Code workspace folder is auto-allowed for `external_directory` permission — no agent-level `external_directory` rules needed.
 
-**How:** In `packages/opencode/src/agent/agent.ts`, the `whitelistedDirs` array is extended with workspace folder paths:
+**How:** `workspaceFolders` is threaded from the session through the middleware chain to `InstanceContext`, then used by `Agent.state` in the `whitelistedDirs` array.
+
+**Data flow:**
+```
+Session (workspaceFolders from DB)
+  → WorkspaceRoutingMiddleware (reads session, extracts workspaceFolders)
+  → WorkspaceRouteContext ({ directory, workspaceID, workspaceFolders })
+    → InstanceContextMiddleware (passes to store.load)
+      → InstanceStore (creates InstanceContext with workspaceFolders)
+        → Agent.state (uses ctx.workspaceFolders in whitelistedDirs)
+```
+
+**agent.ts:** The `whitelistedDirs` array includes workspace folder paths:
 
 ```typescript
 const whitelistedDirs = [
@@ -295,6 +307,13 @@ const whitelistedDirs = [
   ...(ctx.workspaceFolders ?? []).map((dir) => path.join(dir, "*")),
 ]
 ```
+
+**middleware:** `WorkspaceRouteContext` is extended with `workspaceFolders?: string[]`, populated from the session in `WorkspaceRoutingMiddleware`. `InstanceContextMiddleware` passes `route.workspaceFolders` to `store.load()`.
+
+**Files affected:**
+- `packages/opencode/src/agent/agent.ts` — add `ctx.workspaceFolders` to whitelistedDirs
+- `packages/opencode/src/server/routes/instance/httpapi/middleware/workspace-routing.ts` — add `workspaceFolders` to `WorkspaceRouteContext`, `RequestPlan.Local`, thread through `planRequest`
+- `packages/opencode/src/server/routes/instance/httpapi/middleware/instance-context.ts` — pass `route.workspaceFolders` to `store.load`
 
 **Result:** If `~/.agents/skills` is in the workspace folders, the agent never asks permission for files inside it — no `external_directory` rule needed in agent config.
 
@@ -308,6 +327,7 @@ const whitelistedDirs = [
 - [x] Backwards compatible with existing sessions (NULL column)
 - [x] OpenChamber type-check passes
 - [x] OpenChamber build succeeds
+- [x] Agent auto-allows workspace folder paths for `external_directory` permission
 
 ## Open Decisions
 
@@ -329,6 +349,9 @@ const whitelistedDirs = [
 | `packages/opencode/src/project/instance-store.ts` | Add `workspaceFolders` to LoadInput, pass through boot() |
 | `packages/opencode/src/session/system.ts` | Add param, inject into env block |
 | `packages/opencode/src/session/prompt.ts` | Pass session.workspaceFolders to environment() |
+| `packages/opencode/src/agent/agent.ts` | Add `ctx.workspaceFolders` to whitelistedDirs |
+| `packages/opencode/src/server/routes/instance/httpapi/middleware/workspace-routing.ts` | Add `workspaceFolders` to `WorkspaceRouteContext`, `RequestPlan.Local`, thread through `planRequest` |
+| `packages/opencode/src/server/routes/instance/httpapi/middleware/instance-context.ts` | Pass `route.workspaceFolders` to `store.load` |
 
 ### Client-side (better-openchamber)
 
@@ -350,7 +373,7 @@ const whitelistedDirs = [
 | JSON serialization errors | Low | Store as TEXT; handle parse errors gracefully |
 | Session table migration | Low | Drizzle migration adds column (ALTER TABLE) |
 | Extension compatibility | Medium | Extension change is isolated; only affects sessions it creates |
-| InstanceContext field unused | Low | Optional field; existing code path works without it |
+| InstanceContext field unused | Low | Optional field; used by auto-allow feature since v1.2.0 |
 
 ## Session
 
