@@ -1,6 +1,6 @@
 # better-opencode Features
 
-This document describes the nine features added by the `better-opencode` fork.
+This document describes the eleven features added by the `better-opencode` fork.
 
 For an overview of the fork's purpose and installation, see [BETTER-OPENCODE.md](./BETTER-OPENCODE.md).
 
@@ -261,3 +261,45 @@ You are a precise coding agent. Generate code directly without reasoning.
 **Precedence:** `agent.model` (explicit) → `agent.modelPreset + parentModel` (suffixed) → `parentModel` (fallback if suffixed not found)
 
 **Fallback:** If suffixed model not found in provider, logs a warning and falls back to the base (parent) model. Does NOT error — prevents workflow breaks.
+
+---
+
+## 10. Store VS Code Workspace Paths in `<env>`
+
+📋 [Detailed Spec](./spec/10-store-workspace-paths.md)
+
+**Status:** ✅ Implemented
+
+**Problem:** The opencode agent has no awareness of VS Code workspace folders. When working across multiple projects, the agent only sees the single working directory in the `<env>` block.
+
+**Solution:** Store VS Code workspace folder paths in session data and inject them into the `<env>` block. Also auto-allow workspace folder paths for `external_directory` permission.
+
+**System prompt output (multi-folder example):**
+```
+<env>
+  Working directory: /Users/oleksii.honchar/www/misc/better-opencode
+  VS Code workspace folders: /Users/oleksii.honchar/www/misc/better-openchamber, /Users/oleksii.honchar/www/misc/better-opencode
+</env>
+```
+
+**Side effect:** Paths inside VS Code workspace folders are auto-allowed for `external_directory` permission — no agent-level rules needed.
+
+---
+
+## 11. TUI Worker GlobalBus Listener Cleanup
+
+📋 [Detailed Spec](./spec/11-tui-worker-globalbus-listener-cleanup.md)
+
+**Status:** ⏳ Pending
+
+**Problem:** The TUI worker attaches a `GlobalBus.on("event", handler)` listener at module scope that is never removed. The `shutdown()` method disposes instances but does not clean up the GlobalBus listener, causing listener accumulation across reload/stop cycles. After 11 calls, `MaxListenersExceededWarning` is triggered.
+
+**Solution:** Extract the anonymous handler to a named function, export a `removeGlobalEventListener()` cleanup function, and call it during `shutdown()`. Add `setMaxListeners(50)` on GlobalBus as a safety net.
+
+**Root cause:** Module-scoped `GlobalBus.on("event", handler)` in `cli/cmd/tui/worker.ts:43` — no corresponding `off()`.
+
+**Components:**
+- **`cli/cmd/tui/worker.ts`** — Named handler function, `removeGlobalEventListener()` export, cleanup in `shutdown()`
+- **`bus/global.ts`** — `setMaxListeners(50)` safety net
+- **`server/global-lifecycle.ts`** — No changes (already correct)
+- **`handlers/global.ts`** — No changes (already uses `acquireRelease` pattern)

@@ -21,6 +21,8 @@ The fork adds several features to address context loss, repetitive loops, sessio
 - **Session ID in System Prompt** — `sessionID` and `parentSessionID` included in `<env>` block on every LLM call
 - **Unstuck Plugin** — Detects and breaks model loops (thinking→tool-call, sentence-level, tool-only) with nudge-and-prune recovery
 - **`supportedUrls` fallback** — Fixes `Object.entries(undefined)` crash when attaching images with models that don't define `supportedUrls` (defaults to `{}` via `overrideSupportedUrls` in `wrapLanguageModel`)
+- **Store VS Code Workspace Paths** — Multi-folder workspace awareness in `<env>` block and auto-allow for `external_directory`
+- **TUI Worker GlobalBus Cleanup** — Fixes `MaxListenersExceededWarning` by removing stale listeners on worker shutdown
 
 See **[FEATURES.md](./FEATURES.md)** for detailed descriptions and configuration.
 
