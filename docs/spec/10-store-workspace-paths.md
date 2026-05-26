@@ -1,7 +1,7 @@
 ---
 feature: store-workspace-paths
-version: 1.2.0
-status: implemented
+version: 1.3.0
+status: fully-implemented
 source: session/260522-1601-store-workspace-paths/spec.md
 pr: TBD
 implementation: complete
@@ -301,14 +301,19 @@ The `$body_` prefix is recognized by `buildClientParams` (`$body_: "body"` in `p
 
 **How:** `workspaceFolders` is threaded from the session through the middleware chain to `InstanceContext`, then used by `Agent.state` in the `whitelistedDirs` array.
 
-**Data flow:**
+**Data flow (after Fix 1 + Fix 2):**
 ```
-Session (workspaceFolders from DB)
-  → WorkspaceRoutingMiddleware (reads session, extracts workspaceFolders)
-  → WorkspaceRouteContext ({ directory, workspaceID, workspaceFolders })
-    → InstanceContextMiddleware (passes to store.load)
-      → InstanceStore (creates InstanceContext with workspaceFolders)
-        → Agent.state (uses ctx.workspaceFolders in whitelistedDirs)
+VS Code Extension
+  → webviewHtml.ts (injects __opencode_workspaceFolders global)
+    → App (submit.ts reads global, passes to client.session.create({ workspaceFolders }))
+      → Session (workspaceFolders from DB)
+        → WorkspaceRoutingMiddleware (reads session, extracts workspaceFolders)
+        → WorkspaceRouteContext ({ directory, workspaceID, workspaceFolders })
+          → InstanceContextMiddleware (passes to store.load)
+            → InstanceStore (creates InstanceContext with workspaceFolders)
+              → Agent.state (uses ctx.workspaceFolders in whitelistedDirs)
+              → assertExternalDirectory (containsPath check on InstanceContext)
+                → FIX 2: WorkspaceFoldersRef defensive check (per-request fallback)
 ```
 
 **agent.ts:** The `whitelistedDirs` array includes workspace folder paths:
@@ -332,6 +337,43 @@ const whitelistedDirs = [
 **Result:** If `~/.agents/skills` is in the workspace folders, the agent never asks permission for files inside it — no `external_directory` rule needed in agent config.
 
 **Risk:** None — the existing `external_directory` deny rules still take precedence. This only adds auto-allow rules.
+
+**Bug discovered (session 260525-1244-auto-allow-workspace-folders):** The original 1-line fix in `Agent.state` was correct but didn't work end-to-end because the VS Code extension's web app created sessions without `workspaceFolders`. The CLI already passed `workspaceFolders`, but the web app did not. Two fixes were applied:
+
+### Fix 1 — App passes workspaceFolders at session creation (PRIMARY)
+
+**Problem:** `packages/app/src/components/prompt-input/submit.ts` called `client.session.create()` with no arguments. The VS Code extension already injected `workspaceFolders` as `globalThis.__opencode_workspaceFolders` (at `webviewHtml.ts:171`), but the app never read it.
+
+**Fix:** Read the global variable and pass it to `client.session.create({ workspaceFolders })`:
+
+```typescript
+// Before:
+const created = await client.session.create()
+
+// After:
+const workspaceFolders = (globalThis as any).__opencode_workspaceFolders
+const created = await client.session.create(workspaceFolders ? { workspaceFolders } : undefined)
+```
+
+**Why this approach:** The extension already injects the global. The SDK already accepts `workspaceFolders` (sdk.gen.ts:3101). The server handler already reads it (session.ts:155). The DB schema already supports it (session.ts:233). Zero server changes needed.
+
+**File changed:** `packages/app/src/components/prompt-input/submit.ts`
+
+### Fix 2 — Defensive WorkspaceFoldersRef check in assertExternalDirectory
+
+**Problem:** Even with Fix 1, there's a window where the cached `InstanceContext` may have `undefined` workspaceFolders (e.g., first boot before session exists). `WorkspaceFoldersRef` is per-request and may already have the value from the session.
+
+**Fix:** After the existing `containsPath(ins)` check, add a check using `WorkspaceFoldersRef`:
+
+```typescript
+// After the existing containsPath check:
+const workspaceFolders = yield* WorkspaceFoldersRef
+if (workspaceFolders?.some((folder) => AppFileSystem.contains(folder, full))) return
+```
+
+**File changed:** `packages/opencode/src/tool/external-directory.ts`
+
+**Why both fixes:** Fix 1 solves the root cause (workspaceFolders now reach the session). Fix 2 is the safety net for the brief window where the cached `InstanceContext` might be stale.
 
 ## Success Criteria
 
@@ -366,6 +408,10 @@ const whitelistedDirs = [
 | `packages/opencode/src/agent/agent.ts` | Add `ctx.workspaceFolders` to whitelistedDirs |
 | `packages/opencode/src/server/routes/instance/httpapi/middleware/workspace-routing.ts` | Add `workspaceFolders` to `WorkspaceRouteContext`, `RequestPlan.Local`, thread through `planRequest` |
 | `packages/opencode/src/server/routes/instance/httpapi/middleware/instance-context.ts` | Pass `route.workspaceFolders` to `store.load` |
+| `packages/app/src/components/prompt-input/submit.ts` | Read `globalThis.__opencode_workspaceFolders` and pass to `client.session.create()` (Fix 1) |
+| `packages/app/src/components/prompt-input/submit.test.ts` | Tests for workspaceFolders passing (Fix 1) |
+| `packages/opencode/src/tool/external-directory.ts` | Add `WorkspaceFoldersRef` defensive check (Fix 2) |
+| `packages/opencode/test/tool/external-directory.test.ts` | Tests for WorkspaceFoldersRef short-circuit (Fix 2) |
 
 ### Client-side (better-openchamber)
 
@@ -394,9 +440,11 @@ const whitelistedDirs = [
 | Date | Session | Issue | Fix |
 |------|---------|-------|-----|
 | 2026-05-26 | 260526-1718-opencode-extdir-perm | `workspaceFolders` omitted in `InstanceStore.boot`'s `fromDirectory()` branch; `input.project && input.worktree` used truthiness instead of undefined checks | Added `workspaceFolders: input.workspaceFolders` to `Effect.map()` return; changed to `!== undefined` checks |
+| 2026-05-25 | 260525-1244-auto-allow-workspace-folders | Web app created sessions without `workspaceFolders`; `assertExternalDirectory` didn't check `WorkspaceFoldersRef` | **Fix 1:** App reads `globalThis.__opencode_workspaceFolders` and passes to `client.session.create({ workspaceFolders })`. **Fix 2:** `assertExternalDirectory` checks `WorkspaceFoldersRef` after `containsPath` as defensive fallback.
 
 ## Session
 
 - **Server-side session:** 260522-1601-store-workspace-paths (May 22, 2026)
 - **Client-side session:** ses_1a67a3079ffeslu3O06tl8RZM4 (May 24, 2026)
 - **Regression fix session:** 260526-1718-opencode-extdir-perm (May 26, 2026)
+- **Auto-allow fix session:** 260525-1244-auto-allow-workspace-folders (May 25-26, 2026) — Fix 1 (app passes workspaceFolders) and Fix 2 (defensive WorkspaceFoldersRef check)

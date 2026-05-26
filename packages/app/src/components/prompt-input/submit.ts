@@ -362,8 +362,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     let session = input.info()
     if (!session && isNewSession) {
+      const workspaceFolders =
+        (globalThis as any).__opencode_workspaceFolders
       const created = await client.session
-        .create()
+        .create(workspaceFolders ? { workspaceFolders } : undefined)
         .then((x) => x.data ?? undefined)
         .catch((err) => {
           showToast({
