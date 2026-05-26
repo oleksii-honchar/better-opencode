@@ -193,14 +193,28 @@ export interface LoadInput {
   workspaceFolders?: string[]  // NEW: optional multi-folder list
 }
 
-// In boot(), pass workspaceFolders through:
-const ctx: InstanceContext = {
-  directory: input.directory,
-  worktree: result.sandbox,
-  project: result.project,
-  workspaceFolders: input.workspaceFolders,  // NEW
-}
+// In boot(), pass workspaceFolders through both branches:
+const ctx: InstanceContext =
+  input.project !== undefined && input.worktree !== undefined
+    ? {
+        directory: input.directory,
+        worktree: input.worktree,
+        project: input.project,
+        workspaceFolders: input.workspaceFolders,  // NEW
+      }
+    : yield* project.fromDirectory(input.directory).pipe(
+        Effect.map((result) => ({
+          directory: input.directory,
+          worktree: result.sandbox,
+          project: result.project,
+          workspaceFolders: input.workspaceFolders,  // NEW
+        })),
+      )
 ```
+
+**Note — Regression fix (session 260526-1718-opencode-extdir-perm):** The original implementation of `boot()` had two bugs:
+1. The `project.fromDirectory()` branch (the common code path) omitted `workspaceFolders` from the returned object, breaking the `external_directory` auto-allow for workspace folder paths. This was fixed by adding `workspaceFolders: input.workspaceFolders` to the `Effect.map()` return.
+2. The condition `input.project && input.worktree` used JavaScript truthiness, which would incorrectly reject falsy-but-defined values (e.g., an empty-string `worktree`). Changed to `input.project !== undefined && input.worktree !== undefined` for explicit undefined checks.
 
 ### 5. `packages/opencode/src/session/system.ts`
 
@@ -346,7 +360,7 @@ const whitelistedDirs = [
 | `packages/opencode/src/session/session.sql.ts` | Add `workspace_folders` column |
 | `packages/opencode/src/session/session.ts` | Add field to Session table row, fromRow(), toRow(), CreateInput schema |
 | `packages/opencode/src/project/instance-context.ts` | Add `workspaceFolders` to InstanceContext |
-| `packages/opencode/src/project/instance-store.ts` | Add `workspaceFolders` to LoadInput, pass through boot() |
+| `packages/opencode/src/project/instance-store.ts` | Add `workspaceFolders` to LoadInput, pass through boot() both branches; use `!== undefined` checks (regression fix 260526-1718) |
 | `packages/opencode/src/session/system.ts` | Add param, inject into env block |
 | `packages/opencode/src/session/prompt.ts` | Pass session.workspaceFolders to environment() |
 | `packages/opencode/src/agent/agent.ts` | Add `ctx.workspaceFolders` to whitelistedDirs |
@@ -375,7 +389,14 @@ const whitelistedDirs = [
 | Extension compatibility | Medium | Extension change is isolated; only affects sessions it creates |
 | InstanceContext field unused | Low | Optional field; used by auto-allow feature since v1.2.0 |
 
+## Bug History
+
+| Date | Session | Issue | Fix |
+|------|---------|-------|-----|
+| 2026-05-26 | 260526-1718-opencode-extdir-perm | `workspaceFolders` omitted in `InstanceStore.boot`'s `fromDirectory()` branch; `input.project && input.worktree` used truthiness instead of undefined checks | Added `workspaceFolders: input.workspaceFolders` to `Effect.map()` return; changed to `!== undefined` checks |
+
 ## Session
 
 - **Server-side session:** 260522-1601-store-workspace-paths (May 22, 2026)
 - **Client-side session:** ses_1a67a3079ffeslu3O06tl8RZM4 (May 24, 2026)
+- **Regression fix session:** 260526-1718-opencode-extdir-perm (May 26, 2026)
