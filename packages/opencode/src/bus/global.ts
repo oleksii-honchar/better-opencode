@@ -20,3 +20,9 @@ class GlobalBusEmitter extends EventEmitter<{
 }
 
 export const GlobalBus = new GlobalBusEmitter()
+
+// No max listener limit — listeners are managed by consumers:
+// - worker: permanent (1), removed on shutdown
+// - SSE: acquire/release per connection
+// - control-plane: Effect.callback with explicit cleanup
+GlobalBus.setMaxListeners(0)

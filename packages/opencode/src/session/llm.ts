@@ -3,7 +3,7 @@ import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import * as Log from "@opencode-ai/core/util/log"
 import { Context, Effect, Layer } from "effect"
 import * as Stream from "effect/Stream"
-import { streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
+import { streamText, wrapLanguageModel, InvalidToolInputError, type ModelMessage, type Tool } from "ai"
 import type { LLMEvent } from "@opencode-ai/llm"
 import { LLMClient, RequestExecutor, WebSocketExecutor } from "@opencode-ai/llm/route"
 import type { LLMClientService } from "@opencode-ai/llm/route"
@@ -29,6 +29,31 @@ import { LLMRequestPrep } from "./llm/request"
 
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
+
+/**
+ * Attempts to recover JSON wrapped in double braces (model hallucination).
+ * E.g. {{"include":"*.prisma"}} → {"include":"*.prisma"}
+ *
+ * Returns the repaired JSON string if valid, or null.
+ */
+function repairDoubleBraces(input: string): string | null {
+  // {{...}} → strip both leading and trailing brace
+  if (input.startsWith("{{") && input.endsWith("}}")) {
+    const stripped = input.slice(1, -1)
+    try { JSON.parse(stripped); return stripped } catch {}
+  }
+  // {...}} → strip trailing brace only
+  if (input.endsWith("}}")) {
+    const stripped = input.slice(0, -1)
+    try { JSON.parse(stripped); return stripped } catch {}
+  }
+  // {{...} → strip leading brace only
+  if (input.startsWith("{{")) {
+    const stripped = input.slice(1)
+    try { JSON.parse(stripped); return stripped } catch {}
+  }
+  return null
+}
 
 export type StreamInput = {
   user: MessageV2.User
@@ -287,6 +312,29 @@ const live: Layer.Layer<
                 toolName: lower,
               }
             }
+            // Attempt to repair double-brace wrapping: {{...}} → {...}
+            const rawInput =
+              InvalidToolInputError.isInstance(failed.error)
+                ? failed.error.toolInput
+                : typeof failed.toolCall.input === "string"
+                  ? failed.toolCall.input
+                  : JSON.stringify(failed.toolCall.input)
+            const repaired = repairDoubleBraces(rawInput)
+            if (repaired) {
+              l.info("repaired tool call by stripping double braces", {
+                tool: failed.toolCall.toolName,
+              })
+              return {
+                ...failed.toolCall,
+                input: repaired,
+              }
+            }
+
+            l.warn("tool call validation failed, converting to invalid", {
+              tool: failed.toolCall.toolName,
+              error: failed.error.message,
+              input: failed.toolCall.input,
+            })
             return {
               ...failed.toolCall,
               input: JSON.stringify({

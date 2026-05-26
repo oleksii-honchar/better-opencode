@@ -14,7 +14,14 @@ export const InvalidTool = Tool.define(
     execute: (params: { tool: string; error: string }) =>
       Effect.succeed({
         title: "Invalid Tool",
-        output: `The arguments provided to the tool are invalid: ${params.error}`,
+        output: [
+          `The arguments provided to the tool are invalid: ${params.error}`,
+          "",
+          "Please ensure your tool call includes all required fields.",
+          "For bash: { \"command\": \"...\", \"description\": \"...\" }",
+          "For edit: { \"filePath\": \"...\", \"oldString\": \"...\", \"newString\": \"...\" }",
+          "For write: { \"filePath\": \"...\", \"content\": \"...\" }",
+        ].join("\n"),
         metadata: {},
       }),
   }),
