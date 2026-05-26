@@ -442,6 +442,106 @@ if (workspaceFolders?.some((folder) => AppFileSystem.contains(folder, full))) re
 | 2026-05-26 | 260526-1718-opencode-extdir-perm | `workspaceFolders` omitted in `InstanceStore.boot`'s `fromDirectory()` branch; `input.project && input.worktree` used truthiness instead of undefined checks | Added `workspaceFolders: input.workspaceFolders` to `Effect.map()` return; changed to `!== undefined` checks |
 | 2026-05-25 | 260525-1244-auto-allow-workspace-folders | Web app created sessions without `workspaceFolders`; `assertExternalDirectory` didn't check `WorkspaceFoldersRef` | **Fix 1:** App reads `globalThis.__opencode_workspaceFolders` and passes to `client.session.create({ workspaceFolders })`. **Fix 2:** `assertExternalDirectory` checks `WorkspaceFoldersRef` after `containsPath` as defensive fallback.
 
+## Investigation — Fix 1 + Fix 2 Still Prompt (260526-260526)
+
+**Problem:** After Fix 1 + Fix 2, the researcher agent **sometimes** STILL asks permission for paths inside VS Code workspace folders.
+
+**Key findings from codebase analysis:**
+
+### Finding 1 — `Agent.state()` is NOT cached (GOOD)
+
+`Effect.fn("Agent.state")` is a **named Effect wrapper**, NOT a memoizer. Each call to `Agent.get(agentName)` calls `state()` which recomputes `agents` with the current `WorkspaceFoldersRef` value. This means the agent's `external_directory` allow rules are always up-to-date with the current request's `WorkspaceFoldersRef`.
+
+**Evidence:**
+- `agent.ts` line 97: `const state = Effect.fn("Agent.state")(function* () { ... yield* WorkspaceFoldersRef ... })`
+- `agent.ts` line 380: `get: Effect.fn("Agent.get")(function* (agent) { const s = yield* state(); return yield* s.get(agent) })`
+- Each `Agent.get` call re-evaluates `state()` → reads current `WorkspaceFoldersRef`
+
+### Finding 2 — `assertExternalDirectory` Fix 2 is correct (GOOD)
+
+Fix 2 reads `WorkspaceFoldersRef` (per-request) AFTER the cached `containsPath` check:
+- `external-directory.ts` line 28: `containsPath(full, ins)` → cached `InstanceRef` (may have stale workspaceFolders)
+- `external-directory.ts` line 33-34: `WorkspaceFoldersRef` → per-request value from middleware
+
+If `WorkspaceFoldersRef` is set correctly by middleware, Fix 2 should catch paths that `containsPath` misses.
+
+### Finding 3 — InstanceStore caching (CONFIRMED ISSUE)
+
+`InstanceStore.load()` caches by directory only:
+- First boot: `workspaceFolders: undefined` → cached instance has `undefined` workspaceFolders
+- Subsequent requests: cached instance returned → `ctx.workspaceFolders` still `undefined`
+- `containsPath(full, ins)` fails because `ins.workspaceFolders` is `undefined`
+
+**This is why Fix 2 is needed.** However, Fix 2 only works if `WorkspaceFoldersRef` is set.
+
+### Finding 4 — `WorkspaceFoldersRef` can be undefined (ROOT CAUSE CANDIDATE)
+
+`WorkspaceFoldersRef` is set by `InstanceContextMiddleware` from `route.workspaceFolders`:
+```typescript
+// instance-context.ts line 27-38
+const route = yield* WorkspaceRouteContext
+const ctx = yield* store.load({ directory, workspaceFolders: route.workspaceFolders })
+return yield* effect.pipe(
+  Effect.provideService(WorkspaceFoldersRef, route.workspaceFolders),
+)
+```
+
+`route.workspaceFolders` comes from `WorkspaceRouteContext`, which comes from `WorkspaceRoutingMiddleware.planRequest()`:
+```typescript
+// workspace-routing.ts line 222-229
+const session = sessionID ? yield* Session.Service.use((svc) => svc.get(sessionID)) : undefined
+const plan = yield* planRequest(request, session?.workspaceID, session?.workspaceFolders)
+```
+
+**If the session has no `workspaceFolders`, then `route.workspaceFolders` is undefined, then `WorkspaceFoldersRef` is undefined, and Fix 2 does nothing.**
+
+### Finding 5 — The permission ruleset path also needs workspaceFolders
+
+Beyond `assertExternalDirectory`, the agent's `external_directory` ruleset is used by `ctx.ask`:
+```typescript
+// tools.ts line 121
+ruleset: Permission.merge(input.agent.permission, input.session.permission ?? [])
+```
+
+`input.agent.permission` comes from `Agent.get(agentName)`, which calls `Agent.state()`, which reads `WorkspaceFoldersRef` to build `whitelistedDirs`. If `WorkspaceFoldersRef` is undefined, the agent's ruleset lacks workspace folder allow rules, and the permission system falls through to "ask".
+
+### Finding 6 — Session creation is the critical path
+
+The entire chain starts at session creation:
+```
+App (submit.ts line 365-368)
+  → reads globalThis.__opencode_workspaceFolders
+  → passes to client.session.create({ workspaceFolders })
+  → stored in Session table
+  → read by WorkspaceRoutingMiddleware
+  → provided as WorkspaceFoldersRef
+  → used by assertExternalDirectory (Fix 2) AND Agent.state (ruleset)
+```
+
+**If the session was created without `workspaceFolders` (old session, or app didn't pass it), then:**
+1. `WorkspaceFoldersRef` is undefined → Fix 2 fails
+2. `Agent.state()` reads undefined → no workspace folder allow rules in ruleset
+3. `assertExternalDirectory` falls through → permission prompt
+
+### Remaining question: Why "sometimes"?
+
+The issue happens **sometimes** because:
+1. **Old sessions** created before Fix 1 had no `workspaceFolders` — they still prompt
+2. **Race condition**: If `globalThis.__opencode_workspaceFolders` is not set at session creation time (e.g., extension didn't inject it yet), the session has no `workspaceFolders`
+3. **CLI vs App**: CLI already passes `workspaceFolders` (Fix 1 was only for the web app). If the user is using the app (not CLI), Fix 1 applies. But if the app's global is not set, it fails.
+
+### Fix 3 needed: InstanceStore must invalidate cache when workspaceFolders change
+
+The InstanceStore cache is keyed only by directory. If a request arrives with `workspaceFolders` that differ from the cached instance's `workspaceFolders`, the cache should be invalidated so `containsPath` can use the correct value. Currently:
+- `store.load({ directory, workspaceFolders: ["/path"] })` → returns cached instance with `workspaceFolders: undefined`
+- Fix 2 works as fallback, but the root cause (stale cache) remains
+
+### Open questions for architect
+
+1. Should `InstanceStore.load()` key include `workspaceFolders`? (Would require `reload()` on change)
+2. Should the `containsPath` check in `assertExternalDirectory` be replaced entirely with the `WorkspaceFoldersRef` check? (Eliminates the cache issue)
+3. Should `Agent.state()` read `WorkspaceFoldersRef` with a higher priority than `InstanceRef.workspaceFolders`? (Currently does — `(yield* WorkspaceFoldersRef) ?? ctx?.workspaceFolders`)
+
 ## Session
 
 - **Server-side session:** 260522-1601-store-workspace-paths (May 22, 2026)
