@@ -269,14 +269,15 @@ sys.environment(
 vscode.workspace.workspaceFolders
   → webviewHtml.ts (compute array, normalize paths, inject into __VSCODE_CONFIG__)
     → webview (read from __VSCODE_CONFIG__)
-      → session-actions.ts (SDK call with $body_ prefix)
-        → server (CreateInput.body.workspaceFolders)
+      → session-actions.ts (SDK call with $body_ prefix workaround)
+        → SDK buildClientParams strips "$body_" → body.workspaceFolders
+          → server (CreateInput.body.workspaceFolders)
 ```
 
-**SDK limitation:** The SDK v2's `Session2.create` uses `buildClientParams` with a field definition that does not include `workspaceFolders`. Unknown keys are silently dropped. The `$body_` prefix workaround forces the key into the request body:
+**SDK limitation (npm SDK only):** The npm-published SDK v1.14.19's `Session2.create` uses `buildClientParams` with a field definition that does not include `workspaceFolders`. Unknown keys are silently dropped. The `$body_` prefix workaround forces the key into the request body:
 
 ```typescript
-// session-actions.ts
+// session-actions.ts (OpenChamber extension — npm SDK v1.14.19)
 const result = await sdk().session.create({
   directory: directoryOverride ?? dir(),
   title,
@@ -286,6 +287,8 @@ const result = await sdk().session.create({
 ```
 
 The `$body_` prefix is recognized by `buildClientParams` (`$body_: "body"` in `params.gen.js`), which strips the prefix and places the value in `params.body`.
+
+**Note:** The local SDK at `better-opencode/packages/sdk` (sdk.gen.ts:3101) has `workspaceFolders` as a native field. The standalone app (`better-opencode/packages/app`) uses the native field directly. Only the OpenChamber extension's npm SDK dependency requires the workaround.
 
 **Extension implementation:**
 - `ChatViewProvider.ts`, `AgentManagerPanelProvider.ts`, `SessionEditorPanelProvider.ts` — compute `workspaceFolders` array with `normalizeWindowsDriveLetter`, pass to `getWebviewHtml()`
@@ -304,16 +307,18 @@ The `$body_` prefix is recognized by `buildClientParams` (`$body_: "body"` in `p
 **Data flow (after Fix 1 + Fix 2):**
 ```
 VS Code Extension
-  → webviewHtml.ts (injects __opencode_workspaceFolders global)
-    → App (submit.ts reads global, passes to client.session.create({ workspaceFolders }))
-      → Session (workspaceFolders from DB)
-        → WorkspaceRoutingMiddleware (reads session, extracts workspaceFolders)
-        → WorkspaceRouteContext ({ directory, workspaceID, workspaceFolders })
-          → InstanceContextMiddleware (passes to store.load)
-            → InstanceStore (creates InstanceContext with workspaceFolders)
-              → Agent.state (uses ctx.workspaceFolders in whitelistedDirs)
-              → assertExternalDirectory (containsPath check on InstanceContext)
-                → FIX 2: WorkspaceFoldersRef defensive check (per-request fallback)
+  → webviewHtml.ts (injects workspaceFolders into __VSCODE_CONFIG__)
+    → OpenChamber webview (session-ui-store.ts reads __VSCODE_CONFIG__.workspaceFolders)
+      → session-actions.ts (SDK call with $body_workspaceFolders workaround)
+        → SDK buildClientParams strips "$body_" → body.workspaceFolders
+          → Session (workspaceFolders from DB)
+            → WorkspaceRoutingMiddleware (reads session, extracts workspaceFolders)
+            → WorkspaceRouteContext ({ directory, workspaceID, workspaceFolders })
+              → InstanceContextMiddleware (passes to store.load)
+                → InstanceStore (creates InstanceContext with workspaceFolders)
+                  → Agent.state (uses ctx.workspaceFolders in whitelistedDirs)
+                  → assertExternalDirectory (containsPath check on InstanceContext)
+                    → FIX 2: WorkspaceFoldersRef defensive check (per-request fallback)
 ```
 
 **agent.ts:** The `whitelistedDirs` array includes workspace folder paths:
@@ -340,24 +345,36 @@ const whitelistedDirs = [
 
 **Bug discovered (session 260525-1244-auto-allow-workspace-folders):** The original 1-line fix in `Agent.state` was correct but didn't work end-to-end because the VS Code extension's web app created sessions without `workspaceFolders`. The CLI already passed `workspaceFolders`, but the web app did not. Two fixes were applied:
 
-### Fix 1 — App passes workspaceFolders at session creation (PRIMARY)
+### Fix 1 — OpenChamber Extension passes workspaceFolders at session creation (PRIMARY)
 
-**Problem:** `packages/app/src/components/prompt-input/submit.ts` called `client.session.create()` with no arguments. The VS Code extension already injected `workspaceFolders` as `globalThis.__opencode_workspaceFolders` (at `webviewHtml.ts:171`), but the app never read it.
+**Problem:** The OpenChamber extension's `packages/ui/src/sync/session-actions.ts` read `workspaceFolders` from `__VSCODE_CONFIG__` but used the `$body_workspaceFolders` workaround with an unsafe `as Record<string, unknown>` type cast to pass it to the SDK. The standalone app (`better-opencode/packages/app`) was also fixed to read `globalThis.__opencode_workspaceFolders` and pass it natively.
 
-**Fix:** Read the global variable and pass it to `client.session.create({ workspaceFolders })`:
+**Two codebases, two fixes:**
 
+**A. OpenChamber extension** (`better-openchamber/packages/ui/src/sync/session-actions.ts`):
 ```typescript
-// Before:
-const created = await client.session.create()
+// Uses $body_ prefix workaround because npm SDK v1.14.19 doesn't have workspaceFolders
+const result = await sdk().session.create({
+  directory: directoryOverride ?? dir(),
+  title,
+  parentID: parentID ?? undefined,
+  ...(workspaceFolders ? { $body_workspaceFolders: workspaceFolders } : {}),
+} as Record<string, unknown>)
+```
+**Note:** The local SDK at `better-opencode/packages/sdk` has `workspaceFolders` as a native field (sdk.gen.ts:3101), but the npm-published SDK v1.14.19 does not. The `$body_` prefix workaround is necessary until the npm SDK is updated. The `as Record<string, unknown>` cast bypasses TypeScript checking — this is a known limitation.
 
-// After:
+**B. Standalone app** (`better-opencode/packages/app/src/components/prompt-input/submit.ts`):
+```typescript
+// Uses native workspaceFolders field (local SDK has it)
 const workspaceFolders = (globalThis as any).__opencode_workspaceFolders
 const created = await client.session.create(workspaceFolders ? { workspaceFolders } : undefined)
 ```
 
-**Why this approach:** The extension already injects the global. The SDK already accepts `workspaceFolders` (sdk.gen.ts:3101). The server handler already reads it (session.ts:155). The DB schema already supports it (session.ts:233). Zero server changes needed.
+**Why this approach:** The extension already injects the global into `__VSCODE_CONFIG__`. The local SDK already accepts `workspaceFolders` (sdk.gen.ts:3101). The server handler already reads it (session.ts:155). The DB schema already supports it (session.ts:233). Zero server changes needed.
 
-**File changed:** `packages/app/src/components/prompt-input/submit.ts`
+**Files changed:**
+- `better-openchamber/packages/ui/src/sync/session-actions.ts` (OpenChamber extension — `$body_` workaround)
+- `better-opencode/packages/app/src/components/prompt-input/submit.ts` (standalone app — native field)
 
 ### Fix 2 — Defensive WorkspaceFoldersRef check in assertExternalDirectory
 
@@ -421,7 +438,7 @@ if (workspaceFolders?.some((folder) => AppFileSystem.contains(folder, full))) re
 | `packages/vscode/src/ChatViewProvider.ts` | Compute and pass `workspaceFolders` |
 | `packages/vscode/src/AgentManagerPanelProvider.ts` | Compute and pass `workspaceFolders` |
 | `packages/vscode/src/SessionEditorPanelProvider.ts` | Compute and pass `workspaceFolders` |
-| `packages/ui/src/sync/session-actions.ts` | `createSession` accepts `workspaceFolders`, `$body_` prefix for SDK body |
+| `packages/ui/src/sync/session-actions.ts` | `createSession` accepts `workspaceFolders`, `$body_` prefix workaround for npm SDK (native field in local SDK) |
 | `packages/ui/src/sync/session-ui-store.ts` | Read from `__VSCODE_CONFIG__`, pass to `createSession` |
 | `packages/ui/src/types/desktop.d.ts` | `__VSCODE_CONFIG__` type with `workspaceFolders` |
 
@@ -440,7 +457,7 @@ if (workspaceFolders?.some((folder) => AppFileSystem.contains(folder, full))) re
 | Date | Session | Issue | Fix |
 |------|---------|-------|-----|
 | 2026-05-26 | 260526-1718-opencode-extdir-perm | `workspaceFolders` omitted in `InstanceStore.boot`'s `fromDirectory()` branch; `input.project && input.worktree` used truthiness instead of undefined checks | Added `workspaceFolders: input.workspaceFolders` to `Effect.map()` return; changed to `!== undefined` checks |
-| 2026-05-25 | 260525-1244-auto-allow-workspace-folders | Web app created sessions without `workspaceFolders`; `assertExternalDirectory` didn't check `WorkspaceFoldersRef` | **Fix 1:** App reads `globalThis.__opencode_workspaceFolders` and passes to `client.session.create({ workspaceFolders })`. **Fix 2:** `assertExternalDirectory` checks `WorkspaceFoldersRef` after `containsPath` as defensive fallback.
+| 2026-05-25 | 260525-1244-auto-allow-workspace-folders | Web app created sessions without `workspaceFolders`; `assertExternalDirectory` didn't check `WorkspaceFoldersRef` | **Fix 1:** OpenChamber extension reads `__VSCODE_CONFIG__.workspaceFolders` and passes to SDK (uses `$body_` workaround for npm SDK). Standalone app reads `globalThis.__opencode_workspaceFolders` and passes to `client.session.create({ workspaceFolders })` (native field). **Fix 2:** `assertExternalDirectory` checks `WorkspaceFoldersRef` after `containsPath` as defensive fallback.
 
 ## Investigation — Fix 1 + Fix 2 Still Prompt (260526-260526)
 

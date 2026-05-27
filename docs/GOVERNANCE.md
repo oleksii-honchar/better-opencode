@@ -272,6 +272,7 @@ From the repo root:
 cd ~/www/misc/better-opencode
 ./scripts/start-dev.sh              # same as --server-only
 # optional: ./scripts/start-dev.sh --port 5000
+./scripts/start-dev.sh --server-logs | rg -v "message.part.delta publishing|unstuck|message.part.updated|workspace_folders=null|workspace_folders=\["
 ```
 
 This runs `bun run --cwd packages/opencode …` on **`127.0.0.1`** and **`OPENCODE_PORT`** (default **4096**). Leave this tab open; **Ctrl+C** stops the server.
