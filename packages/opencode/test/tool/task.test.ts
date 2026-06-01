@@ -5,6 +5,7 @@ import { BackgroundJob } from "@/background/job"
 import { Bus } from "@/bus"
 import { Config } from "@/config/config"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { Provider } from "@/provider/provider"
 import { Session } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import type { SessionPrompt } from "../../src/session/prompt"
@@ -16,6 +17,7 @@ import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { ProviderTest } from "../fake/provider"
 import { disposeAllInstances } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
@@ -41,10 +43,31 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
     Truncate.defaultLayer,
     ToolRegistry.defaultLayer,
     RuntimeFlags.layer(flags),
+    ProviderTest.fake({
+      model: ProviderTest.model({ id: ref.modelID, providerID: ref.providerID }),
+    }).layer,
   )
 
 const it = testEffect(layer())
 const background = testEffect(layer({ experimentalBackgroundSubagents: true }))
+
+const itWithProvider = testEffect(
+  Layer.mergeAll(
+    layer(),
+    ProviderTest.fake({
+      getModel: Effect.fn("TestProvider.getModel")((providerID, modelID) => {
+        if (modelID.toString().endsWith("-precise")) {
+          return Effect.fail(new Provider.ModelNotFoundError({ providerID, modelID }))
+        }
+        if (providerID === ref.providerID && modelID === ref.modelID) {
+          return Effect.succeed(ProviderTest.model({ id: ref.modelID, providerID: ref.providerID }))
+        }
+        return Effect.fail(new Provider.ModelNotFoundError({ providerID, modelID }))
+      }),
+      model: ProviderTest.model({ id: ref.modelID, providerID: ref.providerID }),
+    }).layer,
+  ),
+)
 
 function defer<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
@@ -752,5 +775,51 @@ describe("tool.task", () => {
       expect((yield* jobs.get(child.id))?.status).toBe("cancelled")
       expect((yield* jobs.get(grandchild.id))?.status).toBe("cancelled")
     }),
+  )
+
+  itWithProvider.instance(
+    "falls back to parent model when modelPreset produces a model not found in provider",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+        const result = yield* def.execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "precise-agent",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        // Should not throw — fallback to parent model
+        expect(result).toBeDefined()
+        // The model used should be the parent model (test-model), not the suffixed one
+        expect(seen?.model?.modelID).toBe(ref.modelID)
+        expect(seen?.model?.providerID).toBe(ref.providerID)
+      }),
+    {
+      config: {
+        agent: {
+          "precise-agent": {
+            mode: "subagent",
+            modelPreset: "precise" as const,
+          },
+        },
+      },
+    },
   )
 })
