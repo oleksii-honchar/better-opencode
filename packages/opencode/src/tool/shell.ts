@@ -629,6 +629,10 @@ export const ShellTool = Tool.define(
                 }),
               )
 
+              // Auto-generate description from command if omitted
+              const description = params.description
+                ? params.description
+                : params.command.split(/\s+/).slice(0, 10).join(" ").slice(0, 80)
               return yield* run(
                 {
                   shell,
@@ -636,7 +640,7 @@ export const ShellTool = Tool.define(
                   cwd,
                   env: yield* shellEnv(ctx, cwd),
                   timeout,
-                  description: params.description,
+                  description,
                 },
                 ctx,
               )
