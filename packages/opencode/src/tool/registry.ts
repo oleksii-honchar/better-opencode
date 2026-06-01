@@ -309,6 +309,17 @@ export const layer: Layer.Layer<
       const filtered = items.filter(
         (item) => Permission.evaluate("task", item.name, agent.permission).action !== "deny",
       )
+      const excluded = items.filter(
+        (item) => Permission.evaluate("task", item.name, agent.permission).action === "deny",
+      )
+      if (excluded.length > 0) {
+        log.info("describeTask: subagents hidden from calling agent", {
+          agent: agent.name,
+          agentMode: agent.mode,
+          hiddenSubagents: excluded.map(e => e.name),
+          agentTaskRules: agent.permission.filter(r => r.permission === "task"),
+        })
+      }
       const list = filtered.toSorted((a, b) => a.name.localeCompare(b.name))
       const description = list
         .map(

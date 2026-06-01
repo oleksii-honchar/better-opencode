@@ -140,6 +140,14 @@ export const TaskTool = Tool.define(
       }
 
       const next = yield* agent.get(params.subagent_type)
+      log.info("TaskTool: subagent resolved", {
+        sessionID: ctx.sessionID,
+        subagent_type: params.subagent_type,
+        callerAgent: ctx.agent,
+        subagent_name: next.name,
+        subagent_mode: next.mode,
+        taskPermissions: next.permission.filter(r => r.permission === "task"),
+      })
       if (!next) {
         return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
       }
@@ -158,6 +166,7 @@ export const TaskTool = Tool.define(
         (yield* sessions.create({
           parentID: ctx.sessionID,
           title: params.description + ` (@${next.name} subagent)`,
+          agent: next.name,
           permission: [
             ...deriveSubagentSessionPermission({
               parentSessionPermission: parent.permission ?? [],
