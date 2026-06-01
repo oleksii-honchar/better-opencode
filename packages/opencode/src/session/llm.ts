@@ -290,7 +290,7 @@ const live: Layer.Layer<
             l.warn("tool call validation failed, converting to invalid", {
               tool: failed.toolCall.toolName,
               error: failed.error.message,
-              args: failed.toolCall.args,
+              input: failed.toolCall.input,
             })
             return {
               ...failed.toolCall,
