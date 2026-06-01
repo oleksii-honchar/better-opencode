@@ -160,23 +160,13 @@ export function resolveAgentModel(
 
 #### 3. Primary Agent Model Resolution — `session/prompt.ts`
 
-In `createUserMessage` (lines 1210-1226):
+**Not yet implemented.** The design describes wiring `modelPreset` into `createUserMessage` with the same fallback logic as section 4, but this has not been wired up yet.
 
+**Design (future work):**
+
+In `createUserMessage`, add an `ag.modelPreset` branch:
 ```typescript
-const current = Database.use((db) =>
-  db
-    .select({ agent: SessionTable.agent, model: SessionTable.model })
-    .from(SessionTable)
-    .where(eq(SessionTable.id, input.sessionID))
-    .get(),
-)
-const parentModel = yield* currentModel(input.sessionID)
-let model: { providerID: ProviderID; modelID: ModelID }
-if (input.model) {
-  model = input.model
-} else if (ag.model) {
-  model = ag.model
-} else if (ag.modelPreset) {
+else if (ag.modelPreset) {
   const resolved = Agent.resolveAgentModel(ag.model, ag.modelPreset, {
     providerID: parentModel.providerID,
     modelID: parentModel.modelID,
@@ -198,14 +188,43 @@ if (input.model) {
 }
 ```
 
-Key behavior:
+**Key behavior (planned):**
 - Only applies when the agent has no explicit `model`
 - Catches `ModelNotFoundError` specifically — other errors propagate as deaths
 - Falls back to base (parent) model on missing suffixed model with a warning
 
+**Outstanding:** This is a separate change with its own scope and risk (more visible, more integration points). Deferred to a follow-up PR.
+
 #### 4. Sub-Agent Model Resolution — `tool/task.ts`
 
-The sub-agent model resolution also uses `resolveAgentModel()` to compute the model for spawned sub-agents, ensuring consistency between primary and sub-agent model selection.
+**Implemented.** The sub-agent model resolution uses `resolveAgentModel()` to compute the model, with a `ModelNotFoundError` catch-and-fallback:
+
+```typescript
+const resolvedModel = Agent.resolveAgentModel(next.model, next.modelPreset, parentModel)
+let model = resolvedModel
+if (next.modelPreset) {
+  const exit = yield* provider
+    .getModel(resolvedModel.providerID, resolvedModel.modelID)
+    .pipe(Effect.exit)
+  if (!Exit.isSuccess(exit)) {
+    const err = Cause.squash(exit.cause)
+    if (Provider.ModelNotFoundError.isInstance(err)) {
+      log.warn(
+        `modelPreset "${next.modelPreset}" produced model "${resolvedModel.providerID}/${resolvedModel.modelID}" which was not found — falling back to base model`,
+      )
+      model = parentModel
+    } else {
+      return yield* Effect.die(err)
+    }
+  }
+}
+```
+
+Key behavior:
+- Only checks model existence when `modelPreset` is set (not for explicit `agent.model`)
+- Catches `ModelNotFoundError` specifically — other errors propagate as deaths
+- Falls back to base (parent) model on missing suffixed model with a warning
+- Explicit `agent.model` errors if not found (no fallback — correct for user-specified models)
 
 ### Agent Config Example
 
@@ -256,16 +275,16 @@ If both `model` and `modelPreset` are set, `model` wins. `modelPreset` only appl
 
 ### Implementation Status
 
-**Completed.** All 4 source files modified, 5 unit tests passing (typecheck 14/14).
+**Partially implemented.** The `modelPreset` field and `resolveAgentModel()` helper are in place. The sub-agent fallback (task.ts) is implemented. The primary agent path (prompt.ts) is **not yet wired up** — `modelPreset` is ignored for the primary agent.
 
 #### Files Modified
 
-| File | Change | Lines |
+| File | Status | Change |
 |------|--------|-------|
-| `packages/opencode/src/config/agent.ts` | Added `modelPreset` to `AgentSchema` + `KNOWN_KEYS` | 43-46, 74 |
-| `packages/opencode/src/agent/agent.ts` | Added `modelPreset` to `Info` schema + exported `resolveAgentModel()` | 44, 299, 466-479 |
-| `packages/opencode/src/session/prompt.ts` | Full modelPreset resolution with fallback + warning | 1210-1226 |
-| `packages/opencode/src/tool/task.ts` | Sub-agent model resolution via `resolveAgentModel()` | — |
+| `packages/opencode/src/config/agent.ts` | ✅ Implemented | Added `modelPreset` to `AgentSchema` + `KNOWN_KEYS` | 43-46, 74 |
+| `packages/opencode/src/agent/agent.ts` | ✅ Implemented | Added `modelPreset` to `Info` schema + exported `resolveAgentModel()` | 44, 299, 466-479 |
+| `packages/opencode/src/session/prompt.ts` | ❌ Not implemented | `modelPreset` ignored — `resolveAgentModel` never called for primary agent | — |
+| `packages/opencode/src/tool/task.ts` | ✅ Implemented | Sub-agent model resolution via `resolveAgentModel()` with `ModelNotFoundError` fallback + warning | 193–210 |
 
 #### Tests
 

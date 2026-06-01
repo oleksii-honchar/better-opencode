@@ -242,7 +242,7 @@ Object.assign(lastFinished.tokens, { input: 0, output: 0, reasoning: 0, total: 0
 
 ## 9. Agent LLM Params Per Agent (`modelPreset`)
 
-📋 [Detailed Spec](./spec/09-agent-llm-params-per-agent.md)
+📋 [Detailed Spec](./spec/09-agent-model-preset.md)
 
 **Status:** ✅ Implemented
 
