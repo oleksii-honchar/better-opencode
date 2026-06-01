@@ -303,6 +303,8 @@ SERVER_ARGS=(
   --log-level DEBUG
 )
 
+export OPENCODE_DEV=1
+
 exec env -u OPENCODE_SERVER_PASSWORD OPENCODE_PORT="$OPENCODE_PORT" \
   bun run --cwd packages/opencode --conditions=browser src/index.ts \
   "${SERVER_ARGS[@]}"

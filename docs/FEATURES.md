@@ -1,6 +1,6 @@
 # better-opencode Features
 
-This document describes the eleven features added by the `better-opencode` fork.
+This document describes the twelve features added by the `better-opencode` fork.
 
 For an overview of the fork's purpose and installation, see [BETTER-OPENCODE.md](./BETTER-OPENCODE.md).
 
@@ -242,7 +242,7 @@ Object.assign(lastFinished.tokens, { input: 0, output: 0, reasoning: 0, total: 0
 
 ## 9. Agent LLM Params Per Agent (`modelPreset`)
 
-📋 [Detailed Spec](./spec/09-agent-llm-params-per-agent.md)
+📋 [Detailed Spec](./spec/09-agent-model-preset.md)
 
 **Status:** ✅ Implemented
 
@@ -303,3 +303,34 @@ You are a precise coding agent. Generate code directly without reasoning.
 - **`bus/global.ts`** — `setMaxListeners(50)` safety net
 - **`server/global-lifecycle.ts`** — No changes (already correct)
 - **`handlers/global.ts`** — No changes (already uses `acquireRelease` pattern)
+
+---
+
+## 12. SQLite Database Cleanup — PRAGMA, CLI & Background WAL
+
+📋 [Detailed Spec](./spec/14-opencode-db-cleanup.md)
+
+**Status:** ✅ Implemented
+
+**Problem:** The opencode SQLite session database grows to ~1GB with no automated maintenance. The `part` table (333K rows, ~774 MB) stores all tool call outputs permanently. WAL checkpoint runs only at startup (PASSIVE mode). No VACUUM, no `journal_size_limit`, no session archival. Sustains 20-30 MB/s SSD writes during active sessions.
+
+**Solution:** Four-part cleanup feature:
+
+1. **DB Layer PRAGMA** (`storage/db.ts`) — `PRAGMA journal_size_limit = 16777216` (16MB WAL cap) added during initialization.
+
+2. **DB CLI Commands** (`cli/cmd/db.ts`):
+   - `opencode db vacuum` — VACUUM + checkpoint (TRUNCATE), prints freed space
+   - `opencode db checkpoint` — Manual `PRAGMA wal_checkpoint(TRUNCATE)` for WAL trimming
+   - `opencode db compact [--older-than 90d] [--dry-run]` — Deletes compacted parts + old tool parts, VACUUM, TRUNCATE
+   - `opencode db stats` — DB size, WAL size, free pages, row counts, VACUUM recommendation
+
+3. **Session Cleanup CLI** (`cli/cmd/session.ts`) — `opencode session cleanup [--older-than 90d] [--dry-run]` archives then cascade-deletes old sessions via Drizzle FK.
+
+4. **Background WAL Checkpoint Loop** (`storage/db.ts`) — `startWalCheckpointLoop()` runs every 10 minutes, checkpoints (TRUNCATE) if WAL > 16MB. Safely disabled via `OPENCODE_DB_NO_AUTO_CHECKPOINT=1`.
+
+**Key design decisions (5 ADRs):**
+- Hybrid approach (CLI + Background) — destructive ops CLI-only, WAL checkpoint safe for background
+- Reuses existing `time_archived` + Drizzle `onDelete: cascade` — zero schema change
+- `PRAGMA wal_checkpoint(TRUNCATE)` over `PASSIVE` — truncates WAL to zero; auto-fallback to PASSIVE if busy
+- `journal_size_limit` over `auto_vacuum` — zero runtime cost, no fragmentation; VACUUM for full reclamation
+- Age-based tool output deletion (compacted parts + >90d threshold) — max space recovery, recent sessions pristine

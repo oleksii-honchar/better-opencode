@@ -963,6 +963,7 @@ export function* listGlobal(input?: {
   search?: string
   limit?: number
   archived?: boolean
+  olderThan?: number
 }) {
   const conditions: SQL[] = []
 
@@ -983,6 +984,9 @@ export function* listGlobal(input?: {
   }
   if (!input?.archived) {
     conditions.push(isNull(SessionTable.time_archived))
+  }
+  if (input?.olderThan) {
+    conditions.push(lt(SessionTable.time_updated, input.olderThan))
   }
 
   const limit = input?.limit ?? 100

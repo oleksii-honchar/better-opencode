@@ -8,7 +8,7 @@ import { Global } from "@opencode-ai/core/global"
 import * as Log from "@opencode-ai/core/util/log"
 import { NamedError } from "@opencode-ai/core/util/error"
 import path from "path"
-import { readFileSync, readdirSync, existsSync } from "fs"
+import { readFileSync, readdirSync, existsSync, statSync } from "fs"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { EffectBridge } from "@/effect/bridge"
@@ -106,6 +106,7 @@ export const Client = Object.assign(
     db.run("PRAGMA busy_timeout = 5000")
     db.run("PRAGMA cache_size = -64000")
     db.run("PRAGMA foreign_keys = ON")
+    db.run("PRAGMA journal_size_limit = 16777216")
     db.run("PRAGMA wal_checkpoint(PASSIVE)")
 
     // Apply schema migrations
@@ -126,6 +127,8 @@ export const Client = Object.assign(
       applyMigrations(db, entries)
     }
 
+    startWalCheckpointLoop()
+
     client = db
     loaded = true
     return db
@@ -141,8 +144,60 @@ export const Client = Object.assign(
 
 export function close() {
   if (!Client.loaded()) return
+  stopWalCheckpointLoop()
   Client().$client.close()
   Client.reset()
+}
+
+let walCheckInterval: ReturnType<typeof setInterval> | undefined
+
+export function startWalCheckpointLoop(): void {
+  if (process.env.OPENCODE_DB_NO_AUTO_CHECKPOINT === "1") {
+    log.info("auto WAL checkpoint disabled via OPENCODE_DB_NO_AUTO_CHECKPOINT")
+    return
+  }
+  if (walCheckInterval) return
+
+  log.info("starting background WAL checkpoint loop (interval: 10 min)")
+
+  walCheckInterval = setInterval(() => {
+    try {
+      const dbPath = getPath(readRuntimeFlags())
+      const walPath = dbPath + "-wal"
+
+      let walSize = 0
+      let walSizeMB = 0
+      try {
+        walSize = statSync(walPath).size
+        walSizeMB = walSize / (1024 * 1024)
+      } catch {
+        // WAL file may not exist yet
+      }
+
+      if (walSize > 16 * 1024 * 1024) {
+        log.info(`WAL file is ${walSizeMB.toFixed(1)}MB (> 16MB), initiating TRUNCATE checkpoint`)
+        try {
+          const { Database: BunDatabase } = require("bun:sqlite") as typeof import("bun:sqlite")
+          const tmpDb = new BunDatabase(dbPath)
+          tmpDb.run("PRAGMA wal_checkpoint(TRUNCATE)")
+          tmpDb.close()
+          log.info("WAL checkpoint completed (TRUNCATE)")
+        } catch (err) {
+          log.error("WAL checkpoint failed", { error: String(err) })
+        }
+      }
+    } catch (err) {
+      log.error("WAL checkpoint loop error", { error: String(err) })
+    }
+  }, 10 * 60 * 1000)
+}
+
+export function stopWalCheckpointLoop(): void {
+  if (walCheckInterval) {
+    clearInterval(walCheckInterval)
+    walCheckInterval = undefined
+    log.info("background WAL checkpoint loop stopped")
+  }
 }
 
 export type TxOrDb = Transaction | Client

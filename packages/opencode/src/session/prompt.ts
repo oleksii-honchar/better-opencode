@@ -1581,6 +1581,19 @@ export const layer = Layer.effect(
               tools,
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
+              onSystemPrepared: step === 1
+                ? (finalSystem: string) =>
+                    sessions.updatePart({
+                      id: PartID.ascending(),
+                      messageID: lastUser.id,
+                      sessionID,
+                      type: "text",
+                      text: finalSystem,
+                      synthetic: true,
+                      ignored: true,
+                      metadata: { systemPrompt: true },
+                    } satisfies MessageV2.TextPart)
+                : undefined,
             })
 
             if (structured !== undefined) {

@@ -363,6 +363,7 @@ manage sessions
 Commands:
   opencode session list                list sessions
   opencode session delete <sessionID>  delete a session
+  opencode session cleanup             archive and delete old sessions
 
 Options:
   -h, --help        show help                                                              [boolean]
@@ -399,6 +400,10 @@ Commands:
   opencode db [query]     open an interactive sqlite3 shell or run a query                 [default]
   opencode db path        print the database path
   opencode db migrate     migrate JSON data to SQLite (merges with existing data)
+  opencode db vacuum      reclaim unused space by rebuilding the database file
+  opencode db checkpoint  truncate the WAL journal file
+  opencode db stats       show database statistics and vacuum recommendations
+  opencode db compact     delete compacted and old tool call parts, then vacuum
 
 Positionals:
   query  SQL query to execute                                                               [string]

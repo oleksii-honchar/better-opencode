@@ -2315,6 +2315,53 @@ noLLMServer.instance(
   30_000,
 )
 
+it.instance(
+  "persists system prompt as synthetic ignored part on first user message",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "System prompt persistence",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "hello" }],
+      })
+
+      yield* llm.text("world")
+
+      yield* prompt.loop({ sessionID: session.id })
+
+      // Query parts from the first user message
+      const msgs = yield* MessageV2.filterCompactedEffect(session.id)
+      const firstUser = msgs.find((m) => m.info.role === "user")
+      expect(firstUser).toBeDefined()
+      if (!firstUser) return
+
+      const systemPromptParts = firstUser.parts.filter(
+        (part): part is MessageV2.TextPart =>
+          part.type === "text" && part.metadata?.systemPrompt === true,
+      )
+
+      // Exactly one system prompt part
+      expect(systemPromptParts).toHaveLength(1)
+
+      const sp = systemPromptParts[0]
+      // Part has correct flags
+      expect(sp.synthetic).toBe(true)
+      expect(sp.ignored).toBe(true)
+      // Part text contains the complete system prompt (agent persona + env block)
+      expect(sp.text).toContain("You are opencode, an interactive CLI tool")
+      expect(sp.text).toContain("Working directory")
+    }),
+)
+
 noLLMServer.instance(
   "unknown command throws typed error with available names",
   () =>

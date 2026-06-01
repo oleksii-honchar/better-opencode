@@ -44,7 +44,12 @@ function pagerCmd(): string[] {
 export const SessionCommand = cmd({
   command: "session",
   describe: "manage sessions",
-  builder: (yargs: Argv) => yargs.command(SessionListCommand).command(SessionDeleteCommand).demandCommand(),
+  builder: (yargs: Argv) =>
+    yargs
+      .command(SessionListCommand)
+      .command(SessionDeleteCommand)
+      .command(SessionCleanupCommand)
+      .demandCommand(),
   async handler() {},
 })
 
@@ -111,6 +116,66 @@ export const SessionListCommand = effectCmd({
       })
     } else {
       console.log(output)
+    }
+  }),
+})
+
+export const SessionCleanupCommand = effectCmd({
+  command: "cleanup",
+  describe: "archive and delete old sessions",
+  builder: (yargs) =>
+    yargs
+      .option("older-than", {
+        describe: "delete sessions older than N days (e.g. 90d)",
+        type: "string",
+        default: "90d",
+      })
+      .option("dry-run", {
+        describe: "show what would be deleted without modifying the database",
+        type: "boolean",
+        default: false,
+      }),
+  handler: Effect.fn("Cli.session.cleanup")(function* (args) {
+    const olderThanRaw = String(args.olderThan ?? "90d")
+    const matchDays = olderThanRaw.match(/^(\d+)d$/)
+    const days = matchDays ? parseInt(matchDays[1], 10) : parseInt(olderThanRaw, 10)
+    if (isNaN(days) || days <= 0) {
+      return yield* fail(`Invalid --older-than: "${olderThanRaw}". Use format like "90d" or a number of days.`)
+    }
+
+    const cutoff = Date.now() - days * 86400000
+    const svc = yield* Session.Service
+
+    // Find old sessions — non-archived root sessions older than cutoff
+    const sessions = Array.from(Session.listGlobal({ archived: false, roots: true, olderThan: cutoff }))
+
+    if (sessions.length === 0) {
+      UI.println("No old sessions found to clean up.")
+      return
+    }
+
+    // Print session info
+    const prefix = args.dryRun ? "[dry-run] " : ""
+    for (const session of sessions) {
+      const timeStr = new Date(session.time.updated).toISOString()
+      UI.println(`${prefix}${session.id}  ${session.title}  ${timeStr}`)
+    }
+
+    if (!args.dryRun) {
+      // Two-phase: archive first for safety, then remove
+      for (const session of sessions) {
+        yield* svc.setArchived({ sessionID: SessionID.make(session.id), time: Date.now() })
+      }
+      for (const session of sessions) {
+        yield* svc.remove(SessionID.make(session.id)).pipe(
+          Effect.catchIf(NotFoundError.isInstance, () => Effect.void),
+        )
+      }
+      UI.println(
+        UI.Style.TEXT_SUCCESS_BOLD + `Archived and deleted ${sessions.length} sessions` + UI.Style.TEXT_NORMAL,
+      )
+    } else {
+      UI.println(`[dry-run] Would archive and delete ${sessions.length} sessions`)
     }
   }),
 })

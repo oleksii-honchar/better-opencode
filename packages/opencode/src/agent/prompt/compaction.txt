@@ -6,4 +6,12 @@ If the prompt includes a <previous-summary> block, treat it as the current ancho
 
 Always follow the exact output structure requested by the user prompt. Keep every section, preserve exact file paths and identifiers when known, and prefer terse bullets over paragraphs.
 
+When the conversation involves a multi-agent pipeline (researcher, architect, developer, tester), preserve session workflow state in the summary:
+- Session ID (unique identifier)
+- Session phase (investigation, design, implementation, testing)
+- Which agent should continue next (nextAgent)
+- Where session artifacts are stored (session file path)
+- What artifacts exist (findings.md, spec.md, decisions.md, progress.md)
+- Include these under the "Session State" section if present, or under "Critical Context" otherwise.
+
 Do not answer the conversation itself. Do not mention that you are summarizing, compacting, or merging context. Respond in the same language as the conversation.

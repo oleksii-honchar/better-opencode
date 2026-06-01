@@ -3,6 +3,7 @@ import DESCRIPTION from "./task.txt"
 import { ToolJsonSchema } from "./json-schema"
 import { BackgroundJob } from "@/background/job"
 import { Bus } from "@/bus"
+import { Provider } from "@/provider/provider"
 import { Session } from "@/session/session"
 import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
@@ -110,6 +111,7 @@ export const TaskTool = Tool.define(
     const background = yield* BackgroundJob.Service
     const bus = yield* Bus.Service
     const config = yield* Config.Service
+    const provider = yield* Provider.Service
     const sessions = yield* Session.Service
     const scope = yield* Scope.Scope
     const status = yield* SessionStatus.Service
@@ -190,7 +192,24 @@ export const TaskTool = Tool.define(
         modelID: msg.info.modelID,
         providerID: msg.info.providerID,
       }
-      const model = Agent.resolveAgentModel(next.model, next.modelPreset, parentModel)
+      const resolvedModel = Agent.resolveAgentModel(next.model, next.modelPreset, parentModel)
+      let model = resolvedModel
+      if (next.modelPreset) {
+        const exit = yield* provider
+          .getModel(resolvedModel.providerID, resolvedModel.modelID)
+          .pipe(Effect.exit)
+        if (!Exit.isSuccess(exit)) {
+          const err = Cause.squash(exit.cause)
+          if (Provider.ModelNotFoundError.isInstance(err)) {
+            log.warn(
+              `modelPreset "${next.modelPreset}" produced model "${resolvedModel.providerID}/${resolvedModel.modelID}" which was not found — falling back to base model`,
+            )
+            model = parentModel
+          } else {
+            return yield* Effect.die(err)
+          }
+        }
+      }
       const metadata = {
         parentSessionId: ctx.sessionID,
         sessionId: nextSession.id,

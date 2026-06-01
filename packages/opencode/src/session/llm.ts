@@ -68,6 +68,7 @@ export type StreamInput = {
   tools: Record<string, Tool>
   retries?: number
   toolChoice?: "auto" | "required" | "none"
+  onSystemPrepared?: (system: string) => Effect.Effect<void, never, never>
 }
 
 export type StreamRequest = StreamInput & {
@@ -135,6 +136,7 @@ const live: Layer.Layer<
         plugin,
         flags,
         isWorkflow,
+        onSystemPrepared: input.onSystemPrepared,
       })
 
       // Wire up toolExecutor for DWS workflow models so that tool calls
