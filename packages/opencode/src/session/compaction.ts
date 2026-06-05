@@ -63,6 +63,13 @@ const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <te
 ## Next Steps
 - [ordered next actions or "(none)"]
 
+## Session State
+- Session ID: [(id) or "(unknown)"]
+- Phase: [investigation/design/implementation/testing or "(unknown)"]
+- Next Agent: [researcher/architect/developer/tester or "(unknown)"]
+- Session Path: [(path) or "(unknown)"]
+- Artifacts: [list of created files or "(none)"]
+
 ## Critical Context
 - [important technical facts, errors, open questions, or "(none)"]
 
