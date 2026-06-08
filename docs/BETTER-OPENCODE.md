@@ -24,6 +24,7 @@ The fork adds several features to address context loss, repetitive loops, sessio
 - **`supportedUrls` fallback** — Fixes `Object.entries(undefined)` crash when attaching images with models that don't define `supportedUrls` (defaults to `{}` via `overrideSupportedUrls` in `wrapLanguageModel`)
 - **Store VS Code Workspace Paths** — Multi-folder workspace awareness in `<env>` block and auto-allow for `external_directory`
 - **TUI Worker GlobalBus Cleanup** — Fixes `MaxListenersExceededWarning` by removing stale listeners on worker shutdown
+- **System Prompt Persistence** — Composed system prompt stored as an `ignored: true` TextPart on the first user message — no schema changes, no DB migration. [See detailed spec](./spec/13-system-prompt-persistence.md)
 
 See **[FEATURES.md](./FEATURES.md)** for detailed descriptions and configuration.
 

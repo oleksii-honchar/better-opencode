@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-06-08T18:32:00Z"
+updatedAt: "2026-06-08T21:00:00Z"
 tags: []
 ---
 
@@ -12,4 +12,4 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 
 ## Nodes
 
-_No ADRs yet._
+- [[0001-system-prompt-persistence.adr.md]] — Persist System Prompt in Session Database (ADR-0001, status: proposed)

@@ -1570,6 +1570,20 @@ export const layer = Layer.effect(
             const system = [...env, ...instructions, ...(hasMessageAttachments(lastUser.id) ? [FILE_ATTACHMENTS_SYSTEM_PROMPT] : []), ...(skills ? [skills] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+            const composedSystem = system.join("\n")
+            // Persist system prompt as a synthetic ignored part on the first user message (only step 1)
+            if (step === 1) {
+              yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: lastUser.id,
+                sessionID,
+                type: "text",
+                text: composedSystem,
+                synthetic: true,
+                ignored: true,
+                metadata: { systemPrompt: true },
+              } satisfies MessageV2.TextPart)
+            }
             const result = yield* handle.process({
               user: lastUser,
               agent,
