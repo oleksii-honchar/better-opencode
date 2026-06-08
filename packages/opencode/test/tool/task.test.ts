@@ -55,7 +55,7 @@ const itWithProvider = testEffect(
   Layer.mergeAll(
     layer(),
     ProviderTest.fake({
-      getModel: Effect.fn("TestProvider.getModel")((providerID, modelID) => {
+      getModel: Effect.fn("TestProvider.getModel")((providerID, modelID): Effect.Effect<Provider.Model, Provider.ModelNotFoundError> => {
         if (modelID.toString().endsWith("-precise")) {
           return Effect.fail(new Provider.ModelNotFoundError({ providerID, modelID }))
         }
