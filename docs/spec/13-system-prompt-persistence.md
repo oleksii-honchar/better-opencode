@@ -1,13 +1,15 @@
 ---
 feature: system-prompt-persistence
-version: 1.0.0
+version: 2.0.0
 status: spec
 source: session/260608-1830-chat-context-history/spec.md
 pr: N/A (to be created)
 implementation: pending
 ---
 
-# Spec: System Prompt Persistence via PartTable
+# Spec: Complete System Prompt Persistence via Callback Pattern
+
+**Version 2.0.0** — Redesigned to capture the complete, final system prompt (including agent persona, user system, and plugin transforms). See [v1.0.0 changelog](#changelog) below.
 
 ## Problem Statement
 
@@ -19,48 +21,88 @@ This creates limitations:
 - Session export is incomplete (missing the system prompt)
 - No way to audit which system prompt was active for a given session
 
+**Critical issue discovered in v1:** The initial design persisted only a **partial** system prompt — `env + instructions + skills + file attachments + structured output` — missing the **agent persona** (`agent.prompt`), **user system prompt** (`user.system`), and **plugin transforms**. These are added in the LLM request preparation layer (`llm/request.ts`'s `prepare()`), after the persistence point.
+
 ## Design Decision
 
-**Store the composed system prompt as a synthetic, `ignored: true` TextPart attached to the first user message in the session.**
+**Use a callback pattern to capture the complete, final system prompt from the LLM request preparation layer where it's fully composed, then persist it back in the calling layer.**
 
-No schema changes, no new types, ~8 lines of code in one file. Uses the existing `ignored` flag mechanism to keep the part invisible to the LLM, UI, and loop processing while still being persisted in the database.
+Add an `onSystemPrepared` callback to `prepare()` that is invoked AFTER the final system prompt is composed (including plugin transforms). The callback persists the prompt as a synthetic, `ignored: true` TextPart attached to the first user message.
 
 ## Architecture
 
-### Current State (Before)
+### Two-Layer Composition Problem
+
+The system prompt is composed in **two layers**:
 
 ```
-Session prompt.ts:runLoop():
-  Step 1: msgs = filterCompactedEffect(sessionID)     ← loads user/assistant messages from DB
-  Step 2: toModelMessagesEffect(msgs, model)          ← converts to LLM format
-  Step 3: system = [...env, ...instructions, ...skills] ← composes system prompt (runtime only)
-  Step 4: handle.process({ system, messages: modelMsgs }) ← sends to LLM
-
-Database:
-  SessionTable:  id, parent_id, title, agent, model, workspace_folders, ...
-  MessageTable:  id, session_id, data (role: user | assistant)
-  PartTable:     id, message_id, session_id, data (TextPart, ToolPart, ...)
-
-System prompt:  NOT STORED  ← gap
+Layer 1 — runLoop() (prompt.ts):
+  system = [...env, ...instructions, ...skills, ...fileAttachments, ...structuredOutput]
+  
+Layer 2 — prepare() (llm/request.ts):
+  finalSystem = [agent.prompt || providerPrompt, ...input.system, user.system]
+  plugin.transform(finalSystem)  ← post-composition hook
 ```
 
-### After Implementation
+**v1 mistake:** Persisted at Layer 1 → missing agent.prompt, user.system, and plugin transforms.
+
+**v2 fix:** Callback from Layer 2 → captures the EXACT prompt the LLM receives.
+
+### Data Flow
 
 ```
-Session prompt.ts:runLoop():
-  Step 1: msgs = filterCompactedEffect(sessionID)     ← loads user/assistant messages from DB
-  Step 2: toModelMessagesEffect(msgs, model)          ← converts to LLM format
-  Step 3: system = [...env, ...instructions, ...skills] ← composes system prompt
-  Step 4: [PERSIST SYSTEM PROMPT] ← only step === 1, via sessions.updatePart()
-  Step 5: handle.process({ system, messages: modelMsgs }) ← sends to LLM
-
-Database:
-  SessionTable:  id, parent_id, title, agent, model, workspace_folders, ...
-  MessageTable:  id, session_id, data (role: user | assistant)
-  PartTable:     id, message_id, session_id, data (TextPart, ToolPart, ...)
-                    └─ NEW: TextPart with ignored: true, metadata.systemPrompt: true
-
-System prompt:  STORED in PartTable  ← gap closed
+┌─────────────────────────────────────────────────────────────┐
+│                      runLoop() (prompt.ts)                   │
+│                                                             │
+│  Step 1: msgs = filterCompactedEffect(sessionID)    ← DB    │
+│  Step 2: toModelMessagesEffect(msgs, model)                │
+│  Step 3: system = [...env, ...instructions, ...skills]      │
+│  Step 4: handle.process({                                  │
+│            system,                                          │
+│            onSystemPrepared: (finalSystem) => {             │
+│              yield* sessions.updatePart({                   │
+│                id: PartID.ascending(),                      │
+│                messageID: lastUser.id,                      │
+│                sessionID,                                   │
+│                type: "text",                                │
+│                text: finalSystem,     ← COMPLETE prompt     │
+│                synthetic: true,                             │
+│                ignored: true,                               │
+│                metadata: { systemPrompt: true },            │
+│              })                                             │
+│            },                                               │
+│          })                                                 │
+└─────────────────────────────────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     LLM layer (llm.ts)                       │
+│                                                             │
+│  const prepared = yield* LLMRequestPrep.prepare({           │
+│    ...input,                                                │
+│    onSystemPrepared: input.onSystemPrepared,   ← callback   │
+│  })                                                         │
+└─────────────────────────────────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────────────────────────────────┐
+│             prepare() (llm/request.ts) — THE COMPOSITION     │
+│                                                             │
+│  const system = [                                           │
+│    agent.prompt || providerPrompt,  ← ✅ CAPTURED           │
+│    ...input.system,         ← ✅ CAPTURED (env+instr+...)   │
+│    user.system,              ← ✅ CAPTURED                  │
+│  ].filter(x => x).join("\n")                                │
+│                                                             │
+│  yield* plugin.trigger("experimental.chat.system.transform",│
+│    { system })     ← ✅ CAPTURED AFTER TRANSFORM           │
+│                                                             │
+│  if (input.onSystemPrepared) {                              │
+│    yield* input.onSystemPrepared(system[0])  ← callback     │
+│  }                                                          │
+│                                                             │
+│  return { system, messages, tools, params, ... }            │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### Why `ignored: true` is Correct
@@ -76,11 +118,10 @@ The `ignored` flag is the critical mechanism that makes this approach work:
 
 **Timing safety:**
 
-The part is created at Step 4, AFTER `toModelMessages` runs (Step 2):
+The callback is invoked inside `prepare()` after the final system prompt is composed. The part is created via the callback before the LLM call:
 
-- **First LLM call:** Part created AFTER Step 2 → not in messages array. LLM receives system prompt only via `system` array — **no duplication**.
+- **First LLM call:** Part created via callback, but `ignored: true` → not sent to LLM. LLM receives system prompt via `system` array — **no duplication**.
 - **Subsequent LLM calls:** Part exists in DB, loaded in Step 1, but `ignored: true` → filtered out — **no duplication**.
-- If `ignored` were `false` and part created BEFORE `toModelMessages`: **duplication** — LLM receives system prompt as `role: "system"` AND as text in user message.
 
 ## Data Model
 
@@ -103,6 +144,8 @@ The part is created at Step 4, AFTER `toModelMessages` runs (Step 2):
 }
 ```
 
+**KEY DIFFERENCE FROM v1:** The `text` field now contains the COMPLETE system prompt (agent persona + env + instructions + user system + plugin transforms), not just the partial `composedSystem` from `prompt.ts`.
+
 ### Query to Retrieve
 
 ```sql
@@ -114,38 +157,110 @@ WHERE session_id = ?
 
 ## Implementation Details
 
-### File Modified
+### File Change Summary
 
-| File | Lines Added | Lines Removed |
-|------|-------------|---------------|
-| `packages/opencode/src/session/prompt.ts` | +11 | 0 |
+| File | Lines Added | Lines Removed | Change Type |
+|------|-------------|---------------|-------------|
+| `packages/opencode/src/session/llm/request.ts` | +5 | 0 | Add callback to PrepareInput, invoke after transform |
+| `packages/opencode/src/session/llm.ts` | +3 | 0 | Add to StreamInput, pass through to prepare() |
+| `packages/opencode/src/session/prompt.ts` | +12 | -11 | Replace inline persistence with callback |
+| **Total** | **+20** | **-11** | **Net +9 lines** |
 
-### Implementation
+### Phase 1: Add Callback to prepare()
 
-**`packages/opencode/src/session/prompt.ts`** (insertion point: after system prompt composition, before `handle.process()`, only on `step === 1`):
+**File:** `packages/opencode/src/session/llm/request.ts`
 
-```typescript
-const system = [
-  ...env,
-  ...instructions,
-  ...(hasMessageAttachments(lastUser.id) ? [FILE_ATTACHMENTS_SYSTEM_PROMPT] : []),
-  ...(skills ? [skills] : []),
-]
-const composedSystem = system.join("\n")
+```diff
+  type PrepareInput = {
+    // ... existing fields ...
++   readonly onSystemPrepared?: (system: string) => Effect.Effect<void, never, never>
+  }
 
-// Persist system prompt as a synthetic ignored part on the first user message (only step 1)
-if (step === 1) {
-  yield* sessions.updatePart({
-    id: PartID.ascending(),
-    messageID: lastUser.id,
-    sessionID,
-    type: "text",
-    text: composedSystem,
-    synthetic: true,
-    ignored: true,
-    metadata: { systemPrompt: true },
-  } satisfies MessageV2.TextPart)
-}
+  export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
+    // ... existing composition (unchanged) ...
+    yield* input.plugin.trigger(
+      "experimental.chat.system.transform",
+      { sessionID: input.sessionID, model: input.model },
+      { system },
+    )
+
++   // Notify caller of the final composed system prompt (after plugin transform)
++   if (input.onSystemPrepared) {
++     yield* input.onSystemPrepared(system[0])
++   }
+
+    // ... rest of prepare (unchanged) ...
+  })
+```
+
+### Phase 2: Thread Callback Through LLM Layer
+
+**File:** `packages/opencode/src/session/llm.ts`
+
+```diff
+  export type StreamInput = {
+    // ... existing fields ...
++   onSystemPrepared?: (system: string) => Effect.Effect<void, never, never>
+  }
+```
+
+```diff
+       const prepared = yield* LLMRequestPrep.prepare({
+         ...input,
+         provider: item,
+         auth: info,
+         plugin,
+         flags,
+         isWorkflow,
++        onSystemPrepared: input.onSystemPrepared,
+       })
+```
+
+### Phase 3: Wire Callback in prompt.ts
+
+**File:** `packages/opencode/src/session/prompt.ts`
+
+Replace the current incomplete persistence with the callback approach:
+
+```diff
+-           // Persist system prompt as a synthetic ignored part (only step 1)
+-           if (step === 1) {
+-             yield* sessions.updatePart({
+-               id: PartID.ascending(),
+-               messageID: lastUser.id,
+-               sessionID,
+-               type: "text",
+-               text: composedSystem,
+-               synthetic: true,
+-               ignored: true,
+-               metadata: { systemPrompt: true },
+-             } satisfies MessageV2.TextPart)
+-           }
+            const result = yield* handle.process({
+              user: lastUser,
+              agent,
+              permission: session.permission,
+              sessionID,
+              parentSessionID: session.parentID,
+              system,
+              messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
+              tools,
+              model,
+              toolChoice: format.type === "json_schema" ? "required" : undefined,
++             onSystemPrepared: step === 1
++               ? (finalSystem: string) =>
++                   sessions.updatePart({
++                     id: PartID.ascending(),
++                     messageID: lastUser.id,
++                     sessionID,
++                     type: "text",
++                     text: finalSystem,
++                     synthetic: true,
++                     ignored: true,
++                     metadata: { systemPrompt: true },
++                   } satisfies MessageV2.TextPart)
++               : undefined,
+            })
 ```
 
 **Dependencies (all already in scope):**
@@ -154,44 +269,66 @@ if (step === 1) {
 - `lastUser.id` — already in scope (the first user message of the session)
 - `MessageV2.TextPart` — already imported via `MessageV2` namespace
 
+### Phase 4: Add Callback to Process Input Type
+
+Add `onSystemPrepared` to the process input type used by `handle.process()`. The exact location depends on how `handle.process()` maps to `StreamInput`. If `handle.process()` passes through to `StreamInput`, the Phase 2 change may be sufficient.
+
 ## Alternative Approaches Considered
 
-### Option 3: SessionTable Column (rejected)
+### Duplicate Composition in prompt.ts (rejected)
+
+Add `agent.prompt` and `user.system` to the system array in `prompt.ts`:
+
+```typescript
+const system = [
+  agent.prompt ?? providerPrompt,
+  ...env, ...instructions, ...skills,
+  lastUser.system,
+].filter(x => x).join("\n")
+```
+
+**Pros:** Minimal change (one file, fewer lines).
+
+**Cons:**
+- **Code duplication** — two composition sites that can diverge
+- **Plugin transforms not captured** — `experimental.chat.system.transform` runs AFTER composition in `prepare()`
+- **Fundamentally unreliable** — if persisted prompt ≠ actual prompt, the feature misleads
+
+**Verdict:** Rejected. The duplication risk and missing plugin transforms make this approach unreliable for capturing the EXACT system prompt the LLM receives.
+
+### SessionTable Column (rejected)
 
 Add a `system_prompt: text()` column to SessionTable, persist at `prepare()` time.
 
-**Why rejected:**
-1. **DB migration required** — The `workspace_folders` column (added in spec/10) required a multi-file migration with client-side SDK workarounds. This would need the same treatment.
-2. **Wrong prompt stored** — The system prompt is composed in two places with different content:
-   - `runLoop()`: env + instructions + FILE_ATTACHMENTS_SYSTEM_PROMPT + skills + STRUCTURED_OUTPUT_SYSTEM_PROMPT
-   - `prepare()`: agent.prompt + system (from runLoop) + user.system
-   
-   Persisting at `prepare()` time stores a slightly different prompt than what was actually used by the LLM.
-3. **Service coupling** — `prepare()` in `llm.ts` doesn't have Session service — requires `Database.use()` directly, coupling the LLM layer to the DB schema.
+**Why rejected:** DB migration required, wrong composition point, service coupling between LLM layer and DB schema.
 
-### Option B: New SystemPromptPart Type (rejected)
+### Extract Shared Composition Function (rejected)
 
-Create a new `SystemPromptPart` type with structured source data.
+Create `composeSystemPrompt()` used by both layers.
 
-**Why rejected:** Over-engineered for current use case. Requires schema change (new type in Part union), changes in 4 files, UI must handle new type. Option A is sufficient and simpler.
+**Why rejected:** Plugin transform still happens after composition in `prepare()`. The shared function would produce the pre-transform prompt.
 
 ## OpenChamber Impact Assessment
 
 | File | Change Type | Impact |
 |------|-------------|--------|
-| `prompt.ts` | Part creation in runLoop | **None** — internal server code, no client-facing API |
+| `request.ts` | Add optional callback to PrepareInput | **None** — internal, optional parameter |
+| `llm.ts` | Add optional field to StreamInput, pass through | **None** — internal, optional parameter |
+| `prompt.ts` | Replace inline persistence with callback | **None** — internal server code |
 
-**Risk Level:** Very Low — no schema changes, no API changes, no client-side code changes.
+**Risk Level:** Very Low — no schema changes, no API changes, no client-side code changes. The callback is optional and doesn't affect existing callers.
 
 ## Success Criteria
 
-- [ ] System prompt is persisted in PartTable on first user message
+- [ ] Complete system prompt (including agent.prompt, user.system, and plugin transforms) is persisted in PartTable
+- [ ] Persisted prompt matches the exact system prompt the LLM receives (verifiable by comparison)
 - [ ] System prompt is retrievable via SQL query with `metadata->>'systemPrompt' = 'true'`
 - [ ] System prompt does NOT appear in `toModelMessages` output (verified by `ignored: true`)
 - [ ] System prompt does NOT appear in the UI chat view (verified by `ignored: true`)
 - [ ] No LLM duplication (system prompt sent only once per call)
 - [ ] No schema changes required (no DB migration)
 - [ ] Existing sessions are unaffected (no system prompt for them)
+- [ ] Plugin transforms are captured (verify with a test plugin that modifies the system prompt)
 
 ## Open Decisions
 
@@ -200,3 +337,26 @@ Create a new `SystemPromptPart` type with structured source data.
 | Update frequency | First message only vs. every message | First message only (env block would change each call) |
 | Store env block | Yes (current) vs. No | Yes (captures exact prompt used) |
 | Structured sources | Flat text vs. structured JSON | Flat text (structured can be added later) |
+
+## Changelog
+
+### v2.0.0 (2026-06-08) — Callback Pattern Redesign
+
+**Problem:** v1.0.0 persisted an incomplete system prompt (missing agent persona, user system, and plugin transforms) because composition happens in two layers.
+
+**Changes:**
+- Redesigned to use a callback pattern (`onSystemPrepared`) from `prepare()` to capture the complete, final system prompt
+- Added `onSystemPrepared` callback to `PrepareInput` in `llm/request.ts`
+- Threaded callback through `llm.ts` (`StreamInput`)
+- Replaced inline persistence in `prompt.ts` with callback
+- Persisted prompt now includes: agent.prompt, provider prompt, env, instructions, skills, file attachments, structured output, user.system, AND plugin transforms
+
+**Impact:** The persisted system prompt now accurately reflects the EXACT prompt the LLM receives, including all composition layers and plugin transforms.
+
+### v1.0.0 (2026-06-08) — Initial Design
+
+**Problem:** System prompt not persisted at all.
+
+**Solution:** Persist `composedSystem` from `prompt.ts` as a synthetic, `ignored: true` TextPart.
+
+**Issue:** Only captured partial system prompt (missing agent.prompt, user.system, and plugin transforms). See `findings-agent-persona.md` for details.
