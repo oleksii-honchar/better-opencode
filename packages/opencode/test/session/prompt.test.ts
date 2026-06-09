@@ -2356,7 +2356,8 @@ it.instance(
       // Part has correct flags
       expect(sp.synthetic).toBe(true)
       expect(sp.ignored).toBe(true)
-      // Part text contains expected system prompt content (env block includes "Working directory")
+      // Part text contains the complete system prompt (agent persona + env block)
+      expect(sp.text).toContain("You are opencode, an interactive CLI tool")
       expect(sp.text).toContain("Working directory")
     }),
 )

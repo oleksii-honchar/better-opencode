@@ -31,6 +31,7 @@ type PrepareInput = {
   readonly plugin: Plugin.Interface
   readonly flags: RuntimeFlags.Info
   readonly isWorkflow: boolean
+  readonly onSystemPrepared?: (system: string) => Effect.Effect<void, never, never>
 }
 
 export type Prepared = {
@@ -73,6 +74,10 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     const rest = system.slice(1)
     system.length = 0
     system.push(header, rest.join("\n"))
+  }
+
+  if (input.onSystemPrepared) {
+    yield* input.onSystemPrepared(system[0])
   }
 
   const variant =
