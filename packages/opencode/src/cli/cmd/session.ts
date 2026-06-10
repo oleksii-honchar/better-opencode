@@ -167,7 +167,9 @@ export const SessionCleanupCommand = effectCmd({
         yield* svc.setArchived({ sessionID: SessionID.make(session.id), time: Date.now() })
       }
       for (const session of sessions) {
-        yield* svc.remove(SessionID.make(session.id))
+        yield* svc.remove(SessionID.make(session.id)).pipe(
+          Effect.catchIf(NotFoundError.isInstance, () => Effect.void),
+        )
       }
       UI.println(
         UI.Style.TEXT_SUCCESS_BOLD + `Archived and deleted ${sessions.length} sessions` + UI.Style.TEXT_NORMAL,

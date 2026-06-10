@@ -122,6 +122,7 @@ describe("WAL Checkpoint Loop", () => {
   test("checkpoint loop can work with a real temp DB and WAL file", () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "wal-loop-test-"))
     const dbPath = join(tmpDir, "test.db")
+    const walPath = dbPath + "-wal"
     try {
       // Create a real WAL-mode DB
       const db = new BunDatabase(dbPath, { create: true })
@@ -141,7 +142,6 @@ describe("WAL Checkpoint Loop", () => {
       db.close()
 
       // Verify WAL file exists
-      const walPath = dbPath + "-wal"
       expect(existsSync(walPath)).toBe(true)
 
       // Run a checkpoint directly on the DB
