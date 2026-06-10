@@ -296,21 +296,14 @@ echo ""
 
 cd "$BETTER_OPENCODE_DIR"
 
-# Build local DCP plugin fork if configured
-DCP_DIR="${DCP_DIR:-$HOME/www/misc/better-opencode-dcp}"
-if [ -d "$DCP_DIR" ] && [ -f "$DCP_DIR/package.json" ]; then
-  echo "  Building local DCP plugin fork ($DCP_DIR)..."
-  (cd "$DCP_DIR" && npm run build 2>&1 | sed 's/^/    /')
-  echo "  DCP plugin fork built."
-  echo ""
-fi
-
 # Build server arguments
 SERVER_ARGS=(
   --hostname 127.0.0.1
   --port "$OPENCODE_PORT"
   --log-level DEBUG
 )
+
+export OPENCODE_DEV=1
 
 exec env -u OPENCODE_SERVER_PASSWORD OPENCODE_PORT="$OPENCODE_PORT" \
   bun run --cwd packages/opencode --conditions=browser src/index.ts \

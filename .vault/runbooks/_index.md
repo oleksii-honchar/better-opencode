@@ -2,7 +2,7 @@
 type: index
 title: "Operational Runbooks"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-06-08T18:32:00Z"
+updatedAt: "2026-06-10T20:00:00Z"
 tags: []
 ---
 
@@ -12,4 +12,4 @@ Step-by-step operational procedures for building, deploying, and maintaining bet
 
 ## Nodes
 
-_No runbooks yet._
+- [[0001-opencode-db-maintenance.runbook.md]] — OpenCode Database Maintenance

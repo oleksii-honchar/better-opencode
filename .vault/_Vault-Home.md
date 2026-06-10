@@ -2,7 +2,7 @@
 type: index
 title: "Vault Home"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-06-08T18:32:00Z"
+updatedAt: "2026-06-10T20:00:00Z"
 tags: []
 ---
 
