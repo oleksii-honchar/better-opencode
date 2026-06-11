@@ -156,17 +156,39 @@ function listTools(key: string, client: MCPClient, timeout: number) {
   )
 }
 
+/**
+ * Build a JSON Schema for a tool input, with a safety net for empty/missing properties.
+ *
+ * When the input schema has no properties (empty object or missing field),
+ * `additionalProperties` is set to `true` to avoid rejecting LLM-generated
+ * arguments that don't match any defined property (which would make the
+ * hallucination problem worse). When properties are present and non-empty,
+ * the default is `additionalProperties: false`, preserving strict validation.
+ */
+export function buildToolSchema(inputSchema: JSONSchema7): JSONSchema7 {
+  const schema = { ...inputSchema, type: "object" as const }
+  const hasProperties =
+    !!schema.properties && Object.keys(schema.properties).length > 0
+
+  if (!hasProperties) {
+    return {
+      ...schema,
+      properties: {},
+      additionalProperties: true,
+    }
+  }
+
+  return {
+    ...schema,
+    properties: schema.properties as JSONSchema7["properties"],
+    additionalProperties: schema.additionalProperties ?? false,
+  }
+}
+
 // Convert MCP tool definition to AI SDK Tool type
 function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number): Tool {
   const inputSchema = mcpTool.inputSchema
-
-  // Spread first, then override type to ensure it's always "object"
-  const schema: JSONSchema7 = {
-    ...(inputSchema as JSONSchema7),
-    type: "object",
-    properties: (inputSchema.properties ?? {}) as JSONSchema7["properties"],
-    additionalProperties: false,
-  }
+  const schema = buildToolSchema(inputSchema as JSONSchema7)
 
   return dynamicTool({
     description: mcpTool.description ?? "",
@@ -174,17 +196,27 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
     execute: async (args: unknown) => {
       // Resolve opencode://attachment URIs in args before forwarding
       const resolvedArgs = resolveAttachmentUris(args)
-      return client.callTool(
-        {
-          name: mcpTool.name,
-          arguments: (resolvedArgs || {}) as Record<string, unknown>,
-        },
-        CallToolResultSchema,
-        {
-          resetTimeoutOnProgress: true,
-          timeout,
-        },
-      )
+      log.debug("MCP tool execute", {
+        toolName: mcpTool.name,
+        argKeys: Object.keys((resolvedArgs || {}) as Record<string, unknown>),
+        argTypes: typeof resolvedArgs,
+      })
+      try {
+        return await client.callTool(
+          {
+            name: mcpTool.name,
+            arguments: (resolvedArgs || {}) as Record<string, unknown>,
+          },
+          CallToolResultSchema,
+          {
+            resetTimeoutOnProgress: true,
+            timeout,
+          },
+        )
+      } catch (error) {
+        log.warn("MCP tool call failed", { toolName: mcpTool.name, error })
+        throw error
+      }
     },
   })
 }

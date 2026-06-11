@@ -299,7 +299,15 @@ const dispatch = (
 
 const decodeAndExecute = (tool: AnyTool, call: ToolCallPart): Effect.Effect<ToolResultValueType, ToolFailure> =>
   tool._decode(call.input).pipe(
-    Effect.mapError((error) => new ToolFailure({ message: `Invalid tool input: ${error.message}` })),
+    Effect.mapError((error) => {
+      const rawHint = typeof call.input === "string" ? call.input.slice(0, 200) : undefined
+      return new ToolFailure({
+        message: rawHint
+          ? `Invalid tool input for "${call.name}". The provided arguments could not be parsed as valid JSON. Raw input: ${rawHint}`
+          : `Invalid tool input: ${error.message}`,
+        error,
+      })
+    }),
     Effect.flatMap((decoded) => tool.execute!(decoded, { id: call.id, name: call.name })),
     Effect.flatMap((value) =>
       tool._encode(value).pipe(

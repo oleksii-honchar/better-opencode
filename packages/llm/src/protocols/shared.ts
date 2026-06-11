@@ -105,13 +105,97 @@ export const parseJson = (route: string, input: string, message: string) =>
 export const joinText = (parts: ReadonlyArray<{ readonly text: string }>) => parts.map((part) => part.text).join("\n")
 
 /**
+ * Attempt to recover from hallucinated / concatenated JSON in tool call arguments.
+ *
+ * Strategy: try JSON.parse on the raw string. If that fails, scan for the
+ * first complete JSON object by tracking brace depth while staying
+ * string-aware at both the outer (candidate-start) and inner (depth) levels.
+ *
+ * Handles the common hallucination pattern where the LLM emits:
+ *   `{"query":"..."{"query":"...","from":"...",...}}`
+ * i.e. a partial object followed by the complete object.
+ */
+export const tryParseArgs = (raw: string): { parsed: unknown; extracted: string } | undefined => {
+  // Fast path: valid JSON
+  try {
+    const parsed = JSON.parse(raw)
+    return { parsed, extracted: raw }
+  } catch {
+    // Fall through to recovery
+  }
+
+  // Recovery: scan for the first valid JSON object, skipping `{` inside strings.
+  // Track string-context at the outer level so we never start a candidate scan
+  // from a `{` that sits inside a quoted value (e.g. `"find {x}"`).
+  let outerInString = false
+  let outerEscaped = false
+  for (let start = 0; start < raw.length; start++) {
+    const ch = raw[start]
+
+    // Update outer string-context tracking
+    if (outerEscaped) { outerEscaped = false; continue }
+    if (ch === "\\" && outerInString) { outerEscaped = true; continue }
+    if (ch === '"') { outerInString = !outerInString; continue }
+    if (outerInString) continue
+
+    if (ch !== "{") continue
+
+    // Found a top-level `{` — track braces to find the matching `}`
+    let depth = 0
+    let innerInString = false
+    let innerEscaped = false
+    for (let end = start; end < raw.length; end++) {
+      const ic = raw[end]
+      if (innerEscaped) { innerEscaped = false; continue }
+      if (ic === "\\" && innerInString) { innerEscaped = true; continue }
+      if (ic === '"') { innerInString = !innerInString; continue }
+      if (innerInString) continue
+      if (ic === "{") depth++
+      if (ic === "}") depth--
+      if (depth === 0) {
+        // Brace-balanced candidate — verify with JSON.parse
+        const candidate = raw.slice(start, end + 1)
+        try {
+          const parsed = JSON.parse(candidate)
+          return { parsed, extracted: candidate }
+        } catch {
+          // Still not valid — move on
+        }
+        break
+      }
+    }
+  }
+
+  return undefined // nothing recoverable
+}
+
+/**
  * Parse the streamed JSON input of a tool call. Treats an empty string as
  * `"{}"` — providers occasionally finish a tool call without ever emitting
  * input deltas (e.g. zero-arg tools). The error message is uniform across
  * routes: `Invalid JSON input for <route> tool call <name>`.
  */
 export const parseToolInput = (route: string, name: string, raw: string) =>
-  parseJson(route, raw || "{}", `Invalid JSON input for ${route} tool call ${name}`)
+  Effect.try({
+    try: () => {
+      const result = tryParseArgs(raw || "{}")
+      if (result) return result.parsed
+      // No recovery possible — include the raw text in a descriptive error
+      throw new Error(
+        `Invalid JSON input for ${route} tool call "${name}". Raw input: ${raw.slice(0, 200)}`,
+      )
+    },
+    catch: (error) =>
+      new LLMError({
+        module: "ProviderShared",
+        method: "stream",
+        reason: new InvalidProviderOutputReason({
+          route,
+          message: error instanceof Error ? error.message : String(error),
+          raw,
+        }),
+      }),
+  })
 
 /**
  * Encode a `MediaPart`'s raw bytes for inclusion in a JSON request body.
