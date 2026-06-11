@@ -6,7 +6,8 @@
   "license": "MIT",
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "test": "bun test --timeout 30000"
   },
   "exports": {
     ".": "./src/index.ts",

@@ -699,6 +699,7 @@ export const layer: Layer.Layer<
         path: sessionPath(ctx.worktree, ctx.directory),
         workspaceID: original.workspaceID,
         title,
+        agent: original.agent,
         workspaceFolders: original.workspaceFolders,
       })
       const msgs = yield* messages({ sessionID: input.sessionID })

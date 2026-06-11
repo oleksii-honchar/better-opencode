@@ -41,9 +41,9 @@ const AgentSchema = Schema.StructWithRest(
       description: "Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)",
     }),
     options: Schema.optional(Schema.Record(Schema.String, Schema.Any)),
-    modelPreset: Schema.optional(Schema.Literals(["precise", "instruct"])).annotate({
+    modelPreset: Schema.optional(Schema.String).annotate({
       description:
-        "Appends a suffix to the inherited model ID (e.g., -precise, -instruct). Only applies when the agent inherits its model from the parent session.",
+        "Suffix to append to the inherited model ID (e.g., -precise, -instruct, -coder-precise). Only applies when the agent inherits its model from the parent session.",
     }),
     color: Schema.optional(Color).annotate({
       description: "Hex color code (e.g., #FF5733) or theme color (e.g., primary)",

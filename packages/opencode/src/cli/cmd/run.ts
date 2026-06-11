@@ -458,6 +458,7 @@ export const RunCommand = effectCmd({
         const name = title()
         const result = await sdk.session.create({
           title: name,
+          agent: args.agent,
           permission: rules as unknown as Array<{ permission: string; pattern: string; action: "allow" | "deny" | "ask" }>,
           ...(localInstance?.workspaceFolders !== undefined && { workspaceFolders: localInstance.workspaceFolders }),
         })
