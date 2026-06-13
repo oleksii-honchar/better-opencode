@@ -810,7 +810,9 @@ export const layer = Layer.effect(
 
               const timeout = entry?.timeout ?? defaultTimeout
               for (const mcpTool of filteredTools) {
-                result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+                const toolKey = sanitize(clientName) + "_" + sanitize(mcpTool.name)
+                result[toolKey] = convertMcpTool(mcpTool, client, timeout)
+                ;(result[toolKey] as any).server = clientName
               }
 
               log.debug("MCP tools filtered", {
@@ -824,7 +826,9 @@ export const layer = Layer.effect(
               // No tool filtering — use original listed tools
               const timeout = entry?.timeout ?? defaultTimeout
               for (const mcpTool of listed) {
-                result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+                const toolKey = sanitize(clientName) + "_" + sanitize(mcpTool.name)
+                result[toolKey] = convertMcpTool(mcpTool, client, timeout)
+                ;(result[toolKey] as any).server = clientName
               }
             }
           }),
