@@ -29,6 +29,12 @@ describe("resolveAgentModel", () => {
     expect(result.modelID).toBe(ModelID.make("qwopus3.6-27b-instruct"))
   })
 
+  it("computes suffixed model ID with custom preset string", () => {
+    const result = Agent.resolveAgentModel(undefined, "coder-precise", parentModel)
+    expect(result.providerID).toBe(parentModel.providerID)
+    expect(result.modelID).toBe(ModelID.make("qwopus3.6-27b-coder-precise"))
+  })
+
   it("returns parent model when neither agent model nor modelPreset is set", () => {
     const result = Agent.resolveAgentModel(undefined, undefined, parentModel)
     expect(result).toEqual(parentModel)

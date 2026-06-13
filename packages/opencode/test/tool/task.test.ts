@@ -816,7 +816,7 @@ describe("tool.task", () => {
         agent: {
           "precise-agent": {
             mode: "subagent",
-            modelPreset: "precise" as const,
+            modelPreset: "precise",
           },
         },
       },

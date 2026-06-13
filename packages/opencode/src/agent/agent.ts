@@ -43,7 +43,7 @@ export const Info = Schema.Struct({
       providerID: ProviderID,
     }),
   ),
-  modelPreset: Schema.optional(Schema.Literals(["precise", "instruct"])),
+  modelPreset: Schema.optional(Schema.String),
   variant: Schema.optional(Schema.String),
   prompt: Schema.optional(Schema.String),
   options: Schema.Record(Schema.String, Schema.Unknown),

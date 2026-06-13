@@ -1545,6 +1545,15 @@ export const layer = Layer.effect(
               { tools },
             ).pipe(Effect.orDie)
 
+            // Re-wrap tools returned by the transform hook — plugins return
+            // plain objects that lack the AI SDK's jsonSchema() wrapper.
+            // The AI SDK's asSchema() needs a callable Schema object.
+            for (const t of Object.values(toolsResult.tools)) {
+              if (t.inputSchema && typeof t.inputSchema === "object" && typeof t.inputSchema !== "function") {
+                t.inputSchema = jsonSchema(t.inputSchema as unknown as JSONSchema7)
+              }
+            }
+
             if (step === 1)
               yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
 
