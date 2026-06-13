@@ -1538,6 +1538,13 @@ export const layer = Layer.effect(
               })
             }
 
+            // Allow plugins to transform the tools list before LLM send
+            const toolsResult = yield* plugin.trigger(
+              "experimental.tools.transform",
+              { sessionID, model },
+              { tools },
+            ).pipe(Effect.orDie)
+
             if (step === 1)
               yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
 
@@ -1578,7 +1585,7 @@ export const layer = Layer.effect(
               parentSessionID: session.parentID,
               system,
               messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
-              tools,
+              tools: toolsResult.tools,
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
               onSystemPrepared: step === 1

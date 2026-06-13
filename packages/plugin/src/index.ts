@@ -296,6 +296,20 @@ export interface Hooks {
     },
   ) => Promise<void>
   /**
+   * Called after all tool definitions have been resolved but before
+   * they are sent to the LLM. Allows plugins to inspect, modify, or
+   * replace the tools dictionary.
+   *
+   * - `tools`: The current tools dictionary (`Record<string, any>`).
+   *   Mutating this object changes the tools visible to the LLM.
+   */
+  "experimental.tools.transform"?: (
+    input: { sessionID?: string; model: Model },
+    output: {
+      tools: Record<string, any>
+    },
+  ) => Promise<void>
+  /**
    * Called before session compaction starts. Allows plugins to customize
    * the compaction prompt.
    *
