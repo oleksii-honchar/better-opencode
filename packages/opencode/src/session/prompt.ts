@@ -1549,7 +1549,7 @@ export const layer = Layer.effect(
             // plain objects that lack the AI SDK's jsonSchema() wrapper.
             // The AI SDK's asSchema() needs a callable Schema object.
             for (const t of Object.values(toolsResult.tools)) {
-              if (t.inputSchema && typeof t.inputSchema === "object" && typeof t.inputSchema !== "function") {
+              if (t.inputSchema && typeof t.inputSchema === "object" && typeof t.inputSchema !== "function" && !("jsonSchema" in t.inputSchema)) {
                 t.inputSchema = jsonSchema(t.inputSchema as unknown as JSONSchema7)
               }
             }
