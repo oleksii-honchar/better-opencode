@@ -777,6 +777,52 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance(
+    "passes models to resolveAgentModel and uses provider-matched model when parent provider matches",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+        const result = yield* def.execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "multi-model-agent",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(result).toBeDefined()
+        // The subagent has models: [test/mammoth-model] and parent provider is "test"
+        // So the resolved model should be the provider-matched one from models
+        expect(seen?.model?.modelID).toBe(ModelID.make("mammoth-model"))
+        expect(seen?.model?.providerID).toBe(ProviderID.make("test"))
+      }),
+    {
+      config: {
+        agent: {
+          "multi-model-agent": {
+            mode: "subagent",
+            models: ["test/mammoth-model"],
+          },
+        },
+      },
+    },
+  )
+
   itWithProvider.instance(
     "falls back to parent model when modelPreset produces a model not found in provider",
     () =>

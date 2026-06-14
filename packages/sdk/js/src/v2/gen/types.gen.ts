@@ -988,6 +988,7 @@ export type PermissionConfig =
 
 export type AgentConfig = {
   model?: string
+  models?: Array<string>
   variant?: string
   temperature?: number
   top_p?: number
@@ -1003,7 +1004,7 @@ export type AgentConfig = {
   options?: {
     [key: string]: unknown
   }
-  modelPreset?: "precise" | "instruct"
+  modelPreset?: string
   /**
    * Hex color code (e.g., #FF5733) or theme color (e.g., primary)
    */
@@ -1014,6 +1015,7 @@ export type AgentConfig = {
   [key: string]:
     | unknown
     | string
+    | Array<string>
     | number
     | {
         [key: string]: boolean
@@ -1026,8 +1028,6 @@ export type AgentConfig = {
     | {
         [key: string]: unknown
       }
-    | "precise"
-    | "instruct"
     | string
     | "primary"
     | "secondary"
@@ -1677,7 +1677,11 @@ export type Agent = {
     modelID: string
     providerID: string
   }
-  modelPreset?: "precise" | "instruct"
+  models?: Array<{
+    modelID: string
+    providerID: string
+  }>
+  modelPreset?: string
   variant?: string
   prompt?: string
   options: {

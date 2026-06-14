@@ -22,6 +22,10 @@ const Color = Schema.Union([
 const AgentSchema = Schema.StructWithRest(
   Schema.Struct({
     model: Schema.optional(ConfigModelID),
+    models: Schema.optional(Schema.mutable(Schema.Array(ConfigModelID))).annotate({
+      description:
+        "Array of provider-prefixed model IDs (e.g., 'mammoth/qwen3.6-40b', 'deepseek/v4-flash') for per-provider model selection.",
+    }),
     variant: Schema.optional(Schema.String).annotate({
       description: "Default model variant for this agent (applies only when using the agent's configured model).",
     }),
@@ -60,6 +64,7 @@ const AgentSchema = Schema.StructWithRest(
 const KNOWN_KEYS = new Set([
   "name",
   "model",
+  "models",
   "variant",
   "prompt",
   "description",

@@ -192,7 +192,7 @@ export const TaskTool = Tool.define(
         modelID: msg.info.modelID,
         providerID: msg.info.providerID,
       }
-      const resolvedModel = Agent.resolveAgentModel(next.model, next.modelPreset, parentModel)
+      const resolvedModel = Agent.resolveAgentModel(next.models, next.model, next.modelPreset, parentModel)
       let model = resolvedModel
       if (next.modelPreset) {
         const exit = yield* provider

@@ -43,6 +43,16 @@ export const Info = Schema.Struct({
       providerID: ProviderID,
     }),
   ),
+  models: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        modelID: ModelID,
+        providerID: ProviderID,
+      }),
+    ),
+  ).annotate({
+    description: "Provider-specific model selections parsed from config",
+  }),
   modelPreset: Schema.optional(Schema.String),
   variant: Schema.optional(Schema.String),
   prompt: Schema.optional(Schema.String),
@@ -302,6 +312,7 @@ export const layer = Layer.effect(
               native: false,
             }
           if (value.model) item.model = Provider.parseModel(value.model)
+          if (value.models) item.models = value.models.map(Provider.parseModel)
           item.modelPreset = value.modelPreset ?? item.modelPreset
           item.variant = value.variant ?? item.variant
           item.prompt = value.prompt ?? item.prompt
@@ -468,15 +479,25 @@ export const layer = Layer.effect(
 
 /**
  * Resolves the effective model for an agent:
- * 1. Explicit `model` takes precedence
- * 2. `modelPreset` computes a suffixed model ID from the parent model
- * 3. Falls back to parent model
+ * 1. `models` list — match parent provider (provider-specific selection)
+ * 2. Explicit `model` — return explicit model
+ * 3. `modelPreset` — compute suffixed model ID from parent model
+ * 4. Falls back to parent model
  */
 export function resolveAgentModel(
+  agentModels: Info["models"],
   agentModel: Info["model"],
   agentModelPreset: Info["modelPreset"],
   parentModel: { providerID: ProviderID; modelID: ModelID },
 ): { modelID: ModelID; providerID: ProviderID } {
+  // Check models list for parent provider match
+  if (agentModels) {
+    const match = agentModels.find(
+      model => model.providerID === parentModel.providerID,
+    )
+    if (match) return match
+  }
+  // Existing resolution chain (unchanged)
   if (agentModel) return agentModel
   if (agentModelPreset) {
     return {

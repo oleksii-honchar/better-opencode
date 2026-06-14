@@ -22,6 +22,12 @@ function defaultNudgeMessage(info: LoopDetectedInfo): string {
   if (info.type === "sentence_loop") {
     return `You are repeating the sentence "${info.sentence}" — this is a loop. Break out and take a different direction.`
   }
+  if (info.type === "self_diagnosis_loop") {
+    return "You've acknowledged being stuck. Break out of this pattern and take a fundamentally different approach."
+  }
+  if (info.type === "pattern_loop") {
+    return "You are oscillating between two states — this is a pattern loop. Break out and take a fundamentally different approach."
+  }
   return "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction."
 }
 
@@ -217,9 +223,8 @@ export function wrapWithLoopDetection(
               chunkCount++
               yield chunk
             }
-            // Clean finish — clear evidence and detector state
+            // Clean finish — clear evidence (per-episode) but preserve detector history (cross-stream)
             evidence.clear()
-            detector.clear()
             log.debug("stream completed normally, evidence cleared", { chunkCount })
             return
           } catch (error) {
@@ -264,13 +269,20 @@ export function wrapWithLoopDetection(
                 stepLoop: evidence.countByType("step_loop"),
                 toolLoop: evidence.countByType("tool_loop"),
                 sentenceLoop: evidence.countByType("sentence_loop"),
+                selfDiagnosis: evidence.countByType("self_diagnosis_loop"),
               },
             })
 
             // Check if threshold is met for intervention
             const thresholdResult = evidence.isThresholdMet(config)
             if (!thresholdResult.met) {
-              const thresholdKey = error.info.type === "step_loop" ? "stepLoop" : error.info.type === "tool_loop" ? "toolLoop" : "sentenceLoop"
+              const thresholdKey =
+                error.info.type === "step_loop" ? "stepLoop"
+                : error.info.type === "tool_loop" ? "toolLoop"
+                : error.info.type === "sentence_loop" ? "sentenceLoop"
+                : error.info.type === "self_diagnosis_loop" ? "selfDiagnosis"
+                : error.info.type === "pattern_loop" ? "patternLoop"
+                : "stepLoop"
               log.info("loop detected but evidence below threshold — continuing stream", {
                 type: error.info.type,
                 evidenceCount: evidence.countByType(error.info.type),
