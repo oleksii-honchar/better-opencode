@@ -2,7 +2,7 @@
 type: index
 title: "Specifications"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-06-10T20:00:00Z"
+updatedAt: "2026-06-14T13:10:00Z"
 tags: []
 ---
 
@@ -13,3 +13,4 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 ## Nodes
 
 - [[0001-opencode-db-cleanup.spec.md]] — OpenCode SQLite Database Cleanup (kind: feature, status: completed)
+- [[0002-meta-skill-enabled-switch.spec.md]] — metaSkillEnabled Switch for AgentMetaTool (kind: feature, status: completed)
