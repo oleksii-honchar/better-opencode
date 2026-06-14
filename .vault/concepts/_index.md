@@ -17,3 +17,4 @@ Mental models, domain vocabulary, and architectural patterns used in better-open
 - [[0003-llm-turn-management.concept.md]] — LLM turn management: main loop, multi-step tool execution, provider-executed vs app-executed tools, compaction
 - [[0004-subagent-delegation.concept.md]] — Subagent delegation via Task(): blocking call via Effect fiber, child session creation, subagent permissions, background mode
 - [[0005-agent-meta-tool-plugin.concept.md]] — Agent Meta Tool Plugin: dynamic skill/tool management via system prompt and tool definition interception
+- [[0006-opencode-observability.concept.md]] — OpenCode Observability (OTEL): telemetry pipeline, data sources, Grafana dashboards
