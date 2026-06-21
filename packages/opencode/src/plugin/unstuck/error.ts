@@ -37,7 +37,7 @@ export interface EvidenceAccumulator {
   readonly records: readonly EvidenceRecord[]
 
   get count(): number
-  countByType(type: "step_loop" | "tool_loop" | "sentence_loop" | "self_diagnosis_loop" | "pattern_loop"): number
+  countByType(type: LoopDetectedInfo["type"]): number
   isThresholdMet(config: UnstuckConfig): { met: true; type: string } | { met: false }
   add(info: LoopDetectedInfo, chunkCount: number, config?: UnstuckConfig): void
   clear(): void

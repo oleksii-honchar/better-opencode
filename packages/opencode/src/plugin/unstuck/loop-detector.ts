@@ -431,7 +431,7 @@ export class EvidenceAccumulatorImpl implements EvidenceAccumulator {
     return this._records.length
   }
 
-  countByType(type: "step_loop" | "tool_loop" | "sentence_loop" | "self_diagnosis_loop" | "pattern_loop"): number {
+  countByType(type: LoopDetectedInfo["type"]): number {
     return this._records.filter((r) => r.type === type).length
   }
 
