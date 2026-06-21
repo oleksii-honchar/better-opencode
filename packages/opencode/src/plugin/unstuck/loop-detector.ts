@@ -13,6 +13,18 @@ function arraysEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
   return true
 }
 
+// Self-diagnosis detection: scans reasoning/text for phrases indicating the model knows it's stuck
+export function detectSelfDiagnosis(text: string): boolean {
+  const patterns = [
+    /stuck\s+in\s+a\s+loop/i,
+    /i['']m\s+stuck/i,
+    /repeating\s+the\s+same/i,
+    /going\s+in\s+circles/i,
+    /cannot\s+(progress|proceed|continue)/i,
+  ]
+  return patterns.some((p) => p.test(text))
+}
+
 // Synchronous hash function using FNV-1a — no external dependencies, no async
 function fnv1a(text: string): string {
   let hash = 0x811c9dc5
@@ -251,6 +263,20 @@ export class LoopDetectorImpl implements LoopDetector {
       return loopInfo
     }
 
+    // Check for self-diagnosis
+    if (config.enableSelfDiagnosisDetection) {
+      if (detectSelfDiagnosis(this.currentReasoning) || detectSelfDiagnosis(this.currentText)) {
+        log.info("finalizeStep — self-diagnosis detected", {
+          type: "self_diagnosis_loop",
+          threshold: 1,
+        })
+        return {
+          type: "self_diagnosis_loop",
+          threshold: 1,
+        }
+      }
+    }
+
     // Reset for next step
     this.currentReasoning = ""
     this.currentText = ""
@@ -286,17 +312,20 @@ export class LoopDetectorImpl implements LoopDetector {
       }
     }
 
-    // Tool-only loop detection
+    // Tool-only loop detection (with gap tolerance)
     if (config.detectToolOnlyLoops) {
       const toolWindow = config.toolLoopThreshold
       if (this.history.length >= toolWindow) {
-        const recentTools = this.history.slice(-toolWindow)
-        const firstTools = recentTools[0].toolSignatures
-        if (firstTools.length > 0) {
-          const allSameTools = recentTools.every((r) => arraysEqual(r.toolSignatures, firstTools))
-          log.debug("detectLoop — tool check", {
+        // Filter out steps with no tool signatures (gap tolerance)
+        const toolSteps = this.history.filter((r) => r.toolSignatures.length > 0)
+        if (toolSteps.length >= toolWindow) {
+          const recentToolSteps = toolSteps.slice(-toolWindow)
+          const firstTools = recentToolSteps[0].toolSignatures
+          const allSameTools = recentToolSteps.every((r) => arraysEqual(r.toolSignatures, firstTools))
+          log.debug("detectLoop — tool check (with gaps)", {
             toolWindow,
             historyLen: this.history.length,
+            toolStepsLen: toolSteps.length,
             firstTools,
             allSameTools,
           })
@@ -304,7 +333,46 @@ export class LoopDetectorImpl implements LoopDetector {
             return {
               type: "tool_loop",
               threshold: toolWindow,
-              steps: recentTools,
+              steps: recentToolSteps,
+            }
+          }
+        }
+      }
+    }
+
+    // Alternating pattern detection (period-2: A→B→A→B)
+    if (config.enablePatternLoopDetection) {
+      const patternThreshold = config.patternLoopThreshold
+      if (this.history.length >= patternThreshold) {
+        const recent = this.history.slice(-patternThreshold)
+        const fingerprints = recent.map((r) => r.stepFingerprint)
+
+        // Must have exactly 2 distinct fingerprints
+        const distinct = new Set(fingerprints)
+        if (distinct.size === 2) {
+          const evenFp = fingerprints[0]
+          const oddFp = fingerprints[1]
+
+          // Verify alternating pattern
+          const isAlternating = fingerprints.every((fp, i) => {
+            return i % 2 === 0 ? fp === evenFp : fp === oddFp
+          })
+
+          log.debug("detectLoop — pattern check", {
+            patternThreshold,
+            historyLen: this.history.length,
+            evenFp,
+            oddFp,
+            isAlternating,
+            fingerprints,
+          })
+
+          if (isAlternating) {
+            return {
+              type: "pattern_loop",
+              threshold: patternThreshold,
+              fingerprint: `${evenFp}|${oddFp}`,
+              steps: recent,
             }
           }
         }
@@ -363,7 +431,7 @@ export class EvidenceAccumulatorImpl implements EvidenceAccumulator {
     return this._records.length
   }
 
-  countByType(type: "step_loop" | "tool_loop" | "sentence_loop"): number {
+  countByType(type: "step_loop" | "tool_loop" | "sentence_loop" | "self_diagnosis_loop" | "pattern_loop"): number {
     return this._records.filter((r) => r.type === type).length
   }
 
@@ -378,6 +446,12 @@ export class EvidenceAccumulatorImpl implements EvidenceAccumulator {
     }
     if (this.countByType("sentence_loop") >= (thresholds.sentenceLoop ?? 1)) {
       return { met: true, type: "sentence_loop" }
+    }
+    if (this.countByType("self_diagnosis_loop") >= (thresholds.selfDiagnosis ?? 1)) {
+      return { met: true, type: "self_diagnosis_loop" }
+    }
+    if (this.countByType("pattern_loop") >= (thresholds.patternLoop ?? 2)) {
+      return { met: true, type: "pattern_loop" }
     }
     return { met: false }
   }

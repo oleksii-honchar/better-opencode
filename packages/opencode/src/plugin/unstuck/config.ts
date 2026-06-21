@@ -4,6 +4,8 @@ export const defaultEvidenceThresholds: EvidenceThresholds = {
   stepLoop: 2,
   toolLoop: 2,
   sentenceLoop: 1,
+  selfDiagnosis: 1,
+  patternLoop: 2,
 }
 
 export interface UnstuckConfig {
@@ -18,6 +20,9 @@ export interface UnstuckConfig {
   enableSentenceLoopDetection: boolean
   sentenceLoopThreshold: number
   minSentenceLength: number
+  enableSelfDiagnosisDetection: boolean
+  enablePatternLoopDetection: boolean
+  patternLoopThreshold: number
   strategy: "nudge-and-prune" | "abort" | "warn"
   maxNudges: number
   pruneCount: number
@@ -39,6 +44,9 @@ export const defaultConfig: UnstuckConfig = {
   enableSentenceLoopDetection: true,
   sentenceLoopThreshold: 3,
   minSentenceLength: 15,
+  enableSelfDiagnosisDetection: true,
+  enablePatternLoopDetection: true,
+  patternLoopThreshold: 4,
   strategy: "nudge-and-prune",
   maxNudges: 2,
   pruneCount: 3,

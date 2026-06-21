@@ -495,6 +495,298 @@ describe("EvidenceAccumulator", () => {
   })
 })
 
+describe("detectSelfDiagnosis", () => {
+  // detectSelfDiagnosis is not exported, so we test it through finalizeStep
+  // by feeding reasoning/text that contains self-diagnosis phrases
+
+  test('detects "stuck in a loop" in reasoning text', () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+    }
+
+    detector.consumeChunk(
+      { type: "reasoning-delta", text: "I think I'm stuck in a loop here. Let me try something different." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+
+    const result = detector.finalizeStep(config, "tool-calls")
+    expect(result).toBeDefined()
+    expect(result?.type).toBe("self_diagnosis_loop")
+    expect(result?.threshold).toBe(1)
+  })
+
+  test('detects "I\'m stuck" with apostrophe in text content', () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+    }
+
+    detector.consumeChunk(
+      { type: "text-delta", text: "I'm stuck on this problem. Let me think about it differently." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+
+    const result = detector.finalizeStep(config, "tool-calls")
+    expect(result).toBeDefined()
+    expect(result?.type).toBe("self_diagnosis_loop")
+  })
+
+  test('detects "I\'m stuck" with straight quote in text content', () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+    }
+
+    detector.consumeChunk(
+      { type: "text-delta", text: "I'm stuck on this problem." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+
+    const result = detector.finalizeStep(config, "tool-calls")
+    expect(result).toBeDefined()
+    expect(result?.type).toBe("self_diagnosis_loop")
+  })
+
+  test('detects "repeating the same" phrase', () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+    }
+
+    detector.consumeChunk(
+      { type: "reasoning-delta", text: "I keep repeating the same steps over and over." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+
+    const result = detector.finalizeStep(config, "tool-calls")
+    expect(result).toBeDefined()
+    expect(result?.type).toBe("self_diagnosis_loop")
+  })
+
+  test('detects "going in circles" phrase', () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+    }
+
+    detector.consumeChunk(
+      { type: "reasoning-delta", text: "It feels like I'm going in circles with this approach." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+
+    const result = detector.finalizeStep(config, "tool-calls")
+    expect(result).toBeDefined()
+    expect(result?.type).toBe("self_diagnosis_loop")
+  })
+
+  test('detects "cannot progress" phrase', () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+    }
+
+    detector.consumeChunk(
+      { type: "reasoning-delta", text: "I cannot progress further with this approach." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+
+    const result = detector.finalizeStep(config, "tool-calls")
+    expect(result).toBeDefined()
+    expect(result?.type).toBe("self_diagnosis_loop")
+  })
+
+  test('detects "cannot proceed" phrase', () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+    }
+
+    detector.consumeChunk(
+      { type: "reasoning-delta", text: "I cannot proceed any further." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+
+    const result = detector.finalizeStep(config, "tool-calls")
+    expect(result).toBeDefined()
+    expect(result?.type).toBe("self_diagnosis_loop")
+  })
+
+  test('detects "cannot continue" phrase', () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+    }
+
+    detector.consumeChunk(
+      { type: "reasoning-delta", text: "I cannot continue with this strategy." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+
+    const result = detector.finalizeStep(config, "tool-calls")
+    expect(result).toBeDefined()
+    expect(result?.type).toBe("self_diagnosis_loop")
+  })
+
+  test("does NOT detect with normal text without stuck phrases", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+    }
+
+    detector.consumeChunk(
+      { type: "reasoning-delta", text: "Let me read the file and check what's inside. This is normal thinking that doesn't indicate any loop or stuck state." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+
+    const result = detector.finalizeStep(config, "tool-calls")
+    expect(result).toBeUndefined()
+  })
+
+  test("does NOT detect when enableSelfDiagnosisDetection is false", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: false,
+    }
+
+    detector.consumeChunk(
+      { type: "reasoning-delta", text: "I'm stuck in a loop here. Let me try something different." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+
+    const result = detector.finalizeStep(config, "tool-calls")
+    expect(result).toBeUndefined()
+  })
+
+  test("detects self-diagnosis even when text is below minThinkingLength", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+      minThinkingLength: 50,
+    }
+
+    // Short text that is below minThinkingLength
+    detector.consumeChunk(
+      { type: "reasoning-delta", text: "I'm stuck." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+
+    const result = detector.finalizeStep(config, "tool-calls")
+    expect(result).toBeDefined()
+    expect(result?.type).toBe("self_diagnosis_loop")
+  })
+})
+
+describe("EvidenceAccumulator — self_diagnosis_loop", () => {
+  test("countByType handles self_diagnosis_loop", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add({ type: "self_diagnosis_loop", threshold: 1 }, 1)
+    acc.add({ type: "self_diagnosis_loop", threshold: 1 }, 2)
+
+    expect(acc.countByType("self_diagnosis_loop")).toBe(2)
+    expect(acc.countByType("step_loop")).toBe(0)
+  })
+
+  test("isThresholdMet checks selfDiagnosis threshold", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add({ type: "self_diagnosis_loop", threshold: 1 }, 1)
+
+    const result = acc.isThresholdMet(defaultConfig)
+    expect(result.met).toBe(true)
+    expect((result as { met: true; type: string }).type).toBe("self_diagnosis_loop")
+  })
+
+  test("isThresholdMet selfDiagnosis with custom threshold", () => {
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      evidenceThresholds: { selfDiagnosis: 2 },
+    }
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add({ type: "self_diagnosis_loop", threshold: 1 }, 1)
+
+    // Below custom threshold of 2
+    const result = acc.isThresholdMet(config)
+    expect(result.met).toBe(false)
+  })
+})
+
 describe("LoopDetector — provider-executed tools", () => {
   test("skips provider-executed tools", () => {
     const detector = createDetector()
@@ -509,6 +801,270 @@ describe("LoopDetector — provider-executed tools", () => {
     }
 
     expect(detector.getState().currentToolsCount).toBe(0)
+  })
+})
+
+describe("LoopDetector — tool-only loop with gaps", () => {
+  test("detects tool-only loop when tool-bearing steps are separated by reasoning-only steps", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      detectToolOnlyLoops: true,
+      toolLoopThreshold: 3,
+      loopThreshold: 10,
+    }
+
+    // 6 steps: tool, no-tool, tool, no-tool, tool, no-tool
+    // Same tool signature each time — should detect because 3 tool-bearing steps have identical signatures
+    const chunks: StreamChunk[] = [
+      // Step 1: tool call
+      { type: "text-delta", text: "First thinking that is long enough to pass the minThinkingLength threshold for detection." },
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      { type: "finish", finishReason: "tool-calls" },
+      // Step 2: no tool (reasoning only)
+      { type: "text-delta", text: "Second thinking that is completely different from the first one and long enough for detection." },
+      { type: "finish", finishReason: "tool-calls" },
+      // Step 3: tool call (same as step 1)
+      { type: "text-delta", text: "Third thinking that is also different from the previous ones and long enough for detection." },
+      { type: "tool-input-end", id: "call-1", toolName: "ReadFile", input: { path: "/foo" } },
+      { type: "finish", finishReason: "tool-calls" },
+      // Step 4: no tool (reasoning only)
+      { type: "text-delta", text: "Fourth thinking that is yet another different thought and long enough for detection." },
+      { type: "finish", finishReason: "tool-calls" },
+      // Step 5: tool call (same as steps 1 and 3)
+      { type: "text-delta", text: "Fifth thinking that is also different again and long enough for detection here." },
+      { type: "tool-input-end", id: "call-2", toolName: "ReadFile", input: { path: "/foo" } },
+      { type: "finish", finishReason: "tool-calls" },
+      // Step 6: no tool (reasoning only)
+      { type: "text-delta", text: "Sixth thinking that is yet another different thought and long enough for detection." },
+      { type: "finish", finishReason: "tool-calls" },
+    ]
+
+    let loopInfo = undefined
+    for (const chunk of chunks) {
+      loopInfo = detector.consumeChunk(chunk, config)
+    }
+
+    expect(loopInfo).toBeDefined()
+    expect(loopInfo?.type).toBe("tool_loop")
+    expect(loopInfo?.threshold).toBe(3)
+  })
+
+  test("does NOT detect tool-only loop with gaps when tool signatures differ", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      detectToolOnlyLoops: true,
+      toolLoopThreshold: 3,
+      loopThreshold: 10,
+    }
+
+    // Tool calls with different signatures separated by no-tool steps
+    const chunks: StreamChunk[] = [
+      // Step 1: tool call A
+      { type: "text-delta", text: "First thinking that is long enough to pass the minThinkingLength threshold for detection." },
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      { type: "finish", finishReason: "tool-calls" },
+      // Step 2: no tool
+      { type: "text-delta", text: "Second thinking that is completely different from the first one and long enough for detection." },
+      { type: "finish", finishReason: "tool-calls" },
+      // Step 3: tool call B (different)
+      { type: "text-delta", text: "Third thinking that is also different from the previous ones and long enough for detection." },
+      { type: "tool-input-end", id: "call-1", toolName: "ReadFile", input: { path: "/bar" } },
+      { type: "finish", finishReason: "tool-calls" },
+      // Step 4: no tool
+      { type: "text-delta", text: "Fourth thinking that is yet another different thought and long enough for detection." },
+      { type: "finish", finishReason: "tool-calls" },
+      // Step 5: tool call C (different)
+      { type: "text-delta", text: "Fifth thinking that is also different again and long enough for detection here." },
+      { type: "tool-input-end", id: "call-2", toolName: "ReadFile", input: { path: "/baz" } },
+      { type: "finish", finishReason: "tool-calls" },
+      // Step 6: no tool
+      { type: "text-delta", text: "Sixth thinking that is yet another different thought and long enough for detection." },
+      { type: "finish", finishReason: "tool-calls" },
+    ]
+
+    let loopInfo = undefined
+    for (const chunk of chunks) {
+      loopInfo = detector.consumeChunk(chunk, config)
+    }
+
+    expect(loopInfo).toBeUndefined()
+  })
+})
+
+describe("LoopDetector — alternating pattern detection", () => {
+  test("detects alternating pattern A→B→A→B with 4 steps", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enablePatternLoopDetection: true,
+      patternLoopThreshold: 4,
+    }
+
+    const textA = "First pattern text that is long enough for fingerprint detection here."
+    const textB = "Second pattern text that is long enough for fingerprint detection here."
+
+    // A, B, A, B — 4 alternating steps
+    const chunks: StreamChunk[] = [
+      { type: "text-delta", text: textA },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textB },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textA },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textB },
+      { type: "finish", finishReason: "tool-calls" },
+    ]
+
+    let loopInfo = undefined
+    for (const chunk of chunks) {
+      loopInfo = detector.consumeChunk(chunk, config)
+    }
+
+    expect(loopInfo).toBeDefined()
+    expect(loopInfo?.type).toBe("pattern_loop")
+    expect(loopInfo?.threshold).toBe(4)
+    expect(loopInfo?.fingerprint).toContain("|")
+  })
+
+  test("does NOT detect alternating pattern with < 4 steps", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enablePatternLoopDetection: true,
+      patternLoopThreshold: 4,
+    }
+
+    const textA = "First pattern text that is long enough for fingerprint detection here."
+    const textB = "Second pattern text that is long enough for fingerprint detection here."
+
+    // Only 3 steps: A, B, A — below threshold
+    const chunks: StreamChunk[] = [
+      { type: "text-delta", text: textA },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textB },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textA },
+      { type: "finish", finishReason: "tool-calls" },
+    ]
+
+    let loopInfo = undefined
+    for (const chunk of chunks) {
+      loopInfo = detector.consumeChunk(chunk, config)
+    }
+
+    expect(loopInfo).toBeUndefined()
+  })
+
+  test("does NOT detect alternating pattern with 3+ distinct fingerprints", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enablePatternLoopDetection: true,
+      patternLoopThreshold: 4,
+    }
+
+    const textA = "First pattern text that is long enough for fingerprint detection here."
+    const textB = "Second pattern text that is long enough for fingerprint detection here."
+    const textC = "Third pattern text that is long enough for fingerprint detection here."
+
+    // A, B, C, A, B, C — 3 distinct fingerprints, not alternating
+    const chunks: StreamChunk[] = [
+      { type: "text-delta", text: textA },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textB },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textC },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textA },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textB },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textC },
+      { type: "finish", finishReason: "tool-calls" },
+    ]
+
+    let loopInfo = undefined
+    for (const chunk of chunks) {
+      loopInfo = detector.consumeChunk(chunk, config)
+    }
+
+    expect(loopInfo).toBeUndefined()
+  })
+
+  test("does NOT detect alternating pattern when enablePatternLoopDetection is false", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enablePatternLoopDetection: false,
+      patternLoopThreshold: 4,
+    }
+
+    const textA = "First pattern text that is long enough for fingerprint detection here."
+    const textB = "Second pattern text that is long enough for fingerprint detection here."
+
+    // A, B, A, B — would be detected if enabled
+    const chunks: StreamChunk[] = [
+      { type: "text-delta", text: textA },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textB },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textA },
+      { type: "finish", finishReason: "tool-calls" },
+      { type: "text-delta", text: textB },
+      { type: "finish", finishReason: "tool-calls" },
+    ]
+
+    let loopInfo = undefined
+    for (const chunk of chunks) {
+      loopInfo = detector.consumeChunk(chunk, config)
+    }
+
+    expect(loopInfo).toBeUndefined()
+  })
+})
+
+describe("EvidenceAccumulator — pattern_loop", () => {
+  test("countByType handles pattern_loop", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add({ type: "pattern_loop", threshold: 4, fingerprint: "fp-a|fp-b" }, 1)
+    acc.add({ type: "pattern_loop", threshold: 4, fingerprint: "fp-a|fp-b" }, 2)
+
+    expect(acc.countByType("pattern_loop")).toBe(2)
+    expect(acc.countByType("step_loop")).toBe(0)
+  })
+
+  test("isThresholdMet checks patternLoop threshold", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add({ type: "pattern_loop", threshold: 4, fingerprint: "fp-a|fp-b" }, 1)
+    acc.add({ type: "pattern_loop", threshold: 4, fingerprint: "fp-a|fp-b" }, 2)
+
+    const result = acc.isThresholdMet(defaultConfig)
+    expect(result.met).toBe(true)
+    expect((result as { met: true; type: string }).type).toBe("pattern_loop")
+  })
+
+  test("isThresholdMet patternLoop with custom threshold", () => {
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      evidenceThresholds: { patternLoop: 3 },
+    }
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add({ type: "pattern_loop", threshold: 4, fingerprint: "fp-a|fp-b" }, 1)
+    acc.add({ type: "pattern_loop", threshold: 4, fingerprint: "fp-a|fp-b" }, 2)
+
+    // Below custom threshold of 3
+    const result = acc.isThresholdMet(config)
+    expect(result.met).toBe(false)
   })
 })
 

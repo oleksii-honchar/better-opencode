@@ -511,7 +511,7 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
     expect(callCount).toBeGreaterThan(1)
   })
 
-  test("evidence is cleared on clean finish", async () => {
+  test("evidence is cleared on clean finish but detector history is preserved", async () => {
     let callCount = 0
 
     // First call: produces loop detection (evidence=1, below threshold=2)
@@ -558,7 +558,55 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
     expect(result.length).toBe(loopingChunks.length + recoveryChunks.length - 1)
     expect(callCount).toBe(2)
 
-    // After clean finish, detector state should be cleared
-    expect(detector.getState().historyLength).toBe(0)
+    // After clean finish, evidence is cleared but detector history is preserved
+    // (detector.clear() was removed from the clean-completion path)
+    expect(detector.getState().historyLength).toBeGreaterThan(0)
+  })
+
+  test("cross-stream history preservation — detector accumulates across streams", async () => {
+    let callCount = 0
+
+    // Both streams produce the same tool call (no thinking text — tool-only detection)
+    const toolChunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-1", toolName: "ReadFile" },
+      {
+        type: "tool-input-end",
+        id: "call-1",
+        input: { path: "/some/file.txt" },
+        providerMetadata: undefined,
+      } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() {
+        throw new Error("not implemented")
+      },
+      async doStream(): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        return { stream: createMockStream(toolChunks) }
+      },
+    }
+
+    const detector = new LoopDetectorImpl()
+    // Use a low toolLoopThreshold so we can see accumulation with just 2 streams
+    const config: UnstuckConfig = { ...defaultConfig, toolLoopThreshold: 2, strategy: "abort" }
+    const wrapped = wrapWithLoopDetection(model, detector, config)
+
+    // First stream — should complete normally, history grows to 1
+    const result1 = await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+    expect(result1.length).toBe(toolChunks.length)
+    expect(detector.getState().historyLength).toBe(1)
+
+    // Second stream with same tool call — should now trigger tool_loop detection
+    // because history accumulates across streams (detector.clear() not called on clean finish)
+    await expectThrowsLoopDetected(() => collectStream(wrapped, [{ role: "user", content: "Hello" }]))
+
+    // After detection, history should have 2 entries (both streams contributed)
+    expect(detector.getState().historyLength).toBe(2)
   })
 })
