@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-06-14T13:10:00Z"
+updatedAt: "2026-06-21T00:00:00Z"
 tags: []
 ---
 
@@ -27,3 +27,9 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0013-hardcode-servicename.adr.md]] — Hardcode ServiceName Instead of Dashboard Variable (ADR-0013, status: accepted)
 - [[0014-conditional-all-macro.adr.md]] — Use $__conditionalAll Macro for Multi-Select Variable Safety (ADR-0014, status: accepted)
 - [[0015-dashboard-tags-include-logs.adr.md]] — Dashboard Tags Include `logs` for Discovery (ADR-0015, status: accepted)
+- [[0016-clear-detector-history.adr.md]] — Stop Clearing Detector History on Clean Stream Completion (ADR-1, status: accepted)
+- [[0017-tool-detection-gap-tolerance.adr.md]] — Add Tool-Only Detection with Gap Tolerance (ADR-2, status: accepted)
+- [[0018-alternating-pattern-detection.adr.md]] — Add Period-2 Alternating Pattern Detection (ADR-3, status: accepted)
+- [[0019-self-diagnosis-detection.adr.md]] — Self-Diagnosis Detection with Immediate Intervention (ADR-4, status: accepted)
+- [[0020-detector-state-sharing.adr.md]] — Detector State Sharing — No Per-Thread Isolation Needed (ADR-5, status: accepted)
+- [[0021-loop-reflection-in-nudges.adr.md]] — Agent-Persona-Coach Loop Reflection in Existing Nudges (ADR-6, status: accepted)

@@ -2,7 +2,7 @@
 type: index
 title: "Domain Concepts"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-06-14T13:10:00Z"
+updatedAt: "2026-06-21T00:00:00Z"
 tags: []
 ---
 
@@ -18,3 +18,4 @@ Mental models, domain vocabulary, and architectural patterns used in better-open
 - [[0004-subagent-delegation.concept.md]] — Subagent delegation via Task(): blocking call via Effect fiber, child session creation, subagent permissions, background mode
 - [[0005-agent-meta-tool-plugin.concept.md]] — Agent Meta Tool Plugin: dynamic skill/tool management via system prompt and tool definition interception
 - [[0006-opencode-observability.concept.md]] — OpenCode Observability (OTEL): telemetry pipeline, data sources, Grafana dashboards
+- [[0007-unstuck-loop-detection.concept.md]] — Unstuck Loop Detection System: fingerprint-based detection, evidence accumulation, nudge-and-prune, cross-stream history, 5 detection types
