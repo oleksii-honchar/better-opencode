@@ -4,7 +4,7 @@ export const defaultEvidenceThresholds: EvidenceThresholds = {
   stepLoop: 2,
   toolLoop: 2,
   sentenceLoop: 1,
-  selfDiagnosis: 1,
+  selfDiagnosis: 2,
   patternLoop: 2,
 }
 
