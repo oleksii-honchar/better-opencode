@@ -304,7 +304,7 @@ SERVER_ARGS=(
 )
 
 export OPENCODE_DEV=1
-# export OPENCODE_DISABLE_CHANNEL_DB=1
+export OPENCODE_DISABLE_CHANNEL_DB=1
 
 exec env -u OPENCODE_SERVER_PASSWORD OPENCODE_PORT="$OPENCODE_PORT" \
   bun run --cwd packages/opencode --conditions=browser src/index.ts \
