@@ -21,30 +21,30 @@ describe("resolveAttachmentUris — file path to base64", () => {
   })
 
   test("resolves absolute file path to base64", () => {
-    const result = resolveAttachmentUris({ data: tempFile })
+    const result = resolveAttachmentUris({ data: tempFile }) as { data: string }
     expect(result.data).toBe(fileContent.toString("base64"))
   })
 
   test("resolves file path passed as plain string", () => {
-    const result = resolveAttachmentUris(tempFile)
+    const result = resolveAttachmentUris(tempFile) as string
     expect(result).toBe(fileContent.toString("base64"))
   })
 
   test("resolves nested file path in deep object", () => {
     const result = resolveAttachmentUris({
       nested: { deep: { data: tempFile } },
-    })
+    }) as { nested: { deep: { data: string } } }
     expect(result.nested.deep.data).toBe(fileContent.toString("base64"))
   })
 
   test("resolves file path inside array", () => {
-    const result = resolveAttachmentUris({ items: [tempFile, "other"] })
+    const result = resolveAttachmentUris({ items: [tempFile, "other"] }) as { items: string[] }
     expect(result.items[0]).toBe(fileContent.toString("base64"))
     expect(result.items[1]).toBe("other")
   })
 
   test("resolves file path as top-level array element", () => {
-    const result = resolveAttachmentUris([tempFile, "other"])
+    const result = resolveAttachmentUris([tempFile, "other"]) as string[]
     expect(result[0]).toBe(fileContent.toString("base64"))
     expect(result[1]).toBe("other")
   })
@@ -58,7 +58,7 @@ describe("resolveAttachmentUris — file path to base64", () => {
   test("allows file at exactly 10MB", () => {
     const exactFile = path.join(tempDir, "exact.bin")
     fs.writeFileSync(exactFile, Buffer.alloc(10 * 1024 * 1024))
-    const result = resolveAttachmentUris({ data: exactFile })
+    const result = resolveAttachmentUris({ data: exactFile }) as { data: string }
     expect(typeof result.data).toBe("string")
     expect(result.data.length).toBeGreaterThan(0)
   })
@@ -69,17 +69,17 @@ describe("resolveAttachmentUris — file path to base64", () => {
 
   test("passes through non-existent file paths unchanged (write destinations)", () => {
     // Non-existent absolute paths may be write destinations (e.g., screenshot filePath)
-    const result = resolveAttachmentUris({ data: "/nonexistent/file.png" })
+    const result = resolveAttachmentUris({ data: "/nonexistent/file.png" }) as { data: string }
     expect(result.data).toBe("/nonexistent/file.png")
   })
 
   test("passes through relative paths unchanged", () => {
-    const result = resolveAttachmentUris({ data: "relative/path.png" })
+    const result = resolveAttachmentUris({ data: "relative/path.png" }) as { data: string }
     expect(result.data).toBe("relative/path.png")
   })
 
   test("passes through dot-relative paths unchanged", () => {
-    const result = resolveAttachmentUris({ data: "./screenshot.png" })
+    const result = resolveAttachmentUris({ data: "./screenshot.png" }) as { data: string }
     expect(result.data).toBe("./screenshot.png")
   })
 
@@ -102,7 +102,7 @@ describe("resolveAttachmentUris — file path to base64", () => {
   })
 
   test("passes through opencode://attachment URIs unchanged (no temp file to resolve)", () => {
-    const result = resolveAttachmentUris({ data: "opencode://attachment/abc123.png" })
+    const result = resolveAttachmentUris({ data: "opencode://attachment/abc123.png" }) as { data: string }
     // The function will try to resolve the attachment; since no temp file exists,
     // it returns the original URI (existing behavior)
     expect(result.data).toBe("opencode://attachment/abc123.png")
@@ -113,7 +113,7 @@ describe("resolveAttachmentUris — file path to base64", () => {
       file: tempFile,
       uri: "opencode://attachment/abc123.png",
       plain: "just a string",
-    })
+    }) as { file: string; uri: string; plain: string }
     expect(result.file).toBe(fileContent.toString("base64"))
     expect(result.uri).toBe("opencode://attachment/abc123.png")
     expect(result.plain).toBe("just a string")
@@ -123,7 +123,7 @@ describe("resolveAttachmentUris — file path to base64", () => {
     const binaryContent = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]) // PNG header
     const binaryFile = path.join(tempDir, "image.png")
     fs.writeFileSync(binaryFile, binaryContent)
-    const result = resolveAttachmentUris({ data: binaryFile })
+    const result = resolveAttachmentUris({ data: binaryFile }) as { data: string }
     expect(result.data).toBe(binaryContent.toString("base64"))
   })
 
@@ -135,7 +135,7 @@ describe("resolveAttachmentUris — file path to base64", () => {
           { path: "not-a-file" },
         ],
       },
-    })
+    }) as { level1: { level2: Array<{ path: string }> } }
     expect(result.level1.level2[0].path).toBe(fileContent.toString("base64"))
     expect(result.level1.level2[1].path).toBe("not-a-file")
   })
