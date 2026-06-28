@@ -28,6 +28,7 @@ import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import open from "open"
 import { Effect, Exit, Layer, Option, Context, Schema, Stream } from "effect"
+import { readFileSync, statSync } from "node:fs"
 import { EffectBridge } from "@/effect/bridge"
 import { resolve as resolveAttachment } from "@/session/attachment"
 import { InstanceState } from "@/effect/instance-state"
@@ -222,11 +223,14 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
 }
 
 /**
- * Recursively resolves opencode://attachment URIs in args to base64 strings.
- * Walks the entire arg tree (objects, arrays) and replaces any URI string
- * with its base64 content from the temp file store.
+ * Recursively resolves opencode://attachment URIs and absolute file paths
+ * in args to base64 strings. Walks the entire arg tree (objects, arrays)
+ * and replaces any URI string with its base64 content from the temp file store,
+ * and any absolute file path with the base64-encoded file content.
+ *
+ * File paths are limited to 10MB; errors are thrown with details.
  */
-function resolveAttachmentUris(args: unknown): unknown {
+export function resolveAttachmentUris(args: unknown): unknown {
   if (typeof args === "string") {
     if (args.startsWith("opencode://attachment/")) {
       const base64 = resolveAttachment(args)
@@ -236,6 +240,32 @@ function resolveAttachmentUris(args: unknown): unknown {
       }
       // If not found, keep original — the tool will handle the error
       log.warn("attachment URI not resolved", { uri: args })
+    } else if (args.startsWith("/")) {
+      // Detect absolute file paths and convert to base64.
+      // Only convert if the file actually exists — non-existent paths
+      // may be write destinations (e.g., screenshot filePath) and should
+      // pass through unchanged.
+      try {
+        const stat = statSync(args)
+        if (!stat.isFile()) {
+          throw new Error(`Not a regular file: ${args}`)
+        }
+        if (stat.size > 10 * 1024 * 1024) {
+          throw new Error(`File too large (${stat.size} bytes, max 10MB): ${args}`)
+        }
+        const buffer = readFileSync(args)
+        const base64 = buffer.toString("base64")
+        log.debug("resolved file path to base64", { path: args, size: base64.length })
+        return base64
+      } catch (err) {
+        // Pass through non-existent paths (likely write destinations)
+        const error = err instanceof Error ? err : new Error("Unknown error")
+        if (error.message.includes("ENOENT")) {
+          return args
+        }
+        log.warn("file path resolution failed", { path: args, error: error.message })
+        throw new Error(`Failed to read file: ${args} — ${error.message}`)
+      }
     }
     return args
   }
