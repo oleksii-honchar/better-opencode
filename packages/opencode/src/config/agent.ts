@@ -22,7 +22,7 @@ const Color = Schema.Union([
 const AgentSchema = Schema.StructWithRest(
   Schema.Struct({
     model: Schema.optional(ConfigModelID),
-    models: Schema.optional(Schema.Array(ConfigModelID)).annotate({
+    models: Schema.optional(Schema.mutable(Schema.Array(ConfigModelID))).annotate({
       description:
         "Array of provider-prefixed model IDs (e.g., 'mammoth/qwen3.6-40b', 'deepseek/v4-flash') for per-provider model selection.",
     }),
