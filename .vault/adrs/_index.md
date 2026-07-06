@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-06-21T00:00:00Z"
+updatedAt: "2026-07-06T13:15:00Z"
 tags: []
 ---
 
@@ -33,3 +33,8 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0019-self-diagnosis-detection.adr.md]] — Self-Diagnosis Detection with Immediate Intervention (ADR-4, status: accepted)
 - [[0020-detector-state-sharing.adr.md]] — Detector State Sharing — No Per-Thread Isolation Needed (ADR-5, status: accepted)
 - [[0021-loop-reflection-in-nudges.adr.md]] — Agent-Persona-Coach Loop Reflection in Existing Nudges (ADR-6, status: accepted)
+- [[0022-multi-provider-model-field.adr.md]] — Add models: Field to Agent Configuration (ADR-0022, status: accepted)
+- [[0023-resolution-priority.adr.md]] — Resolution Priority — models Before model (ADR-0023, status: accepted)
+- [[0024-exact-provider-match.adr.md]] — Provider Match — Exact Comparison (ADR-0024, status: accepted)
+- [[0025-graceful-fallback.adr.md]] — Graceful Fallback — Not Hard Error (ADR-0025, status: accepted)
+- [[0026-deprecate-model-fields.adr.md]] — Deprecate model: and modelPreset: After models: Implementation (ADR-0026, status: accepted)
