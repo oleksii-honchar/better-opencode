@@ -1,6 +1,6 @@
 # better-opencode Features
 
-This document describes the twelve features added by the `better-opencode` fork.
+This document describes the thirteen features added by the `better-opencode` fork.
 
 For an overview of the fork's purpose and installation, see [BETTER-OPENCODE.md](./BETTER-OPENCODE.md).
 
@@ -264,7 +264,85 @@ You are a precise coding agent. Generate code directly without reasoning.
 
 ---
 
-## 10. Store VS Code Workspace Paths in `<env>`
+## 10. Multi-Provider Model Setup (`models:`)
+
+📋 [Detailed Spec](./spec/13-multi-provider-model-setup.md)
+
+**Status:** ✅ Implemented
+
+**Problem:** The `model:` and `modelPreset:` fields support only a single model per agent or a suffix-based variant. When the parent session uses a different provider (e.g., deepseek vs mammoth), the sub-agent gets the wrong provider or fails. Agent developers must maintain separate agent files per provider.
+
+**Solution:** The `models:` field accepts an array of provider-prefixed model ID strings. When a sub-agent is invoked, the system matches the parent's provider against the `models:` list and picks the corresponding model. Falls through to existing resolution chain when no match.
+
+**Agent config example:**
+```yaml
+# agents/researcher.md
+---
+name: researcher
+mode: subagent
+description: Multi-provider capable research agent
+
+# Provider-specific model selection
+models:
+  - mammoth/qwen3.6-40b
+  - deepseek/deepseek-v4-flash
+  - codex/gpt-5
+
+# Fallback when provider not in list (deprecated, but functional)
+model: mammoth/qwen3.6-40b
+---
+```
+
+**Resolution chain (strict priority):**
+
+1. `models:` list — iterate entries, match `providerID === parentModel.providerID` (exact match). First match wins. If no match, fall through.
+2. `model:` — return the explicitly specified model. **Deprecated** — use `models:` instead.
+3. `modelPreset:` — compute `modelID = parentModel.modelID + modelPreset`, using `parentModel.providerID`. **Deprecated** — use `models:` instead.
+4. Parent model — inheritance (no agent-level model field defined).
+
+**Provider-Model String Format:**
+
+Each `models:` entry is a `{providerID}/{modelID}` string parsed by `Provider.parseModel()`:
+
+- `mammoth/qwen3.6-40b` → `{ providerID: "mammoth", modelID: "qwen3.6-40b" }`
+- `deepseek/deepseek-v4-flash` → `{ providerID: "deepseek", modelID: "deepseek-v4-flash" }`
+
+**Matching Rules:**
+
+- **Exact match only** — `providerID === parentModel.providerID`. No fuzzy matching, prefix matching, or wildcards.
+- **First match wins** — if multiple entries have the same providerID, the first is used.
+- **Unmatched providers** — fall through to `model:`, then `modelPreset:`, then parent model. No error thrown.
+
+**Deprecation Plan:**
+
+Both `model:` and `modelPreset:` are deprecated. They remain functional as fallbacks in the resolution chain during the deprecation period. Migration guide:
+
+| Old Format | New Format |
+|------------|------------|
+| `model: mammoth/qwen3.6-40b` | `models:\n  - mammoth/qwen3.6-40b` |
+| `modelPreset: -precise` | `models:\n  - mammoth/qwen3.6-40b\n  - deepseek/deepseek-v4-flash` |
+
+**Files Changed:**
+
+| File | Change | Lines |
+|------|--------|-------|
+| `config/agent.ts` | Added `models` field to AgentSchema + KNOWN_KEYS | 5 |
+| `agent/agent.ts` | Added `models` to Info schema, config parsing, extended `resolveAgentModel` | 28 |
+| `tool/task.ts` | Pass `next.models` to `resolveAgentModel` | 2 |
+
+**Test Coverage:** 40 tests across 4 files, all passing.
+
+**Key Design Decisions (5 ADRs):**
+
+- Add `models:` field as array of `provider/modelID` strings (ADR-0022)
+- Resolution priority: `models:` → `model:` → `modelPreset:` → parent (ADR-0023)
+- Exact `providerID ===` comparison, no fuzzy/wildcard matching (ADR-0024)
+- Graceful fallback — fall through to existing chain, not hard error (ADR-0025)
+- Deprecate `model:` and `modelPreset:` after `models:` is stable (ADR-0026)
+
+---
+
+## 11. Store VS Code Workspace Paths in `<env>`
 
 📋 [Detailed Spec](./spec/10-store-workspace-paths.md)
 
@@ -286,7 +364,7 @@ You are a precise coding agent. Generate code directly without reasoning.
 
 ---
 
-## 11. TUI Worker GlobalBus Listener Cleanup
+## 12. TUI Worker GlobalBus Listener Cleanup
 
 📋 [Detailed Spec](./spec/11-tui-worker-globalbus-listener-cleanup.md)
 
@@ -306,9 +384,9 @@ You are a precise coding agent. Generate code directly without reasoning.
 
 ---
 
-## 12. SQLite Database Cleanup — PRAGMA, CLI & Background WAL
+## 13. SQLite Database Cleanup — PRAGMA, CLI & Background WAL
 
-📋 [Detailed Spec](./spec/14-opencode-db-cleanup.md)
+📋 [Detailed Spec](./spec/15-opencode-db-cleanup.md)
 
 **Status:** ✅ Implemented
 
