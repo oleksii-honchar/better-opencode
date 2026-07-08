@@ -66,7 +66,8 @@ const FILE_ATTACHMENTS_SYSTEM_PROMPT = `## File Attachments
 import * as DateTime from "effect/DateTime"
 import { eq } from "@/storage/db"
 import * as Database from "@/storage/db"
-import { SessionTable } from "./session.sql"
+import { sql } from "drizzle-orm"
+import { SessionTable, PartTable } from "./session.sql"
 import { referencePromptMetadata, referenceTextPart } from "./prompt/reference"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
@@ -1586,6 +1587,19 @@ export const layer = Layer.effect(
             const system = [...env, ...instructions, ...(hasMessageAttachments(lastUser.id) ? [FILE_ATTACHMENTS_SYSTEM_PROMPT] : []), ...(skills ? [skills] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+
+            // Check if system prompt was already persisted for this session
+            const hasSystemPromptPart = Database.use((db) =>
+              db
+                .select()
+                .from(PartTable)
+                .where(
+                  sql`${PartTable.session_id} = ${sessionID} AND json_extract(${PartTable.data}, '$.metadata.systemPrompt') = 1`,
+                )
+                .limit(1)
+                .get() !== undefined,
+            )
+
             const result = yield* handle.process({
               user: lastUser,
               agent,
@@ -1597,7 +1611,7 @@ export const layer = Layer.effect(
               tools: toolsResult.tools,
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
-              onSystemPrepared: step === 1
+              onSystemPrepared: step === 1 && !hasSystemPromptPart
                 ? (finalSystem: string) =>
                     sessions.updatePart({
                       id: PartID.ascending(),
