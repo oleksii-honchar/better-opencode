@@ -493,6 +493,47 @@ describe("tool.registry", () => {
     }),
   )
 
+  it.instance("apply_patch is available for all model IDs", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const agent = yield* Agent.Service
+      const build = yield* agent.get("build")
+      if (!build) throw new Error("build agent not found")
+
+      const nonGptModels = ["qwen3.6-40b", "gemini-2.0", "claude-4"]
+      for (const modelID of nonGptModels) {
+        const tools = yield* registry.tools({
+          providerID: ProviderID.opencode,
+          modelID: ModelID.make(modelID),
+          agent: build,
+        })
+        const ids = tools.map((t) => t.id)
+        expect(ids).toContain("apply_patch")
+      }
+    }),
+  )
+
+  it.instance("all three editing tools are available simultaneously", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const agent = yield* Agent.Service
+      const build = yield* agent.get("build")
+      if (!build) throw new Error("build agent not found")
+
+      for (const modelID of ["gpt-5", "qwen3.6-40b", "claude-4"]) {
+        const tools = yield* registry.tools({
+          providerID: ProviderID.opencode,
+          modelID: ModelID.make(modelID),
+          agent: build,
+        })
+        const ids = tools.map((t) => t.id)
+        expect(ids).toContain("apply_patch")
+        expect(ids).toContain("edit")
+        expect(ids).toContain("write")
+      }
+    }),
+  )
+
   it.instance("loads tools with external dependencies without crashing", () =>
     Effect.gen(function* () {
       const test = yield* TestInstance

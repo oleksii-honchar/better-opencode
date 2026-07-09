@@ -100,3 +100,4 @@ When calling tools, always include all required fields:
 - bash: command (string), description (string, 5-10 words)
 - edit: filePath (string), oldString (string), newString (string)
 - write: filePath (string), content (string)
+- apply_patch: patchText (string) — for multi-file edits or complex changes, use the apply_patch tool with a patch in *** Begin Patch / *** End Patch format
