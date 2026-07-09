@@ -361,7 +361,7 @@ describe("session.llm.ai-sdk adapter", () => {
         uncheckedAdapterEvent({
           type: "tool-call",
           toolCallId: "call_123",
-          toolName: "tool_search",
+          toolName: "meta_search",
           args: { query: "test" },
           input: undefined,
           providerExecuted: true,
@@ -373,7 +373,7 @@ describe("session.llm.ai-sdk adapter", () => {
     expect(events[0]).toMatchObject({
       type: "tool-call",
       id: "call_123",
-      name: "tool_search",
+      name: "meta_search",
       input: { query: "test" },
     })
   })
@@ -386,7 +386,7 @@ describe("session.llm.ai-sdk adapter", () => {
         uncheckedAdapterEvent({
           type: "tool-call",
           toolCallId: "call_456",
-          toolName: "tool_search",
+          toolName: "meta_search",
           args: { query: "from_args" },
           input: { query: "from_input" },
           providerExecuted: true,
@@ -398,7 +398,7 @@ describe("session.llm.ai-sdk adapter", () => {
     expect(events[0]).toMatchObject({
       type: "tool-call",
       id: "call_456",
-      name: "tool_search",
+      name: "meta_search",
       input: { query: "from_args" },
     })
   })

@@ -18,7 +18,7 @@ see_also:
 
 ## Overview
 
-Add a `metaSkillEnabled` boolean configuration switch to the `@olho/agent-meta-tool` plugin that controls whether the meta-layer replaces skill content in the system prompt. When disabled, skills remain in the system prompt exactly as standard (no replacement by `<amt-system-reminder>`), while meta tools (`tool_search`, `tool_use`, `skill_search`) continue to function normally.
+Add a `metaSkillEnabled` boolean configuration switch to the `@olho/agent-meta-tool` plugin that controls whether the meta-layer replaces skill content in the system prompt. When disabled, skills remain in the system prompt exactly as standard (no replacement by `<amt-system-reminder>`), while meta tools (`meta_search`, `meta_use`, `skill_search`) continue to function normally.
 
 ### Behavior Summary
 

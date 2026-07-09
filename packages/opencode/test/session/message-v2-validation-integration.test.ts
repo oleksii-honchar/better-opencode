@@ -198,7 +198,7 @@ describe("session.message-v2.toModelMessagesEffect validation integration", () =
       {
         info: assistantInfo(assistantID, userID),
         parts: [
-          makeToolPart(assistantID, "a1", "call-bad", "tool_search", undefined, "completed"),
+          makeToolPart(assistantID, "a1", "call-bad", "meta_search", undefined, "completed"),
         ] as MessageV2.Part[],
       },
     ]
@@ -215,7 +215,7 @@ describe("session.message-v2.toModelMessagesEffect validation integration", () =
     const error = capturedError as LLMError
     expect(error.reason._tag).toBe("InvalidRequest")
     expect(error.message).toContain("call-bad")
-    expect(error.message).toContain("tool_search")
+    expect(error.message).toContain("meta_search")
     expect(error.message).toContain("missing required field")
   })
 
@@ -231,7 +231,7 @@ describe("session.message-v2.toModelMessagesEffect validation integration", () =
       {
         info: assistantInfo(assistantID, userID),
         parts: [
-          makeToolPart(assistantID, "a1", "call-bad", "tool_search", undefined, "error", {
+          makeToolPart(assistantID, "a1", "call-bad", "meta_search", undefined, "error", {
             output: "partial output",
             error: "something went wrong",
           }),
@@ -265,7 +265,7 @@ describe("session.message-v2.toModelMessagesEffect validation integration", () =
       {
         info: assistantInfo(assistantID, userID),
         parts: [
-          makeToolPart(assistantID, "a1", "call-bad", "tool_search", undefined, "error"),
+          makeToolPart(assistantID, "a1", "call-bad", "meta_search", undefined, "error"),
         ] as MessageV2.Part[],
       },
     ]
@@ -296,7 +296,7 @@ describe("session.message-v2.toModelMessagesEffect validation integration", () =
       {
         info: assistantInfo(assistantID, userID),
         parts: [
-          makeToolPart(assistantID, "a1", "call-bad", "tool_search", undefined, "pending"),
+          makeToolPart(assistantID, "a1", "call-bad", "meta_search", undefined, "pending"),
         ] as MessageV2.Part[],
       },
     ]
@@ -327,7 +327,7 @@ describe("session.message-v2.toModelMessagesEffect validation integration", () =
       {
         info: assistantInfo(assistantID, userID),
         parts: [
-          makeToolPart(assistantID, "a1", "call-bad", "tool_search", undefined, "running"),
+          makeToolPart(assistantID, "a1", "call-bad", "meta_search", undefined, "running"),
         ] as MessageV2.Part[],
       },
     ]
@@ -358,7 +358,7 @@ describe("session.message-v2.toModelMessagesEffect validation integration", () =
       {
         info: assistantInfo(assistantID, userID),
         parts: [
-          makeToolPart(assistantID, "a1", "call-bad", "tool_search", "", "completed"),
+          makeToolPart(assistantID, "a1", "call-bad", "meta_search", "", "completed"),
         ] as MessageV2.Part[],
       },
     ]
