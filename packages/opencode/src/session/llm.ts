@@ -62,7 +62,7 @@ export const validateMessages = (messages: ModelMessage[]): Effect.Effect<ModelM
     if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue
     for (const part of msg.content) {
       if (part.type !== "tool-call") continue
-      if (part.args === undefined || part.args === null) {
+      if (part.input === undefined || part.input === null) {
         return Effect.logWarning(
           `Tool call "${part.toolCallId}" for "${part.toolName}" at message index ${i} missing arguments at API boundary`,
         ).pipe(

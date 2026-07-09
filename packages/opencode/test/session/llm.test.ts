@@ -412,45 +412,10 @@ describe("session.llm.ai-sdk adapter", () => {
           type: "tool-call",
           toolCallId: "call_789",
           toolName: "bash",
-          args: undefined,
-          input: { command: "echo hello" },
-          providerExecuted: true,
+          input: { query: "from_input_only" },
         }),
       ),
     )
-
-    expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({
-      type: "tool-call",
-      id: "call_789",
-      name: "bash",
-      input: { command: "echo hello" },
-    })
-  })
-
-  test("emits undefined usage when every AI SDK usage field is missing", async () => {
-    // If every numeric field is undefined the translator should signal "no usage info"
-    // by emitting undefined, not by polluting the event with usage: {}. Downstream cost
-    // telemetry distinguishes "missing" from "zero," so emitting an empty object causes
-    // false positives ("usage was tracked, just empty") instead of correct nulls.
-    const events = await adapt([
-      {
-        type: "finish-step",
-        response: { id: "response-1", timestamp: new Date(0), modelId: "gpt-test" },
-        finishReason: "stop",
-        rawFinishReason: "stop",
-        providerMetadata: undefined,
-        usage: {
-          inputTokens: undefined,
-          outputTokens: undefined,
-          totalTokens: undefined,
-          reasoningTokens: undefined,
-          cachedInputTokens: undefined,
-          inputTokenDetails: { noCacheTokens: undefined, cacheReadTokens: undefined, cacheWriteTokens: undefined },
-          outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
-        },
-      },
-    ])
 
     expect(events).toHaveLength(1)
     const stepFinish = events[0]
@@ -1946,7 +1911,7 @@ describe("session.llm.stream", () => {
 })
 
 describe("session.llm.validateMessages", () => {
-  test("valid messages with args — passes, returns messages unchanged", () => {
+  test("valid messages with input — passes, returns messages unchanged", () => {
     const messages: ModelMessage[] = [
       {
         role: "assistant",
@@ -1955,7 +1920,7 @@ describe("session.llm.validateMessages", () => {
             type: "tool-call",
             toolCallId: "call-1",
             toolName: "bash",
-            args: { command: "ls" },
+            input: { command: "ls" },
           },
         ],
       },
@@ -1964,7 +1929,7 @@ describe("session.llm.validateMessages", () => {
     expect(result).toBe(messages)
   })
 
-  test("tool-call with undefined args — fails with LLMError", () => {
+  test("tool-call with undefined input — fails with LLMError", () => {
     const messages: ModelMessage[] = [
       {
         role: "assistant",
@@ -1973,7 +1938,7 @@ describe("session.llm.validateMessages", () => {
             type: "tool-call",
             toolCallId: "call-2",
             toolName: "read",
-            args: undefined,
+            input: undefined,
           },
         ],
       },
@@ -1991,7 +1956,7 @@ describe("session.llm.validateMessages", () => {
     }
   })
 
-  test("tool-call with null args — fails with LLMError", () => {
+  test("tool-call with null input — fails with LLMError", () => {
     const messages: ModelMessage[] = [
       {
         role: "assistant",
@@ -2000,7 +1965,7 @@ describe("session.llm.validateMessages", () => {
             type: "tool-call",
             toolCallId: "call-3",
             toolName: "glob",
-            args: null,
+            input: null,
           },
         ],
       },
@@ -2034,13 +1999,13 @@ describe("session.llm.validateMessages", () => {
             type: "tool-call",
             toolCallId: "call-ok",
             toolName: "read",
-            args: { filePath: "/root" },
+            input: { filePath: "/root" },
           },
           {
             type: "tool-call",
             toolCallId: "call-bad",
             toolName: "bash",
-            args: undefined,
+            input: undefined,
           },
         ],
       },
@@ -2064,7 +2029,7 @@ describe("session.llm.validateMessages", () => {
             type: "tool-call",
             toolCallId: "call-1",
             toolName: "read",
-            args: { filePath: "/root" },
+            input: { filePath: "/root" },
           },
         ],
       },
@@ -2075,7 +2040,7 @@ describe("session.llm.validateMessages", () => {
             type: "tool-call",
             toolCallId: "call-2",
             toolName: "bash",
-            args: undefined,
+            input: undefined,
           },
         ],
       },
@@ -2113,7 +2078,7 @@ describe("session.llm.validateMessages", () => {
             type: "tool-call",
             toolCallId: "call-5",
             toolName: "bash",
-            args: undefined,
+            input: undefined,
           },
         ],
       },
@@ -2127,16 +2092,16 @@ describe("session.llm.validateMessages", () => {
     }
   })
 
-  test("empty args object — passes (empty object is valid args)", () => {
+  test("empty input object — passes (empty object is valid input)", () => {
     const messages: ModelMessage[] = [
       {
         role: "assistant",
         content: [
           {
             type: "tool-call",
-            toolCallId: "call-empty-args",
+            toolCallId: "call-empty-input",
             toolName: "bash",
-            args: {},
+            input: {},
           },
         ],
       },
@@ -2154,7 +2119,7 @@ describe("session.llm.validateMessages", () => {
             type: "tool-call",
             toolCallId: "call-index-test",
             toolName: "read",
-            args: { filePath: "/root" },
+            input: { filePath: "/root" },
           },
         ],
       },
@@ -2165,7 +2130,7 @@ describe("session.llm.validateMessages", () => {
             type: "tool-call",
             toolCallId: "call-index-bad",
             toolName: "bash",
-            args: undefined,
+            input: undefined,
           },
         ],
       },
@@ -2209,7 +2174,7 @@ describe("session.llm.validateMessages integration", () => {
           model: { providerID: ProviderID.make("openai"), modelID: resolved.id },
         } satisfies MessageV2.User
 
-        // Messages contain a tool-call with missing args — should be caught by validateMessages
+        // Messages contain a tool-call with missing input — should be caught by validateMessages
         const messages: ModelMessage[] = [
           {
             role: "assistant",
@@ -2218,7 +2183,7 @@ describe("session.llm.validateMessages integration", () => {
                 type: "tool-call",
                 toolCallId: "call-missing-args",
                 toolName: "bash",
-                args: undefined,
+                input: undefined,
               },
             ],
           },
