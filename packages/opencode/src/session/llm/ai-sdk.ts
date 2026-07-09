@@ -6,6 +6,10 @@ import { errorMessage } from "@/util/error"
 type Result = Awaited<ReturnType<typeof streamText>>
 type AISDKEvent = Result["fullStream"] extends AsyncIterable<infer T> ? T : never
 
+// event.args is a runtime field emitted by Codex provider but not in AI SDK types (6.0.168).
+// Cast required until AI SDK types are updated to expose args.
+type ToolCallWithArgs = { args?: unknown }
+
 export function adapterState() {
   return {
     step: 0,
@@ -188,19 +192,32 @@ export function toLLMEvents(
         }),
       ])
 
-    case "tool-call":
+    case "tool-call": {
       return Effect.sync(() => {
         state.toolNames[event.toolCallId] = event.toolName
+        // event.args is canonical; event.input is deprecated — Codex only populates args
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- args is runtime field not in AI SDK types
+        const toolInput = (event as ToolCallWithArgs).args ?? event.input
+        if (toolInput === undefined || toolInput === null) {
+          Effect.logWarning("tool-call event has no args or input", {
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            hasEventInput: "input" in event,
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- args is runtime field
+            hasEventArgs: "args" in (event as ToolCallWithArgs),
+          })
+        }
         return [
           LLMEvent.toolCall({
             id: event.toolCallId,
             name: event.toolName,
-            input: event.input,
+            input: toolInput,
             providerExecuted: "providerExecuted" in event ? event.providerExecuted : undefined,
             providerMetadata: providerMetadata(event.providerMetadata),
           }),
         ]
       })
+    }
 
     case "tool-result":
       return Effect.sync(() => {

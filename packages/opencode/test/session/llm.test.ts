@@ -351,6 +351,82 @@ describe("session.llm.ai-sdk adapter", () => {
     })
   })
 
+  test("uses event.args when event.input is undefined (Codex provider path)", async () => {
+    // Codex only populates args, not input — this was the root cause of
+    // "Missing required parameter: 'input[N].arguments'" errors
+    const events = await Effect.runPromise(
+      LLMAISDK.toLLMEvents(
+        LLMAISDK.adapterState(),
+        uncheckedAdapterEvent({
+          type: "tool-call",
+          toolCallId: "call_123",
+          toolName: "tool_search",
+          args: { query: "test" },
+          input: undefined,
+          providerExecuted: true,
+        }),
+      ),
+    )
+
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      type: "tool-call",
+      id: "call_123",
+      name: "tool_search",
+      input: { query: "test" },
+    })
+  })
+
+  test("prefers event.args over event.input when both are present", async () => {
+    // event.args is canonical; event.input is deprecated — args should take priority
+    const events = await Effect.runPromise(
+      LLMAISDK.toLLMEvents(
+        LLMAISDK.adapterState(),
+        uncheckedAdapterEvent({
+          type: "tool-call",
+          toolCallId: "call_456",
+          toolName: "tool_search",
+          args: { query: "from_args" },
+          input: { query: "from_input" },
+          providerExecuted: true,
+        }),
+      ),
+    )
+
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      type: "tool-call",
+      id: "call_456",
+      name: "tool_search",
+      input: { query: "from_args" },
+    })
+  })
+
+  test("falls back to event.input when event.args is undefined (legacy provider)", async () => {
+    // Older providers may only populate input — the ?? fallback preserves compatibility
+    const events = await Effect.runPromise(
+      LLMAISDK.toLLMEvents(
+        LLMAISDK.adapterState(),
+        uncheckedAdapterEvent({
+          type: "tool-call",
+          toolCallId: "call_789",
+          toolName: "bash",
+          args: undefined,
+          input: { command: "echo hello" },
+          providerExecuted: true,
+        }),
+      ),
+    )
+
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      type: "tool-call",
+      id: "call_789",
+      name: "bash",
+      input: { command: "echo hello" },
+    })
+  })
+
   test("emits undefined usage when every AI SDK usage field is missing", async () => {
     // If every numeric field is undefined the translator should signal "no usage info"
     // by emitting undefined, not by polluting the event with usage: {}. Downstream cost
