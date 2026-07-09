@@ -24,6 +24,7 @@ import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Schema, Types } from "effect"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import * as EffectLogger from "@opencode-ai/core/effect/logger"
+import { InvalidRequestReason, LLMError } from "@opencode-ai/llm"
 import { MessageError } from "./message-error"
 import { AuthError, OutputLengthError } from "./message-error"
 export { AuthError, OutputLengthError } from "./message-error"
@@ -627,6 +628,55 @@ function providerMeta(metadata: Record<string, any> | undefined) {
   return Object.keys(rest).length > 0 ? rest : undefined
 }
 
+function makeInvalidRequest(message: string): LLMError {
+  return new LLMError({
+    module: "MessageV2",
+    method: "toModelMessagesEffect",
+    reason: new InvalidRequestReason({ message }),
+  })
+}
+
+/**
+ * Validate and serialize a tool call's input to JSON. Ensures
+ * `part.state.input` is present (not `undefined`/`null`) and produces
+ * a non-empty JSON string. Returns an Effect that succeeds with the
+ * serialized string or fails with `InvalidRequestReason`.
+ */
+export const toModelMessagesValidation = (
+  part: ToolPart,
+): Effect.Effect<string, LLMError, never> => {
+  const input = part.state.input
+  if (input === undefined || input === null) {
+    const missing = input === undefined ? "undefined" : "null"
+    return Effect.logWarning(
+      `Validation failure: tool call "${part.callID}" for tool "${part.tool}" is missing required field "arguments" (value: ${missing}), message ${part.messageID}, part ${part.id}`,
+    ).pipe(
+      Effect.flatMap(() =>
+        Effect.fail(
+          makeInvalidRequest(
+            `Tool call "${part.callID}" for tool "${part.tool}" is missing required field "arguments"`,
+          ),
+        ),
+      ),
+    )
+  }
+  const json = typeof input === "string" ? input : JSON.stringify(input)
+  if (json.length === 0) {
+    return Effect.logWarning(
+      `Validation failure: tool call "${part.callID}" for tool "${part.tool}" produced empty "arguments" after serialization, message ${part.messageID}, part ${part.id}`,
+    ).pipe(
+      Effect.flatMap(() =>
+        Effect.fail(
+          makeInvalidRequest(
+            `Tool call "${part.callID}" for tool "${part.tool}" produced empty "arguments" after serialization`,
+          ),
+        ),
+      ),
+    )
+  }
+  return Effect.succeed(json)
+}
+
 export const toModelMessagesEffect = Effect.fnUntraced(function* (
   input: WithParts[],
   model: Provider.Model,
@@ -810,11 +860,12 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
                   }
                 : outputText
 
+            const validatedInput = yield* toModelMessagesValidation(part)
             assistantMessage.parts.push({
               type: ("tool-" + part.tool) as `tool-${string}`,
               state: "output-available",
               toolCallId: part.callID,
-              input: part.state.input,
+              input: validatedInput,
               output,
               ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
               ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
@@ -823,21 +874,23 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           if (part.state.status === "error") {
             const output = part.state.metadata?.interrupted === true ? part.state.metadata.output : undefined
             if (typeof output === "string") {
+              const validatedInput = yield* toModelMessagesValidation(part)
               assistantMessage.parts.push({
                 type: ("tool-" + part.tool) as `tool-${string}`,
                 state: "output-available",
                 toolCallId: part.callID,
-                input: part.state.input,
+                input: validatedInput,
                 output,
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
               })
             } else {
+              const validatedInput = yield* toModelMessagesValidation(part)
               assistantMessage.parts.push({
                 type: ("tool-" + part.tool) as `tool-${string}`,
                 state: "output-error",
                 toolCallId: part.callID,
-                input: part.state.input,
+                input: validatedInput,
                 errorText: part.state.error,
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
@@ -846,16 +899,18 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           }
           // Handle pending/running tool calls to prevent dangling tool_use blocks
           // Anthropic/Claude APIs require every tool_use to have a corresponding tool_result
-          if (part.state.status === "pending" || part.state.status === "running")
+          if (part.state.status === "pending" || part.state.status === "running") {
+            const validatedInput = yield* toModelMessagesValidation(part)
             assistantMessage.parts.push({
               type: ("tool-" + part.tool) as `tool-${string}`,
               state: "output-error",
               toolCallId: part.callID,
-              input: part.state.input,
+              input: validatedInput,
               errorText: "[Tool execution was interrupted]",
               ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
               ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
             })
+          }
         }
         if (part.type === "reasoning") {
           if (differentModel) {
