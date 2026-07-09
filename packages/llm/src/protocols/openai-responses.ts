@@ -266,11 +266,13 @@ const lowerToolChoice = (toolChoice: NonNullable<LLMRequest["toolChoice"]>) =>
     tool: (name) => ({ type: "function" as const, name }),
   })
 
-const lowerToolCall = (part: ToolCallPart): OpenAIResponsesInputItem => ({
-  type: "function_call",
-  call_id: part.id,
-  name: part.name,
-  arguments: ProviderShared.encodeJson(part.input),
+const lowerToolCall = Effect.fn("OpenAIResponses.lowerToolCall")(function* (part: ToolCallPart) {
+  return {
+    type: "function_call" as const,
+    call_id: part.id,
+    name: part.name,
+    arguments: yield* ProviderShared.validateToolCallInput("openai-responses", part),
+  }
 })
 
 const lowerReasoning = (part: ReasoningPart): OpenAIResponsesReasoningInput | undefined => {
@@ -371,7 +373,7 @@ const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (requ
         }
         if (part.type === "tool-call") {
           flushText()
-          input.push(lowerToolCall(part))
+          input.push(yield* lowerToolCall(part))
           continue
         }
         return yield* ProviderShared.unsupportedContent("OpenAI Responses", "assistant", [

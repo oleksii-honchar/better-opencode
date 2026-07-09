@@ -176,13 +176,15 @@ const lowerToolChoice = (toolChoice: NonNullable<LLMRequest["toolChoice"]>) =>
     tool: (name) => ({ type: "function" as const, function: { name } }),
   })
 
-const lowerToolCall = (part: ToolCallPart): OpenAIChatAssistantToolCall => ({
-  id: part.id,
-  type: "function",
-  function: {
-    name: part.name,
-    arguments: ProviderShared.encodeJson(part.input),
-  },
+const lowerToolCall = Effect.fn("OpenAIChat.lowerToolCall")(function* (part: ToolCallPart) {
+  return {
+    id: part.id,
+    type: "function" as const,
+    function: {
+      name: part.name,
+      arguments: yield* ProviderShared.validateToolCallInput("openai-chat", part),
+    },
+  }
 })
 
 const openAICompatibleReasoningContent = (native: unknown) =>
@@ -211,7 +213,7 @@ const lowerAssistantMessage = Effect.fn("OpenAIChat.lowerAssistantMessage")(func
       continue
     }
     if (part.type === "tool-call") {
-      toolCalls.push(lowerToolCall(part))
+      toolCalls.push(yield* lowerToolCall(part))
       continue
     }
   }
