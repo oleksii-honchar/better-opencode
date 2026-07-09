@@ -199,13 +199,16 @@ export function toLLMEvents(
         // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- args is runtime field not in AI SDK types
         const toolInput = (event as ToolCallWithArgs).args ?? event.input
         if (toolInput === undefined || toolInput === null) {
-          Effect.logWarning("tool-call event has no args or input", {
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            hasEventInput: "input" in event,
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- args is runtime field
-            hasEventArgs: "args" in (event as ToolCallWithArgs),
-          })
+Effect.logWarning("tool-call event has no args or input", {
+    toolCallId: event.toolCallId,
+    toolName: event.toolName,
+    hasEventInput: "input" in event,
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- args is runtime field
+    hasEventArgs: "args" in (event as ToolCallWithArgs),
+    eventInputValue: event.input,
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access -- args is runtime field
+    eventArgsValue: (event as ToolCallWithArgs).args,
+  })
         }
         return [
           LLMEvent.toolCall({

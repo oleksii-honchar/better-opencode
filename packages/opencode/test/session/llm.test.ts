@@ -6,6 +6,7 @@ import { InstanceRef } from "../../src/effect/instance-ref"
 import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import z from "zod"
 import { LLM } from "../../src/session/llm"
+import { LLMError, InvalidRequestReason } from "@opencode-ai/llm"
 import { LLMClient, RequestExecutor, WebSocketExecutor } from "@opencode-ai/llm/route"
 import { Auth } from "@/auth"
 import { Config } from "@/config/config"
@@ -1937,6 +1938,380 @@ describe("session.llm.stream", () => {
         provider: {
           [geminiFixture.providerID]: {
             options: { apiKey: "test-google-key", baseURL: `${state.server!.url.origin}/v1beta` },
+          },
+        },
+      }),
+    },
+  )
+})
+
+describe("session.llm.validateMessages", () => {
+  test("valid messages with args — passes, returns messages unchanged", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "bash",
+            args: { command: "ls" },
+          },
+        ],
+      },
+    ] as ModelMessage[]
+    const result = Effect.runSync(LLM.validateMessages(messages))
+    expect(result).toBe(messages)
+  })
+
+  test("tool-call with undefined args — fails with LLMError", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-2",
+            toolName: "read",
+            args: undefined,
+          },
+        ],
+      },
+    ] as ModelMessage[]
+    const exit = Effect.runSyncExit(LLM.validateMessages(messages))
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const error = Cause.squash(exit.cause) as LLMError
+      expect(error._tag).toBe("LLM.Error")
+      expect(error.module).toBe("LLM")
+      expect(error.method).toBe("run")
+      expect(error.reason._tag).toBe("InvalidRequest")
+      expect(error.reason.message).toContain("call-2")
+      expect(error.reason.message).toContain("read")
+    }
+  })
+
+  test("tool-call with null args — fails with LLMError", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-3",
+            toolName: "glob",
+            args: null,
+          },
+        ],
+      },
+    ] as ModelMessage[]
+    const exit = Effect.runSyncExit(LLM.validateMessages(messages))
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const error = Cause.squash(exit.cause) as LLMError
+      expect(error._tag).toBe("LLM.Error")
+      expect(error.reason.message).toContain("call-3")
+      expect(error.reason.message).toContain("glob")
+    }
+  })
+
+  test("non-assistant messages — passes (no tool-calls to check)", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi there" },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: "call-1", toolName: "bash", result: "ok" }] },
+    ] as ModelMessage[]
+    const result = Effect.runSync(LLM.validateMessages(messages))
+    expect(result).toBe(messages)
+  })
+
+  test("mixed valid and invalid tool-calls — fails on first invalid", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-ok",
+            toolName: "read",
+            args: { filePath: "/root" },
+          },
+          {
+            type: "tool-call",
+            toolCallId: "call-bad",
+            toolName: "bash",
+            args: undefined,
+          },
+        ],
+      },
+    ] as ModelMessage[]
+    const exit = Effect.runSyncExit(LLM.validateMessages(messages))
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const error = Cause.squash(exit.cause) as LLMError
+      expect(error._tag).toBe("LLM.Error")
+      expect(error.reason.message).toContain("call-bad")
+      expect(error.reason.message).toContain("bash")
+    }
+  })
+
+  test("multiple messages — fails on first invalid across messages", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "read",
+            args: { filePath: "/root" },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-2",
+            toolName: "bash",
+            args: undefined,
+          },
+        ],
+      },
+    ] as ModelMessage[]
+    const exit = Effect.runSyncExit(LLM.validateMessages(messages))
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const error = Cause.squash(exit.cause) as LLMError
+      expect(error._tag).toBe("LLM.Error")
+      expect(error.reason.message).toContain("call-2")
+      expect(error.reason.message).toContain("bash")
+    }
+  })
+
+  test("empty messages array — passes", () => {
+    const result = Effect.runSync(LLM.validateMessages([]))
+    expect(result).toEqual([])
+  })
+
+  test("assistant message with string content — passes", () => {
+    const messages: ModelMessage[] = [
+      { role: "assistant", content: "Just a text response" },
+    ]
+    const result = Effect.runSync(LLM.validateMessages(messages))
+    expect(result).toBe(messages)
+  })
+
+  test("tool-call mixed with text content — validates tool-call part", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Let me run that" },
+          {
+            type: "tool-call",
+            toolCallId: "call-5",
+            toolName: "bash",
+            args: undefined,
+          },
+        ],
+      },
+    ] as ModelMessage[]
+    const exit = Effect.runSyncExit(LLM.validateMessages(messages))
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const error = Cause.squash(exit.cause) as LLMError
+      expect(error._tag).toBe("LLM.Error")
+      expect(error.reason.message).toContain("call-5")
+    }
+  })
+
+  test("empty args object — passes (empty object is valid args)", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-empty-args",
+            toolName: "bash",
+            args: {},
+          },
+        ],
+      },
+    ] as ModelMessage[]
+    const result = Effect.runSync(LLM.validateMessages(messages))
+    expect(result).toBe(messages)
+  })
+
+  test("structured error includes message index", () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-index-test",
+            toolName: "read",
+            args: { filePath: "/root" },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-index-bad",
+            toolName: "bash",
+            args: undefined,
+          },
+        ],
+      },
+    ] as ModelMessage[]
+    const exit = Effect.runSyncExit(LLM.validateMessages(messages))
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const error = Cause.squash(exit.cause) as LLMError
+      expect(error._tag).toBe("LLM.Error")
+      expect(error.reason.message).toContain("call-index-bad")
+      expect(error.reason.message).toContain("bash")
+      expect(error.reason.message).toContain("at message index 1")
+    }
+  })
+})
+
+describe("session.llm.validateMessages integration", () => {
+  it.instance(
+    "validates messages before streamText — tool-call with missing args fails with LLMError",
+    () =>
+      Effect.gen(function* () {
+        const fixture = loadFixture("openai", "gpt-4o")
+        const resolved = yield* Provider.use.getModel(
+          ProviderID.make("openai"),
+          ModelID.make(fixture.model.id),
+        )
+        const sessionID = SessionID.make("session-validation-test")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+
+        const user = {
+          id: MessageID.make("msg_user-val"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make("openai"), modelID: resolved.id },
+        } satisfies MessageV2.User
+
+        // Messages contain a tool-call with missing args — should be caught by validateMessages
+        const messages: ModelMessage[] = [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "call-missing-args",
+                toolName: "bash",
+                args: undefined,
+              },
+            ],
+          },
+        ] as ModelMessage[]
+
+        const exit = yield* drain({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: ["You are a helpful assistant."],
+          messages,
+          tools: {},
+        }).pipe(Effect.exit)
+
+        // Should fail with LLMError from validateMessages, not reach the API
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          const error = Cause.squash(exit.cause) as LLMError
+          expect(error._tag).toBe("LLM.Error")
+          expect(error.module).toBe("LLM")
+          expect(error.method).toBe("run")
+          expect(error.reason._tag).toBe("InvalidRequest")
+          expect(error.reason.message).toContain("call-missing-args")
+          expect(error.reason.message).toContain("bash")
+        }
+      }),
+    {
+      config: () => ({
+        enabled_providers: ["openai"],
+        provider: {
+          openai: {
+            options: { apiKey: "test-openai-key", baseURL: `${state.server!.url.origin}/v1` },
+          },
+        },
+      }),
+    },
+  )
+
+  it.instance(
+    "validates messages before streamText — valid messages pass through to API",
+    () =>
+      Effect.gen(function* () {
+        const fixture = loadFixture("openai", "gpt-4o")
+        const request = waitRequest("/responses", createEventResponse([{ type: "message.delta", data: { delta: "Hello" } }], true))
+
+        const resolved = yield* Provider.use.getModel(
+          ProviderID.make("openai"),
+          ModelID.make(fixture.model.id),
+        )
+        const sessionID = SessionID.make("session-validation-pass")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+
+        const user = {
+          id: MessageID.make("msg_user-pass"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make("openai"), modelID: resolved.id },
+        } satisfies MessageV2.User
+
+        // Valid messages — should pass validation and reach the API
+        const messages: ModelMessage[] = [
+          { role: "user", content: "Hello" },
+        ]
+
+        yield* drain({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: ["You are a helpful assistant."],
+          messages,
+          tools: {},
+        })
+
+        // If we got here, validation passed and the API was called
+        const capture = yield* Effect.promise(() => request)
+        expect(capture.url.pathname.endsWith("/responses")).toBe(true)
+        expect(capture.body.model).toBe(resolved.api.id)
+      }),
+    {
+      config: () => ({
+        enabled_providers: ["openai"],
+        provider: {
+          openai: {
+            options: { apiKey: "test-openai-key", baseURL: `${state.server!.url.origin}/v1` },
           },
         },
       }),

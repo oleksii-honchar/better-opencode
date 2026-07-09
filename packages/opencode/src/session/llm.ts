@@ -6,6 +6,7 @@ import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, InvalidToolInputError, type ModelMessage, type Tool } from "ai"
 import type { LLMEvent } from "@opencode-ai/llm"
 import { LLMClient, RequestExecutor, WebSocketExecutor } from "@opencode-ai/llm/route"
+import { LLMError, InvalidRequestReason } from "@opencode-ai/llm"
 import type { LLMClientService } from "@opencode-ai/llm/route"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider/transform"
@@ -53,6 +54,34 @@ function repairDoubleBraces(input: string): string | null {
     try { JSON.parse(stripped); return stripped } catch {}
   }
   return null
+}
+
+export const validateMessages = (messages: ModelMessage[]): Effect.Effect<ModelMessage[], LLMError, never> => {
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]
+    if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue
+    for (const part of msg.content) {
+      if (part.type !== "tool-call") continue
+      if (part.args === undefined || part.args === null) {
+        return Effect.logWarning(
+          `Tool call "${part.toolCallId}" for "${part.toolName}" at message index ${i} missing arguments at API boundary`,
+        ).pipe(
+          Effect.flatMap(() =>
+            Effect.fail(
+              new LLMError({
+                module: "LLM",
+                method: "run",
+                reason: new InvalidRequestReason({
+                  message: `Tool call "${part.toolCallId}" for "${part.toolName}" at message index ${i} missing arguments at API boundary`,
+                }),
+              }),
+            ),
+          ),
+        )
+      }
+    }
+  }
+  return Effect.succeed(messages)
 }
 
 export type StreamInput = {
@@ -292,6 +321,10 @@ const live: Layer.Layer<
           "llm.model": input.model.id,
         }),
       )
+      // Pre-API boundary validation: catch malformed tool calls (missing args)
+      // with clear error messages before they reach streamText / the provider.
+      const validatedMessages = yield* validateMessages(prepared.messages)
+
       // Default runtime path: AI SDK owns provider execution and tool dispatch;
       // LLMAISDK.toLLMEvents below normalizes fullStream parts for the processor.
       return {
@@ -357,7 +390,7 @@ const live: Layer.Layer<
           abortSignal: input.abort,
           headers: prepared.headers,
           maxRetries: input.retries ?? 0,
-          messages: prepared.messages,
+          messages: validatedMessages,
           model: wrapLanguageModel({
             model: language,
             middleware: [
