@@ -1,4 +1,4 @@
-import { and, desc, eq } from "@/storage/db"
+import { and, desc, eq, sql } from "@/storage/db"
 import type { Database } from "@/storage/db"
 import { SessionMessage } from "@opencode-ai/core/session-message"
 import { SessionMessageUpdater } from "@opencode-ai/core/session-message-updater"
@@ -26,7 +26,21 @@ function encodeMessageData(value: unknown): SessionMessageData {
   return encodeDateTimes(value) as SessionMessageData
 }
 
+function hasSessionMessageSeq(db: Database.TxOrDb) {
+  return db
+    .all(sql`PRAGMA table_info(session_message)`)
+    .some((row) => (row as { name?: unknown }).name === "seq")
+}
+
+function nextSessionMessageSeq(db: Database.TxOrDb, sessionID: SessionID) {
+  const row = db
+    .all(sql`SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM session_message WHERE session_id = ${sessionID}`)
+    .at(0) as { seq?: unknown } | undefined
+  return typeof row?.seq === "number" ? row.seq : 0
+}
+
 function sqlite(db: Database.TxOrDb, sessionID: SessionID): SessionMessageUpdater.Adapter<void> {
+  const hasSeq = hasSessionMessageSeq(db)
   return {
     getCurrentAssistant() {
       return db
@@ -99,16 +113,16 @@ function sqlite(db: Database.TxOrDb, sessionID: SessionID): SessionMessageUpdate
     },
     appendMessage(message) {
       const { id, type, ...data } = message
+      const value = {
+        id,
+        session_id: sessionID,
+        type,
+        ...(hasSeq ? { seq: nextSessionMessageSeq(db, sessionID) } : {}),
+        time_created: DateTime.toEpochMillis(message.time.created),
+        data: encodeMessageData(data),
+      }
       db.insert(SessionMessageTable)
-        .values([
-          {
-            id,
-            session_id: sessionID,
-            type,
-            time_created: DateTime.toEpochMillis(message.time.created),
-            data: encodeMessageData(data),
-          },
-        ])
+        .values([value])
         .run()
     },
     finish() {},

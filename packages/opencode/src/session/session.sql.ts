@@ -119,6 +119,7 @@ export const SessionMessageTable = sqliteTable(
       .notNull()
       .references(() => SessionTable.id, { onDelete: "cascade" }),
     type: text().$type<SessionMessage.Type>().notNull(),
+    seq: integer(),
     ...Timestamps,
     data: text({ mode: "json" }).notNull().$type<SessionMessageData>(),
   },
