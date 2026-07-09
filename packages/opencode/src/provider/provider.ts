@@ -1887,11 +1887,24 @@ export function sort<T extends { id: string }>(models: T[]) {
   )
 }
 
-export function parseModel(model: string) {
+export function parseModel(model: string): {
+  providerID: ProviderID
+  modelID: ModelID
+  variant?: string
+} {
   const [providerID, ...rest] = model.split("/")
+  const restStr = rest.join("/")
+  const colonIdx = restStr.lastIndexOf(":")
+  if (colonIdx === -1) {
+    return {
+      providerID: ProviderID.make(providerID),
+      modelID: ModelID.make(restStr),
+    }
+  }
   return {
     providerID: ProviderID.make(providerID),
-    modelID: ModelID.make(rest.join("/")),
+    modelID: ModelID.make(restStr.slice(0, colonIdx)),
+    variant: restStr.slice(colonIdx + 1),
   }
 }
 

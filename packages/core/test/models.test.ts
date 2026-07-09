@@ -1,4 +1,5 @@
-import { describe, expect, beforeAll, beforeEach, afterAll } from "bun:test"
+import { describe, expect, test, beforeAll, beforeEach, afterAll } from "bun:test"
+import { ModelV2 } from "@opencode-ai/core/model"
 import { Effect, Layer, Ref } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -262,4 +263,33 @@ describe("ModelsDev Service", () => {
       expect(final.calls.length).toBeGreaterThanOrEqual(1)
     }),
   )
+})
+
+describe("ModelV2.parse", () => {
+  test("extracts variant from codex/gpt-5.5:medium", () => {
+    const result = ModelV2.parse("codex/gpt-5.5:medium")
+    expect(result.variant).toBe("medium")
+    // modelID should not contain ":medium"
+    expect(result.modelID).not.toContain(":")
+  })
+
+  test("returns undefined variant when no colon present", () => {
+    const result = ModelV2.parse("anthropic/claude-sonnet-4")
+    expect(result.variant).toBeUndefined()
+  })
+
+  test("multi-slash model with variant", () => {
+    const result = ModelV2.parse("openrouter/anthropic/claude-3-opus:high")
+    expect(result.variant).toBe("high")
+  })
+
+  test("multi-slash model without variant", () => {
+    const result = ModelV2.parse("openrouter/anthropic/claude-3-opus")
+    expect(result.variant).toBeUndefined()
+  })
+
+  test("only last colon is variant separator", () => {
+    const result = ModelV2.parse("codex/gpt-5.5:medium:extra")
+    expect(result.variant).toBe("extra")
+  })
 })

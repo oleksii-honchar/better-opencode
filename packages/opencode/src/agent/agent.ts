@@ -48,6 +48,7 @@ export const Info = Schema.Struct({
       Schema.Struct({
         modelID: ModelID,
         providerID: ProviderID,
+        variant: Schema.optional(Schema.String),
       }),
     ),
   ).annotate({
@@ -311,10 +312,33 @@ export const layer = Layer.effect(
               options: {},
               native: false,
             }
-          if (value.model) item.model = Provider.parseModel(value.model)
-          if (value.models) item.models = value.models.map(Provider.parseModel)
+          if (value.model) {
+            const parsed = Provider.parseModel(value.model)
+            item.model = { providerID: parsed.providerID, modelID: parsed.modelID }
+            // Inline variant takes precedence over explicit config variant
+            item.variant = parsed.variant ?? value.variant ?? item.variant
+          }
+          if (value.models) {
+            item.models = value.models.map(m => {
+              const parsed = Provider.parseModel(m)
+              return {
+                providerID: parsed.providerID,
+                modelID: parsed.modelID,
+                variant: parsed.variant,  // preserved for resolveAgentModel
+              }
+            })
+            // Per-entry variant stays on the entry — NOT copied to item.variant.
+            // resolveAgentModel applies it when that entry is selected.
+            // If no model was set, apply config-level variant:
+            if (!value.model) {
+              item.variant = value.variant ?? item.variant
+            }
+          }
+          // If neither model nor models was set, apply config-level variant:
+          if (!value.model && !value.models) {
+            item.variant = value.variant ?? item.variant
+          }
           item.modelPreset = value.modelPreset ?? item.modelPreset
-          item.variant = value.variant ?? item.variant
           item.prompt = value.prompt ?? item.prompt
           item.description = value.description ?? item.description
           item.temperature = value.temperature ?? item.temperature
@@ -489,7 +513,7 @@ export function resolveAgentModel(
   agentModel: Info["model"],
   agentModelPreset: Info["modelPreset"],
   parentModel: { providerID: ProviderID; modelID: ModelID },
-): { modelID: ModelID; providerID: ProviderID } {
+): { modelID: ModelID; providerID: ProviderID; variant?: string } {
   // Check models list for parent provider match
   if (agentModels) {
     const match = agentModels.find(

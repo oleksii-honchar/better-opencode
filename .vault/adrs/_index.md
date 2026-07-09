@@ -38,3 +38,8 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0024-exact-provider-match.adr.md]] — Provider Match — Exact Comparison (ADR-0024, status: accepted)
 - [[0025-graceful-fallback.adr.md]] — Graceful Fallback — Not Hard Error (ADR-0025, status: accepted)
 - [[0026-deprecate-model-fields.adr.md]] — Deprecate model: and modelPreset: After models: Implementation (ADR-0026, status: accepted)
+- [[0027-parse-model-variant-return-type.adr.md]] — Extend `parseModel` Return Type to Include Variant (ADR-0027, status: accepted)
+- [[0028-inline-variant-precedence.adr.md]] — Inline `:variant` Wins Over Explicit Config Variant (ADR-0028, status: accepted)
+- [[0029-colon-as-variant-separator.adr.md]] — Use `:` as Variant Separator (Not `/`) (ADR-0029, status: accepted)
+- [[0030-models-per-entry-variant.adr.md]] — Propagate Per-Entry Variant for `models[]` Array (ADR-0030, status: accepted)
+- [[0031-variant-downstream-validation.adr.md]] — Validate Variant Downstream, Not in Parser (ADR-0031, status: accepted)

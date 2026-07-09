@@ -20,3 +20,4 @@ Mental models, domain vocabulary, and architectural patterns used in better-open
 - [[0006-opencode-observability.concept.md]] — OpenCode Observability (OTEL): telemetry pipeline, data sources, Grafana dashboards
 - [[0007-unstuck-loop-detection.concept.md]] — Unstuck Loop Detection System: fingerprint-based detection, evidence accumulation, nudge-and-prune, cross-stream history, 5 detection types
 - [[0008-agent-model-selection.concept.md]] — Agent Model Selection from Frontmatter: three fields (models, model, modelPreset), resolution chain, provider-model format
+- [[0009-agent-model-variant-parsing.concept.md]] — Agent Model Variant Parsing (`:variant` Syntax): inline variant extraction, precedence rules, single/multi-model propagation

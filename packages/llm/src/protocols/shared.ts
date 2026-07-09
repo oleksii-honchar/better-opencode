@@ -264,6 +264,35 @@ export const invalidRequest = (message: string) =>
     reason: new InvalidRequestReason({ message }),
   })
 
+/**
+ * Validate and serialize a tool call's input to JSON. Ensures `part.input`
+ * is present (not `undefined`/`null`) and produces a non-empty JSON string.
+ * Returns an Effect that succeeds with the serialized string or fails with
+ * `InvalidRequestReason` containing tool ID, tool name, and descriptive message.
+ */
+export const validateToolCallInput = (part: {
+  readonly id: string
+  readonly name: string
+  readonly input: unknown
+}): Effect.Effect<string, LLMError, never> => {
+  if (part.input === undefined || part.input === null) {
+    return Effect.fail(
+      invalidRequest(
+        `Tool call "${part.id}" for tool "${part.name}" is missing required field "arguments"`,
+      ),
+    )
+  }
+  const json = encodeJson(part.input)
+  if (json.length === 0) {
+    return Effect.fail(
+      invalidRequest(
+        `Tool call "${part.id}" for tool "${part.name}" produced empty "arguments" after serialization`,
+      ),
+    )
+  }
+  return Effect.succeed(json)
+}
+
 export const matchToolChoice = <Auto, None, Required, Tool>(
   route: string,
   toolChoice: NonNullable<LLMRequest["toolChoice"]>,

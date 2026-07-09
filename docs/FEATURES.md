@@ -412,3 +412,44 @@ Both `model:` and `modelPreset:` are deprecated. They remain functional as fallb
 - `PRAGMA wal_checkpoint(TRUNCATE)` over `PASSIVE` — truncates WAL to zero; auto-fallback to PASSIVE if busy
 - `journal_size_limit` over `auto_vacuum` — zero runtime cost, no fragmentation; VACUUM for full reclamation
 - Age-based tool output deletion (compacted parts + >90d threshold) — max space recovery, recent sessions pristine
+
+---
+
+## 14. Agent Model `:variant` Parsing
+
+📋 [Detailed Spec](./spec/16-agent-model-variant-parsing.md)
+
+**Status:** ✅ Implemented
+
+**Problem:** The `variant:` config field is the only way to set a thinking variant for an agent's model. Users cannot specify a variant inline with the model string, forcing separate `variant:` declarations per agent.
+
+**Solution:** Extend `Provider.parseModel()` to extract an optional `:variant` suffix from the model string. For example, `codex/gpt-5.5:medium` parses into `{ providerID: "codex", modelID: "gpt-5.5", variant: "medium" }`. The `:variant` is optional — `codex/gpt-5.5` (no variant) continues to work unchanged.
+
+The variant is propagated through agent state construction, `resolveAgentModel`, and ACP `parseModelSelection`. It works for both the `model:` field (single model) and `models[]` array entries (per-entry variant).
+
+**Variant precedence (highest to lowest):**
+1. Inline `:variant` from matched `models[]` entry
+2. Inline `:variant` from `model` string
+3. Explicit `variant` field in agent config
+4. Previously set `item.variant` (defaults, parent override, inheritance)
+
+**Agent config examples:**
+
+Single model:
+```yaml
+model: codex/gpt-5.5:medium
+```
+
+Multi-model with per-entry variants:
+```yaml
+models:
+  - codex/gpt-5.5:medium
+  - openrouter/claude:high
+```
+
+**Key design decisions (5 ADRs):**
+- Extend `parseModel` return type — not a separate wrapper function (ADR-0027)
+- Inline `:variant` beats config-level `variant` (ADR-0028)
+- `:` as separator — unambiguous vs `/` in model IDs like `openrouter/anthropic/claude` (ADR-0029)
+- Per-entry variant in `models[]` array, not Phase 2 deferral (ADR-0030)
+- Pure parser — variant validation stays downstream (ADR-0031)

@@ -12,6 +12,7 @@ see_also:
   - "adrs/0026-deprecate-model-fields.adr.md"
   - "specifications/0005-multi-provider-model-setup.spec.md"
   - "concepts/0004-subagent-delegation.concept.md"
+  - "concepts/0009-agent-model-variant-parsing.concept.md"
 deprecated:
   date: null
   reason: null
@@ -79,6 +80,9 @@ Examples:
 - `mammoth/qwen3.6-40b` → `{ providerID: "mammoth", modelID: "qwen3.6-40b" }`
 - `deepseek/deepseek-v4-flash` → `{ providerID: "deepseek", modelID: "deepseek-v4-flash" }`
 - `codex/gpt-5` → `{ providerID: "codex", modelID: "gpt-5" }`
+
+> **Note:** Since July 2026, model strings also support an optional `:variant` suffix 
+> (e.g., `codex/gpt-5.5:medium`). See [[concepts/0009-agent-model-variant-parsing.concept.md]].
 
 ### Data Flow
 

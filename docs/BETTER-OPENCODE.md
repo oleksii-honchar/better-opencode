@@ -17,6 +17,7 @@ This fork provides plugin hooks for behavioral enforcement and session awareness
 The fork adds several features to address context loss, repetitive loops, session opacity, and context pollution:
 
 - **`modelPreset` (spec/09)** — Per-agent LLM parameter selection via suffixed model IDs (e.g., `qwopus3.6-27b-precise`). Falls back to base model with warning when suffixed model not found. [See detailed spec](./spec/09-agent-model-preset.md)
+- **`:variant` Parsing (spec/16)** — Inline `provider/model:variant` syntax to select thinking variants (e.g., `codex/gpt-5.5:medium`). Works for both `model:` and `models[]` fields. [See detailed spec](./spec/16-agent-model-variant-parsing.md)
 - **`tool.execute.after` Inject (PR #19519)** — Plugins inject synthetic user messages after tool execution
 - **`session.stopping` Hook (PR #16598)** — Plugins intercept idle/stop state and inject follow-up messages
 - **Session ID in System Prompt** — `sessionID` and `parentSessionID` included in `<env>` block on every LLM call

@@ -1123,6 +1123,44 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  it.effect("rejects tool call with undefined input", () =>
+    Effect.gen(function* () {
+      const error = yield* LLMClient.prepare(
+        LLM.request({
+          id: "req_tool_missing_input",
+          model,
+          messages: [
+            Message.user("What is the weather?"),
+            Message.assistant([ToolCallPart.make({ id: "call_1", name: "lookup", input: undefined })]),
+          ],
+        }),
+      ).pipe(Effect.flip)
+
+      expect(error.message).toContain("call_1")
+      expect(error.message).toContain("lookup")
+      expect(error.message).toContain("arguments")
+    }),
+  )
+
+  it.effect("rejects tool call with null input", () =>
+    Effect.gen(function* () {
+      const error = yield* LLMClient.prepare(
+        LLM.request({
+          id: "req_tool_null_input",
+          model,
+          messages: [
+            Message.user("What is the weather?"),
+            Message.assistant([ToolCallPart.make({ id: "call_2", name: "bash", input: null })]),
+          ],
+        }),
+      ).pipe(Effect.flip)
+
+      expect(error.message).toContain("call_2")
+      expect(error.message).toContain("bash")
+      expect(error.message).toContain("arguments")
+    }),
+  )
+
   it.effect("emits provider-error events for mid-stream provider errors", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(request).pipe(

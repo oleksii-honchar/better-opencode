@@ -124,4 +124,60 @@ describe("resolveAgentModel", () => {
       expect(result).toEqual(explicitModel)
     })
   })
+
+  describe("variant propagation", () => {
+    it("propagates variant from models entry when present", () => {
+      const agentModels = [
+        {
+          providerID: ProviderID.make("mammoth"),
+          modelID: ModelID.make("qwen3.6-40b"),
+          variant: "medium" as string | undefined,
+        },
+        { providerID: ProviderID.make("deepseek"), modelID: ModelID.make("v4-flash") },
+      ]
+      const mammothParent = {
+        providerID: ProviderID.make("mammoth"),
+        modelID: ModelID.make("default-model"),
+      }
+      const result = Agent.resolveAgentModel(agentModels, undefined, undefined, mammothParent)
+      expect(result.providerID).toBe(ProviderID.make("mammoth"))
+      expect(result.modelID).toBe(ModelID.make("qwen3.6-40b"))
+      expect(result.variant).toBe("medium")
+    })
+
+    it("has undefined variant when models entry has no variant", () => {
+      const agentModels = [
+        { providerID: ProviderID.make("mammoth"), modelID: ModelID.make("qwen3.6-40b") },
+      ]
+      const mammothParent = {
+        providerID: ProviderID.make("mammoth"),
+        modelID: ModelID.make("default-model"),
+      }
+      const result = Agent.resolveAgentModel(agentModels, undefined, undefined, mammothParent)
+      expect(result.variant).toBeUndefined()
+    })
+
+    it("has undefined variant when falling back to agentModel (no match in models)", () => {
+      const agentModels = [
+        { providerID: ProviderID.make("mammoth"), modelID: ModelID.make("qwen3.6-40b") },
+      ]
+      const explicitModel = {
+        providerID: ProviderID.make("openai"),
+        modelID: ModelID.make("gpt-4"),
+      }
+      const result = Agent.resolveAgentModel(agentModels, explicitModel, undefined, parentModel)
+      expect(result).toEqual(explicitModel)
+      expect(result.variant).toBeUndefined()
+    })
+
+    it("has undefined variant when falling back to modelPreset", () => {
+      const result = Agent.resolveAgentModel(undefined, undefined, "precise", parentModel)
+      expect(result.variant).toBeUndefined()
+    })
+
+    it("has undefined variant when falling back to parentModel", () => {
+      const result = Agent.resolveAgentModel(undefined, undefined, undefined, parentModel)
+      expect(result.variant).toBeUndefined()
+    })
+  })
 })

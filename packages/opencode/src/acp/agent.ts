@@ -1874,19 +1874,30 @@ function buildVariantMeta(input: {
   }
 }
 
-function parseModelSelection(
+export function parseModelSelection(
   modelId: string,
   providers: Array<{ id: string; models: Record<string, { variants?: Record<string, any> }> }>,
 ): { model: { providerID: ProviderID; modelID: ModelID }; variant?: string } {
   const parsed = Provider.parseModel(modelId)
   const provider = providers.find((p) => p.id === parsed.providerID)
   if (!provider) {
-    return { model: parsed, variant: undefined }
+    return { model: { providerID: parsed.providerID, modelID: parsed.modelID }, variant: undefined }
+  }
+
+  // New: Check for :variant syntax first (from parseModel)
+  if (parsed.variant) {
+    const modelEntry = provider.models[parsed.modelID]
+    if (modelEntry?.variants && parsed.variant in modelEntry.variants) {
+      return {
+        model: { providerID: parsed.providerID, modelID: parsed.modelID },
+        variant: parsed.variant,
+      }
+    }
   }
 
   // Check if modelID exists directly
   if (provider.models[parsed.modelID]) {
-    return { model: parsed, variant: undefined }
+    return { model: { providerID: parsed.providerID, modelID: parsed.modelID }, variant: undefined }
   }
 
   // Try to extract variant from end of modelID (e.g., "claude-sonnet-4/high" -> model: "claude-sonnet-4", variant: "high")
@@ -1903,7 +1914,7 @@ function parseModelSelection(
     }
   }
 
-  return { model: parsed, variant: undefined }
+  return { model: { providerID: parsed.providerID, modelID: parsed.modelID }, variant: undefined }
 }
 
 function buildConfigOptions(input: {

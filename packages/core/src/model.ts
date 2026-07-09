@@ -105,11 +105,20 @@ export class Info extends Schema.Class<Info>("ModelV2.Info")({
   }
 }
 
-export function parse(input: string): { providerID: ProviderV2.ID; modelID: ID } {
+export function parse(input: string): { providerID: ProviderV2.ID; modelID: ID; variant?: string } {
   const [providerID, ...modelID] = input.split("/")
+  const modelStr = modelID.join("/")
+  const colonIdx = modelStr.lastIndexOf(":")
+  if (colonIdx === -1) {
+    return {
+      providerID: ProviderV2.ID.make(providerID),
+      modelID: ID.make(modelStr),
+    }
+  }
   return {
     providerID: ProviderV2.ID.make(providerID),
-    modelID: ID.make(modelID.join("/")),
+    modelID: ID.make(modelStr.slice(0, colonIdx)),
+    variant: modelStr.slice(colonIdx + 1),
   }
 }
 

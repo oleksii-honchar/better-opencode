@@ -331,6 +331,48 @@ test("parseModel handles model IDs with slashes", () => {
   expect(String(result.modelID)).toBe("anthropic/claude-3-opus")
 })
 
+test("parseModel returns undefined variant when no :variant suffix", () => {
+  const result = Provider.parseModel("anthropic/claude-sonnet-4")
+  expect(result.providerID).toBeDefined()
+  expect(result.modelID).toBeDefined()
+  expect(result.variant).toBeUndefined()
+})
+
+test("parseModel extracts :variant suffix after model ID", () => {
+  const result = Provider.parseModel("codex/gpt-5.5:medium")
+  expect(String(result.providerID)).toBe("codex")
+  expect(String(result.modelID)).toBe("gpt-5.5")
+  expect(result.variant).toBe("medium")
+})
+
+test("parseModel extracts variant from multi-slash model with :variant", () => {
+  const result = Provider.parseModel("openrouter/anthropic/claude-3-opus:high")
+  expect(String(result.providerID)).toBe("openrouter")
+  expect(String(result.modelID)).toBe("anthropic/claude-3-opus")
+  expect(result.variant).toBe("high")
+})
+
+test("parseModel returns undefined variant for multi-slash model without :variant", () => {
+  const result = Provider.parseModel("openrouter/anthropic/claude-3-opus")
+  expect(String(result.providerID)).toBe("openrouter")
+  expect(String(result.modelID)).toBe("anthropic/claude-3-opus")
+  expect(result.variant).toBeUndefined()
+})
+
+test("parseModel handles empty variant after colon", () => {
+  const result = Provider.parseModel("codex/gpt-5.5:")
+  expect(String(result.providerID)).toBe("codex")
+  expect(String(result.modelID)).toBe("gpt-5.5")
+  expect(result.variant).toBe("")
+})
+
+test("parseModel preserves providerID and modelID for existing callers via structural typing", () => {
+  const result = Provider.parseModel("codex/gpt-5.5:medium")
+  const { providerID, modelID } = result
+  expect(String(providerID)).toBe("codex")
+  expect(String(modelID)).toBe("gpt-5.5")
+})
+
 it.instance("defaultModel returns first available model when no config set", () =>
   Effect.gen(function* () {
     yield* setProcessEnv("ANTHROPIC_API_KEY", "test-api-key")

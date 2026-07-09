@@ -810,6 +810,8 @@ describe("tool.task", () => {
         // So the resolved model should be the provider-matched one from models
         expect(seen?.model?.modelID).toBe(ModelID.make("mammoth-model"))
         expect(seen?.model?.providerID).toBe(ProviderID.make("test"))
+        // No variant in model string — variant should be undefined
+        expect(seen?.variant).toBeUndefined()
       }),
     {
       config: {
@@ -817,6 +819,54 @@ describe("tool.task", () => {
           "multi-model-agent": {
             mode: "subagent",
             models: ["test/mammoth-model"],
+          },
+        },
+      },
+    },
+  )
+
+  it.instance(
+    "propagates variant from resolvedModel to sub-agent prompt call when model string has :variant",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+        const result = yield* def.execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "multi-model-variant-agent",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(result).toBeDefined()
+        // The subagent has models: [test/mammoth-model:medium] and parent provider is "test"
+        // So the resolved model should be the provider-matched one from models
+        expect(seen?.model?.modelID).toBe(ModelID.make("mammoth-model"))
+        expect(seen?.model?.providerID).toBe(ProviderID.make("test"))
+        // Variant from :variant syntax should propagate to input.variant
+        expect(seen?.variant).toBe("medium")
+      }),
+    {
+      config: {
+        agent: {
+          "multi-model-variant-agent": {
+            mode: "subagent",
+            models: ["test/mammoth-model:medium"],
           },
         },
       },
