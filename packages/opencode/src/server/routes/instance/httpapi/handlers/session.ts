@@ -37,6 +37,8 @@ import {
 } from "../groups/session"
 import { PermissionNotFoundError } from "../errors"
 import * as SessionError from "./session-errors"
+import * as ApiError from "../errors"
+import { LLMError } from "@opencode-ai/llm"
 
 const tryParseJson = (text: string) =>
   Effect.try({
@@ -286,7 +288,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         },
         auto: ctx.payload.auto ?? false,
       })
-      yield* promptSvc.loop({ sessionID: ctx.params.sessionID })
+      yield* promptSvc
+        .loop({ sessionID: ctx.params.sessionID })
+        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
       return true
     })
 
@@ -343,7 +347,17 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof ShellPayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapBusy(promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID }))
+      return yield* promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+        Effect.catchTag("SessionBusyError", (error) =>
+          Effect.fail(
+            new ApiError.SessionBusyError({
+              sessionID: error.sessionID,
+              message: `Session is busy: ${error.sessionID}`,
+            }),
+          ),
+        ),
+        Effect.mapError((error) => (error instanceof LLMError ? new HttpApiError.BadRequest({}) : error)),
+      )
     })
 
     const revert = Effect.fn("SessionHttpApi.revert")(function* (ctx: {

@@ -20,6 +20,7 @@ import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionEvent } from "@opencode-ai/core/session-event"
+import { LLMError } from "@opencode-ai/llm"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -170,7 +171,7 @@ function splitTurn(input: {
   turn: Turn
   model: Provider.Model
   budget: number
-  estimate: (input: { messages: MessageV2.WithParts[]; model: Provider.Model }) => Effect.Effect<number>
+  estimate: (input: { messages: MessageV2.WithParts[]; model: Provider.Model }) => Effect.Effect<number, LLMError>
 }) {
   return Effect.gen(function* () {
     if (input.budget <= 0) return undefined
@@ -202,7 +203,7 @@ export interface Interface {
     sessionID: SessionID
     auto: boolean
     overflow?: boolean
-  }) => Effect.Effect<"continue" | "stop">
+  }) => Effect.Effect<"continue" | "stop", LLMError>
   readonly create: (input: {
     sessionID: SessionID
     agent: string

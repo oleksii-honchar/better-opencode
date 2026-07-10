@@ -71,7 +71,7 @@ import { SessionTable, PartTable } from "./session.sql"
 import { referencePromptMetadata, referenceTextPart } from "./prompt/reference"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
-import { LLMEvent } from "@opencode-ai/llm"
+import { LLMError, LLMEvent } from "@opencode-ai/llm"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -100,10 +100,10 @@ function isOrphanedInterruptedTool(part: MessageV2.ToolPart) {
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts, Image.Error>
-  readonly loop: (input: LoopInput) => Effect.Effect<MessageV2.WithParts>
-  readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts, Session.BusyError>
-  readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts, Image.Error>
+  readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts, Image.Error | LLMError>
+  readonly loop: (input: LoopInput) => Effect.Effect<MessageV2.WithParts, LLMError>
+  readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts, Session.BusyError | LLMError>
+  readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts, Image.Error | LLMError>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
 }
 
@@ -144,7 +144,7 @@ export const layer = Layer.effect(
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
         resolvePromptParts: (template: string) => resolvePromptParts(template),
-        prompt: (input: PromptInput) => prompt(input).pipe(Effect.catch(Effect.die)),
+        prompt: (input: PromptInput) => prompt(input),
         loop: (input: LoopInput) => loop(input),
       } satisfies TaskPromptOps
     })
@@ -1296,7 +1296,7 @@ export const layer = Layer.effect(
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts, Image.Error> = Effect.fn(
+    const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts, Image.Error | LLMError> = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: PromptInput) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
@@ -1325,7 +1325,7 @@ export const layer = Layer.effect(
       throw new Error("Impossible")
     })
 
-    const runLoop: (sessionID: SessionID) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(
+    const runLoop: (sessionID: SessionID) => Effect.Effect<MessageV2.WithParts, LLMError> = Effect.fn("SessionPrompt.run")(
       function* (sessionID: SessionID) {
         const ctx = yield* InstanceState.context
         const slog = elog.with({ sessionID })
@@ -1669,13 +1669,13 @@ export const layer = Layer.effect(
       },
     )
 
-    const loop: (input: LoopInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
+    const loop: (input: LoopInput) => Effect.Effect<MessageV2.WithParts, LLMError> = Effect.fn("SessionPrompt.loop")(function* (
       input: LoopInput,
     ) {
       return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
     })
 
-    const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts, Session.BusyError> = Effect.fn(
+    const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts, Session.BusyError | LLMError> = Effect.fn(
       "SessionPrompt.shell",
     )(function* (input: ShellInput) {
       const ready = yield* Latch.make()

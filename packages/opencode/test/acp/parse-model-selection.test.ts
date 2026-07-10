@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { ACP } from "../../src/acp/agent"
+import { ModelID, ProviderID } from "../../src/provider/schema"
 
 // Provider models fixture matching the ACP provider config shape
 function provider(
   id: string,
-  models: Record<string, { id: string; name: string; variants?: Record<string, any> }>,
+  models: Record<string, { id: string; name: string; variants?: Record<string, unknown> }>,
 ) {
   return { id, models }
 }
@@ -37,7 +38,7 @@ describe("parseModelSelection", () => {
   test(":variant syntax returns variant from parsed.variant when model has variants", () => {
     const result = ACP.parseModelSelection("codex/gpt-5.5:medium", providers)
     expect(result).toEqual({
-      model: { providerID: "codex", modelID: "gpt-5.5" },
+      model: { providerID: ProviderID.make("codex"), modelID: ModelID.make("gpt-5.5") },
       variant: "medium",
     })
   })
@@ -46,7 +47,7 @@ describe("parseModelSelection", () => {
   test("legacy /variant syntax still extracts variant via / fallback", () => {
     const result = ACP.parseModelSelection("anthropic/claude-sonnet-4/high", providers)
     expect(result).toEqual({
-      model: { providerID: "anthropic", modelID: "claude-sonnet-4" },
+      model: { providerID: ProviderID.make("anthropic"), modelID: ModelID.make("claude-sonnet-4") },
       variant: "high",
     })
   })
@@ -55,7 +56,7 @@ describe("parseModelSelection", () => {
   test("no variant returns variant: undefined", () => {
     const result = ACP.parseModelSelection("anthropic/claude-sonnet-4", providers)
     expect(result).toEqual({
-      model: { providerID: "anthropic", modelID: "claude-sonnet-4" },
+      model: { providerID: ProviderID.make("anthropic"), modelID: ModelID.make("claude-sonnet-4") },
       variant: undefined,
     })
   })
@@ -64,7 +65,7 @@ describe("parseModelSelection", () => {
   test("backward compatible - model without variants config", () => {
     const result = ACP.parseModelSelection("openrouter/gpt-5.5", providers)
     expect(result).toEqual({
-      model: { providerID: "openrouter", modelID: "gpt-5.5" },
+      model: { providerID: ProviderID.make("openrouter"), modelID: ModelID.make("gpt-5.5") },
       variant: undefined,
     })
   })
@@ -73,7 +74,7 @@ describe("parseModelSelection", () => {
   test("unknown provider returns model with undefined variant", () => {
     const result = ACP.parseModelSelection("unknown/model", providers)
     expect(result).toEqual({
-      model: { providerID: "unknown", modelID: "model" },
+      model: { providerID: ProviderID.make("unknown"), modelID: ModelID.make("model") },
       variant: undefined,
     })
   })
@@ -85,7 +86,7 @@ describe("parseModelSelection", () => {
     // Falls through: model exists directly, no variant match
     // Without :variant handling it would return the model with undefined variant
     expect(result).toEqual({
-      model: { providerID: "openrouter", modelID: "gpt-5.5" },
+      model: { providerID: ProviderID.make("openrouter"), modelID: ModelID.make("gpt-5.5") },
       variant: undefined,
     })
   })

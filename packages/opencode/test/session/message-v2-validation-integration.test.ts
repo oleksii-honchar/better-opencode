@@ -100,15 +100,56 @@ function basePart(messageID: string, id: string) {
   }
 }
 
-function makeToolPart(
-  messageID: string,
-  partID: string,
-  callID: string,
-  tool: string,
-  input: unknown,
-  status: MessageV2.ToolState["status"],
-  extra?: { output?: string; error?: string; raw?: string; time?: { start: number; end?: number } },
-): MessageV2.ToolPart {
+type CompletedToolTime = Extract<MessageV2.ToolState, { status: "completed" }>["time"]
+type ErrorToolTime = Extract<MessageV2.ToolState, { status: "error" }>["time"]
+type RunningToolTime = Extract<MessageV2.ToolState, { status: "running" }>["time"]
+
+type ToolPartExtra = {
+  output?: string
+  error?: string
+  raw?: string
+}
+
+type MakeToolPartArgs =
+  | [
+      messageID: string,
+      partID: string,
+      callID: string,
+      tool: string,
+      input: unknown,
+      status: "completed",
+      extra?: ToolPartExtra & { time?: CompletedToolTime },
+    ]
+  | [
+      messageID: string,
+      partID: string,
+      callID: string,
+      tool: string,
+      input: unknown,
+      status: "pending",
+      extra?: ToolPartExtra,
+    ]
+  | [
+      messageID: string,
+      partID: string,
+      callID: string,
+      tool: string,
+      input: unknown,
+      status: "running",
+      extra?: ToolPartExtra & { time?: RunningToolTime },
+    ]
+  | [
+      messageID: string,
+      partID: string,
+      callID: string,
+      tool: string,
+      input: unknown,
+      status: "error",
+      extra?: ToolPartExtra & { time?: ErrorToolTime },
+    ]
+
+function makeToolPart(...args: MakeToolPartArgs): MessageV2.ToolPart {
+  const [messageID, partID, callID, tool, input, status, extra] = args
   const base = {
     ...basePart(messageID, partID),
     type: "tool" as const,
@@ -116,6 +157,7 @@ function makeToolPart(
     tool,
   }
   if (status === "completed") {
+    const time: CompletedToolTime = extra?.time ?? { start: 0, end: 1 }
     return {
       ...base,
       state: {
@@ -124,7 +166,7 @@ function makeToolPart(
         output: extra?.output ?? "result",
         title: "Test",
         metadata: {},
-        time: extra?.time ?? { start: 0, end: 1 },
+        time,
       },
     }
   }
@@ -139,23 +181,24 @@ function makeToolPart(
     }
   }
   if (status === "running") {
+    const time: RunningToolTime = extra?.time ?? { start: 0 }
     return {
       ...base,
       state: {
         status: "running" as const,
         input: input as Record<string, unknown>,
-        time: extra?.time ?? { start: 0 },
+        time,
       },
     }
   }
-  // error
+  const time: ErrorToolTime = extra?.time ?? { start: 0, end: 1 }
   return {
     ...base,
     state: {
       status: "error" as const,
       input: input as Record<string, unknown>,
       error: extra?.error ?? "error",
-      time: extra?.time ?? { start: 0, end: 1 },
+      time,
       metadata: {},
     },
   }

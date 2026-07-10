@@ -17,14 +17,16 @@ import { Cause, Effect, Exit, Option, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import * as Log from "@opencode-ai/core/util/log"
+import { LLMError } from "@opencode-ai/llm"
+import { Image } from "@/image/image"
 
 const log = Log.create({ service: "tool.task" })
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
   resolvePromptParts(template: string): Effect.Effect<SessionPrompt.PromptInput["parts"]>
-  prompt(input: SessionPrompt.PromptInput): Effect.Effect<MessageV2.WithParts>
-  loop(input: SessionPrompt.LoopInput): Effect.Effect<MessageV2.WithParts>
+  prompt(input: SessionPrompt.PromptInput): Effect.Effect<MessageV2.WithParts, Image.Error | LLMError>
+  loop(input: SessionPrompt.LoopInput): Effect.Effect<MessageV2.WithParts, LLMError>
 }
 
 const id = "task"
