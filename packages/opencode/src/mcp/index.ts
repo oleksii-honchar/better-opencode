@@ -187,7 +187,7 @@ export function buildToolSchema(inputSchema: JSONSchema7): JSONSchema7 {
 }
 
 // Convert MCP tool definition to AI SDK Tool type
-function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number): Tool {
+export function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number): Tool {
   const inputSchema = mcpTool.inputSchema
   const schema = buildToolSchema(inputSchema as JSONSchema7)
 
@@ -247,6 +247,9 @@ export function resolveAttachmentUris(args: unknown): unknown {
       // pass through unchanged.
       try {
         const stat = statSync(args)
+        if (stat.isDirectory()) {
+          return args
+        }
         if (!stat.isFile()) {
           throw new Error(`Not a regular file: ${args}`)
         }

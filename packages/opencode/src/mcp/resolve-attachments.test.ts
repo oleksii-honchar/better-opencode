@@ -1,5 +1,5 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { resolveAttachmentUris } from "./index"
+import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test"
+import { convertMcpTool, resolveAttachmentUris } from "./index"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -63,8 +63,70 @@ describe("resolveAttachmentUris — file path to base64", () => {
     expect(result.data.length).toBeGreaterThan(0)
   })
 
-  test("throws for directory path", () => {
-    expect(() => resolveAttachmentUris({ data: tempDir })).toThrow("Not a regular file")
+  test("passes through existing absolute directory path unchanged", () => {
+    const result = resolveAttachmentUris({ data: tempDir }) as { data: string }
+    expect(result.data).toBe(tempDir)
+  })
+
+  test("passes through existing absolute directory path in nested queries unchanged", () => {
+    const result = resolveAttachmentUris({
+      queries: [
+        {
+          pattern: "resolveAttachmentUris",
+          path: tempDir,
+        },
+      ],
+    }) as { queries: Array<{ pattern: string; path: string }> }
+
+    expect(result.queries[0].path).toBe(tempDir)
+  })
+
+  test("forwards an existing absolute directory path unchanged through converted MCP tool execution", async () => {
+    let callToolRequest: unknown
+    const callTool = mock(async (request: unknown) => {
+      callToolRequest = request
+      return { content: [{ type: "text", text: "ok" }] }
+    })
+    const tool = convertMcpTool(
+      {
+        name: "localSearchCode",
+        inputSchema: {
+          type: "object",
+          properties: {
+            queries: { type: "array" },
+          },
+        },
+      },
+      { callTool } as unknown as Parameters<typeof convertMcpTool>[1],
+    )
+    const args = {
+      queries: [
+        {
+          pattern: "resolveAttachmentUris",
+          path: tempDir,
+        },
+      ],
+    }
+
+    const executableTool = tool as unknown as { execute: (args: unknown) => Promise<unknown> }
+
+    await expect(executableTool.execute(args)).resolves.toEqual({
+      content: [{ type: "text", text: "ok" }],
+    })
+
+    expect(callTool).toHaveBeenCalledTimes(1)
+    expect(callToolRequest).toMatchObject({
+      name: "localSearchCode",
+      arguments: {
+        queries: [
+          {
+            pattern: "resolveAttachmentUris",
+            path: tempDir,
+          },
+        ],
+      },
+    })
+    expect(JSON.stringify(callToolRequest)).not.toContain("Not a regular file")
   })
 
   test("passes through non-existent file paths unchanged (write destinations)", () => {
