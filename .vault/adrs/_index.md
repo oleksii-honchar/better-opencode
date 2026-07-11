@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-07-06T13:15:00Z"
+updatedAt: "2026-07-10T15:35:00Z"
 tags: []
 ---
 
@@ -43,3 +43,5 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0029-colon-as-variant-separator.adr.md]] — Use `:` as Variant Separator (Not `/`) (ADR-0029, status: accepted)
 - [[0030-models-per-entry-variant.adr.md]] — Propagate Per-Entry Variant for `models[]` Array (ADR-0030, status: accepted)
 - [[0031-variant-downstream-validation.adr.md]] — Validate Variant Downstream, Not in Parser (ADR-0031, status: accepted)
+- [[0032-protect-anthropic-protocol-tool-use.adr.md]] — Protect Anthropic Protocol tool_use from Meta Tool Rename (ADR-0032, status: accepted)
+- [[0033-absolute-directory-mcp-arguments.adr.md]] — Pass Existing Absolute Directory MCP Arguments Through Unchanged (ADR-0033, status: accepted)

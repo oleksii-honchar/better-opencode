@@ -2,7 +2,7 @@
 type: index
 title: "Atomic Memories"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-06-11T17:55:00+02:00"
+updatedAt: "2026-07-10T15:35:00Z"
 tags: []
 ---
 
@@ -16,3 +16,4 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0002-no-automated-db-maintenance.memory.md]] — OpenCode Database Had No Automated Maintenance Before DB Cleanup Feature
 - [[0003-system-prompt-cache-invalidation.memory.md]] — system.transform hook invalidates Anthropic cache for plugin authors
 - [[0004-dev-db-channel-path.memory.md]] — Dev Mode Database Path Depends on InstallationChannel (opencode-local.db vs opencode.db)
+- [[0005-mcp-absolute-directory-argument-gotcha.memory.md]] — MCP Absolute Directory Arguments Can Be Mistaken for Attachment Files
