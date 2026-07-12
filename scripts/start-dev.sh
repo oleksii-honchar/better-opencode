@@ -29,6 +29,7 @@ STOP=false
 FORCE=false
 MODE=server
 SERVER_LOGS=false
+TOOL_LOGS=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     --server-only)
@@ -67,6 +68,10 @@ while [[ $# -gt 0 ]]; do
       SERVER_LOGS=true
       shift
       ;;
+    --tool-logs)
+      TOOL_LOGS=true
+      shift
+      ;;
     --help|-h)
       echo "Usage: $0 [OPTIONS]"
       echo ""
@@ -76,6 +81,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --vscode      Use VSCode instead of VSCodium (default: VSCodium)"
       echo "  --server-only Same as default: run dev server in foreground (this tab)"
       echo "  --server-logs Tail dev server logs (requires running server)"
+      echo "  --tool-logs   Enable tool execution logging (OPENCODE_LOG_TOOLS=1)"
       echo "  --ide-only    Other tab: launch IDE; server must already listen on OPENCODE_PORT"
       echo "  --force       Force launch even if $VSCODE_APP is detected as running"
       echo "  --help, -h    Show this help message"
@@ -305,6 +311,11 @@ SERVER_ARGS=(
 
 export OPENCODE_DEV=1
 export OPENCODE_DISABLE_CHANNEL_DB=1
+
+if [ "$TOOL_LOGS" = true ]; then
+  export OPENCODE_LOG_TOOLS=1
+  echo "  Tool logging enabled (OPENCODE_LOG_TOOLS=1) — check ~/.local/share/opencode/log/tools.log"
+fi
 
 exec env -u OPENCODE_SERVER_PASSWORD OPENCODE_PORT="$OPENCODE_PORT" \
   bun run --cwd packages/opencode --conditions=browser src/index.ts \
