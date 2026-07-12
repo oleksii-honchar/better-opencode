@@ -42,6 +42,7 @@ const mockTruncateAlways: Truncate.Interface = {
       truncated: true,
       outputPath: "/tmp/truncated.txt",
     }),
+  limits: () => Effect.succeed({ maxLines: 2000, maxBytes: 50 * 1024 }),
 }
 
 const mockAgent: Agent.Interface = {
@@ -49,18 +50,18 @@ const mockAgent: Agent.Interface = {
     name,
     description: "",
     mode: "primary",
-    permission: {},
+    permission: [],
     options: {},
   }),
   list: () => Effect.succeed([]),
-  defaultInfo: () => Effect.succeed({ name: "default", description: "", mode: "primary", permission: {}, options: {} }),
+  defaultInfo: () => Effect.succeed({ name: "default", description: "", mode: "primary", permission: [], options: {} }),
   defaultAgent: () => Effect.succeed("default"),
   generate: () => Effect.succeed({ identifier: "gen", whenToUse: "test", systemPrompt: "test" }),
 }
 
 const mockCtx: Context = {
-  sessionID: "ses_test",
-  messageID: "msg_test",
+  sessionID: "ses_test" as Context["sessionID"],
+  messageID: "msg_test" as Context["messageID"],
   agent: "build",
   abort: new AbortController().signal,
   callID: "call_123",
@@ -74,7 +75,7 @@ const mockCtx: Context = {
 // ---------------------------------------------------------------------------
 
 function makeDef(
-  params: Schema.Schema<unknown, unknown, unknown>,
+  params: Schema.Decoder<unknown>,
   executeFn: (args: unknown, ctx: Context) => Effect.Effect<ExecuteResult>,
 ) {
   return {
@@ -230,7 +231,7 @@ describe("wrap — toolsLog instrumentation", () => {
     test("logs toolsLog with error when execute throws", () => {
       const def = makeDef(
         Schema.Struct({ command: Schema.String }),
-        () => Effect.fail(new Error("execution failed")),
+        () => Effect.fail(new Error("execution failed")) as unknown as Effect.Effect<ExecuteResult>,
       )
 
       const exit = Effect.runSyncExit(
@@ -260,7 +261,7 @@ describe("wrap — toolsLog instrumentation", () => {
     test("logs toolsLog with error when execute throws non-Error", () => {
       const def = makeDef(
         Schema.Struct({ command: Schema.String }),
-        () => Effect.fail("string error"),
+        () => Effect.fail("string error") as unknown as Effect.Effect<ExecuteResult>,
       )
 
       const exit = Effect.runSyncExit(
