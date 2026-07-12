@@ -54,7 +54,7 @@ function buildMcpEffect(params: {
             callId: callID,
             durationMs: Date.now() - start,
             args,
-            error: error instanceof Error ? error.message : String(error),
+            error: (error as unknown) instanceof Error ? (error as Error).message : String(error),
             source: "mcp",
           })
         }),
