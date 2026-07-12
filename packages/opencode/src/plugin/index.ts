@@ -122,7 +122,6 @@ export const layer = Layer.effect(
     const bus = yield* Bus.Service
     const config = yield* Config.Service
     const flags = yield* RuntimeFlags.Service
-    const llmService = yield* LLM.Service
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("Plugin.state")(function* (ctx) {
@@ -159,7 +158,8 @@ export const layer = Layer.effect(
             const messages = request.messages as LLM.StreamInput["messages"]
 
             const collect = Effect.gen(function* () {
-              const stream = llmService.stream({
+              const llmSrv = yield* LLM.Service
+              const stream = llmSrv.stream({
                 user,
                 sessionID,
                 model,
