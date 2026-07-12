@@ -3,6 +3,7 @@ import type {
   PluginInput,
   Plugin as PluginInstance,
   PluginModule,
+  PluginLLMService,
   WorkspaceAdapter as PluginWorkspaceAdapter,
 } from "@opencode-ai/plugin"
 import { Config } from "@/config/config"
@@ -29,6 +30,12 @@ import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } fro
 import { registerAdapter } from "@/control-plane/adapters"
 import type { WorkspaceAdapter } from "@/control-plane/types"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { LLM } from "@/session/llm"
+import { Provider } from "@/provider/provider"
+import type { LLMEvent } from "@opencode-ai/llm"
+import type { MessageV2 } from "@/session/message-v2"
+import { SessionID, MessageID } from "@/session/schema"
+import { ProviderID, ModelID } from "@/provider/schema"
 
 const log = Log.create({ service: "plugin" })
 
@@ -115,6 +122,7 @@ export const layer = Layer.effect(
     const bus = yield* Bus.Service
     const config = yield* Config.Service
     const flags = yield* RuntimeFlags.Service
+    const llmService = yield* LLM.Service
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("Plugin.state")(function* (ctx) {
@@ -123,6 +131,64 @@ export const layer = Layer.effect(
 
         function publishPluginError(message: string) {
           bridge.fork(bus.publish(Session.Event.Error, { error: new NamedError.Unknown({ message }).toObject() }))
+        }
+
+        const pluginLlm: PluginLLMService = {
+          async chatCompletionWithModel(request) {
+            const parsed = Provider.parseModel(request.model)
+            const providerID = parsed.providerID
+            const modelID = parsed.modelID
+            const model = {
+              providerID,
+              id: modelID,
+            } as Provider.Model
+
+            const sessionID = SessionID.make("plugin-" + crypto.randomUUID())
+            const user: MessageV2.User = {
+              id: MessageID.ascending(),
+              sessionID,
+              role: "user",
+              time: { created: Date.now() },
+              agent: "plugin",
+              model: {
+                providerID,
+                modelID,
+              },
+            }
+
+            const messages = request.messages as LLM.StreamInput["messages"]
+
+            const collect = Effect.gen(function* () {
+              const stream = llmService.stream({
+                user,
+                sessionID,
+                model,
+                agent: { name: "plugin", mode: "all", permission: [], options: {} },
+                system: [],
+                messages,
+                tools: {},
+                toolChoice: "none",
+              })
+              const events = yield* stream.pipe(Stream.runCollect)
+              let content = ""
+              let inputTokens: number | undefined
+              let outputTokens: number | undefined
+              for (const event of events) {
+                if (event.type === "text-delta") content += event.text
+                if ("usage" in event && event.usage) {
+                  inputTokens = event.usage.inputTokens
+                  outputTokens = event.usage.outputTokens
+                }
+              }
+              const usage =
+                inputTokens !== undefined || outputTokens !== undefined
+                  ? { inputTokens: inputTokens ?? 0, outputTokens: outputTokens ?? 0 }
+                  : undefined
+              return { content, usage }
+            })
+
+            return bridge.promise(collect)
+          },
         }
 
         const { Server } = yield* Effect.promise(() => import("../server/server"))
@@ -149,6 +215,7 @@ export const layer = Layer.effect(
           },
           // @ts-expect-error
           $: typeof Bun === "undefined" ? undefined : Bun.$,
+          llm: pluginLlm,
         }
 
         for (const plugin of flags.disableDefaultPlugins ? [] : INTERNAL_PLUGINS) {

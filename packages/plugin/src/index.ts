@@ -63,6 +63,8 @@ export type PluginInput = {
   }
   serverUrl: URL
   $: BunShell
+  /** LLM service for plugin-initiated chat completions */
+  llm: PluginLLMService
 }
 
 export type PluginOptions = Record<string, unknown>
@@ -214,6 +216,26 @@ export type ProviderHookContext = {
 export type ProviderHook = {
   id: string
   models?: (provider: ProviderV2, ctx: ProviderHookContext) => Promise<Record<string, ModelV2>>
+}
+
+/**
+ * LLM service available to plugins — allows plugins to make
+ * chat completions with a specific model.
+ * The model string is resolved by opencode's provider system
+ * (e.g. "mammoth/qwen3.5-0.8b").
+ */
+export type PluginLLMService = {
+  chatCompletionWithModel(request: {
+    /** Chat messages (system + user) */
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>
+    /** Model name in provider/model format, resolved by opencode */
+    model: string
+  }): Promise<{
+    /** Response content from the model */
+    content: string
+    /** Token usage (optional) */
+    usage?: { inputTokens: number; outputTokens: number }
+  }>
 }
 
 /** @deprecated Use AuthOAuthResult instead. */
