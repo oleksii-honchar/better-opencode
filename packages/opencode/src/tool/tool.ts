@@ -4,6 +4,7 @@ import type { MessageV2 } from "../session/message-v2"
 import type { Permission } from "../permission"
 import type { SessionID, MessageID } from "../session/schema"
 import * as Truncate from "./truncate"
+import * as Log from "@opencode-ai/core/util/log"
 import { Agent } from "@/agent/agent"
 
 interface Metadata {
@@ -116,6 +117,8 @@ function wrap<Parameters extends Schema.Decoder<unknown>, Result extends Metadat
           ...(ctx.callID ? { "tool.call_id": ctx.callID } : {}),
         }
         return Effect.gen(function* () {
+          const start = Date.now()
+
           const decoded = yield* decode(args).pipe(
             Effect.mapError(
               (error) =>
@@ -124,13 +127,70 @@ function wrap<Parameters extends Schema.Decoder<unknown>, Result extends Metadat
                   detail: toolInfo.formatValidationError ? toolInfo.formatValidationError(error) : String(error),
                 }),
             ),
+            Effect.tapError((error) =>
+              Effect.sync(() =>
+                Log.toolsLog({
+                  tool: id,
+                  sessionId: ctx.sessionID,
+                  messageId: ctx.messageID,
+                  callId: ctx.callID ?? null,
+                  durationMs: Date.now() - start,
+                  args,
+                  error: error.message,
+                  source: "built-in",
+                }),
+              ),
+            ),
           )
-          const result = yield* execute(decoded as Schema.Schema.Type<Parameters>, ctx)
+
+          const result = yield* execute(decoded as Schema.Schema.Type<Parameters>, ctx).pipe(
+            Effect.tapError((error) =>
+              Effect.sync(() =>
+                Log.toolsLog({
+                  tool: id,
+                  sessionId: ctx.sessionID,
+                  messageId: ctx.messageID,
+                  callId: ctx.callID ?? null,
+                  durationMs: Date.now() - start,
+                  args: decoded,
+                  error: (error as Error).message ?? String(error),
+                  source: "built-in",
+                }),
+              ),
+            ),
+          )
+
           if (result.metadata.truncated !== undefined) {
+            Log.toolsLog({
+              tool: id,
+              sessionId: ctx.sessionID,
+              messageId: ctx.messageID,
+              callId: ctx.callID ?? null,
+              durationMs: Date.now() - start,
+              args: decoded,
+              output: result.output,
+              truncated: false,
+              source: "built-in",
+            })
             return result
           }
+
           const agent = yield* agents.get(ctx.agent)
           const truncated = yield* truncate.output(result.output, {}, agent)
+
+          Log.toolsLog({
+            tool: id,
+            sessionId: ctx.sessionID,
+            messageId: ctx.messageID,
+            callId: ctx.callID ?? null,
+            durationMs: Date.now() - start,
+            args: decoded,
+            output: truncated.content,
+            truncated: truncated.truncated,
+            rawOutputLength: truncated.truncated ? result.output.length : undefined,
+            source: "built-in",
+          })
+
           return {
             ...result,
             output: truncated.content,

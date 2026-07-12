@@ -22,6 +22,11 @@ const levelPriority: Record<Level, number> = {
 const keep = 10
 const initializedRunID = "OPENCODE_LOG_INITIALIZED_RUN_ID"
 
+// --- Tools Log ---
+const TOOLS_LOG_ENABLED = process.env.OPENCODE_LOG_TOOLS === "1"
+const toolsKeep = 5
+let toolsWrite: ((msg: string) => void) | null = null
+
 let level: Level = "INFO"
 
 function shouldLog(input: Level): boolean {
@@ -66,6 +71,9 @@ let write = (msg: any) => {
 export async function init(options: Options) {
   if (options.level) level = options.level
   void cleanup(Global.Path.log)
+  if (TOOLS_LOG_ENABLED) {
+    await initToolsLog()
+  }
   if (options.print) return
   logpath = path.join(
     Global.Path.log,
@@ -84,6 +92,45 @@ export async function init(options: Options) {
       })
     })
   }
+}
+
+export async function rotateToolsLog() {
+  const dir = Global.Path.log
+  const base = "tools"
+  // Drop oldest backup
+  const oldest = path.join(dir, `${base}-${toolsKeep}.log`)
+  await fs.unlink(oldest).catch(() => {})
+  // Shift backups: tools-4 → tools-5, tools-3 → tools-4, ..., tools → tools-1
+  for (let i = toolsKeep - 1; i >= 1; i--) {
+    const src = path.join(dir, `${base}-${i}.log`)
+    const dst = path.join(dir, `${base}-${i + 1}.log`)
+    await fs.rename(src, dst).catch(() => {})
+  }
+  // Shift current → tools-1
+  const current = path.join(dir, `${base}.log`)
+  const firstBackup = path.join(dir, `${base}-1.log`)
+  await fs.rename(current, firstBackup).catch(() => {})
+  // Truncate (create fresh current)
+  await fs.writeFile(current, "").catch(() => {})
+}
+
+export async function initToolsLog() {
+  const dir = Global.Path.log
+  await fs.mkdir(dir, { recursive: true }).catch(() => {})
+  // Rotate on start
+  await rotateToolsLog()
+  // Open write stream
+  const toolsLogPath = path.join(dir, "tools.log")
+  const stream = createWriteStream(toolsLogPath, { flags: "a" })
+  toolsWrite = (msg: string) => {
+    stream.write(msg)
+  }
+}
+
+export function toolsLog(entry: Record<string, unknown>): void {
+  if (!TOOLS_LOG_ENABLED || !toolsWrite) return
+  const line = JSON.stringify({ timestamp: new Date().toISOString(), ...entry }) + "\n"
+  toolsWrite(line)
 }
 
 async function cleanup(dir: string) {

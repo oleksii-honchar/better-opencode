@@ -453,3 +453,160 @@ models:
 - `:` as separator — unambiguous vs `/` in model IDs like `openrouter/anthropic/claude` (ADR-0029)
 - Per-entry variant in `models[]` array, not Phase 2 deferral (ADR-0030)
 - Pure parser — variant validation stays downstream (ADR-0031)
+
+---
+
+## 15. Tool Execution Logging — `tools.log`
+
+**Status:** ✅ Implemented
+
+**Problem:** There is no audit trail of what tools the agent called, with what arguments, and what the results were. Debugging agentic behavior is difficult because raw tool arguments are never persisted, outputs are only in chat history, and there is no structured log of the full tool execution lifecycle.
+
+**Solution:** Introduce a `tools.log` JSON Lines file that captures the full lifecycle of every tool execution (built-in and MCP). Gated by the opt-in environment variable `OPENCODE_LOG_TOOLS=1`.
+
+### ⚠️ Privacy & Security Warning
+
+**`tools.log` captures full tool arguments and outputs, which may contain sensitive data including:**
+
+- File contents (paths, code, credentials, tokens)
+- Shell command outputs (environment variables, system information)
+- API responses from MCP servers
+- User messages and session data
+
+**Do not enable `OPENCODE_LOG_TOOLS` in production or on systems with sensitive data unless you understand the privacy implications.** The feature is opt-in and disabled by default. When enabled, the log file is written to disk in plain text — anyone with file access can read it. Rotate and clean up logs regularly.
+
+### How to Enable
+
+```bash
+export OPENCODE_LOG_TOOLS=1
+opencode
+```
+
+Or inline:
+
+```bash
+OPENCODE_LOG_TOOLS=1 opencode
+```
+
+### Log File Location
+
+The log file is written to the opencode global log directory:
+
+```
+<Global.Path.log>/tools.log
+```
+
+Typical paths:
+- macOS/Linux: `~/.opencode/log/tools.log`
+- Windows: `%USERPROFILE%\.opencode\log\tools.log`
+
+### Rotation
+
+The log file uses numeric rotation with 5 backups:
+
+```
+tools.log        ← current (truncated on rotation)
+tools-1.log      ← previous
+tools-2.log      ← older
+tools-3.log
+tools-4.log
+tools-5.log      ← oldest (dropped on next rotation)
+```
+
+Rotation occurs on process start. The current `tools.log` is truncated, and older files are shifted numerically.
+
+### JSON Schema — Log Entry Fields
+
+Each line is a single JSON object with the following fields:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `timestamp` | `string` (ISO 8601) | Yes | When the log line was written |
+| `tool` | `string` | Yes | Tool ID (e.g., `shell`, `mcp:filesystem:read`) |
+| `sessionId` | `string` | Yes | Session ID (e.g., `ses_abc123`) |
+| `messageId` | `string` | Yes | Message ID (e.g., `msg_xyz`) |
+| `callId` | `string \| null` | Yes | Tool call ID (`null` if absent) |
+| `durationMs` | `number` | Yes | Wall-clock duration in milliseconds |
+| `args` | `object` | Yes | Decoded args (built-in) or raw args (MCP) |
+| `output` | `string` | No | Truncated output (omitted on error) |
+| `truncated` | `boolean` | No | Whether output was truncated |
+| `rawOutputLength` | `number` | No | Original output length when truncated |
+| `error` | `string` | No | Error message (omitted on success) |
+| `source` | `"built-in" \| "mcp"` | Yes | Origin of the tool |
+
+### Example Log Entries
+
+**Successful built-in tool call:**
+```json
+{"timestamp":"2026-07-12T12:51:00.123Z","tool":"shell","sessionId":"ses_abc","messageId":"msg_123","callId":"call_456","durationMs":842,"args":{"command":"ls","cwd":"/home/user"},"output":"file1.txt\nfile2.txt","truncated":false,"source":"built-in"}
+```
+
+**Successful MCP tool call:**
+```json
+{"timestamp":"2026-07-12T12:51:01.456Z","tool":"mcp:filesystem:read","sessionId":"ses_abc","messageId":"msg_123","callId":"call_789","durationMs":1205,"args":{"path":"/etc/hosts"},"output":"127.0.0.1 localhost","truncated":false,"source":"mcp"}
+```
+
+**Error — tool execution failed:**
+```json
+{"timestamp":"2026-07-12T12:51:02.789Z","tool":"shell","sessionId":"ses_abc","messageId":"msg_123","callId":"call_012","durationMs":15,"args":{"command":"invalid"},"error":"Command not found: invalid","source":"built-in"}
+```
+
+**Truncated output (raw output exceeded limit):**
+```json
+{"timestamp":"2026-07-12T12:51:03.000Z","tool":"shell","sessionId":"ses_abc","messageId":"msg_123","callId":"call_345","durationMs":3200,"args":{"command":"cat large-file.txt"},"output":"...truncated...","truncated":true,"rawOutputLength":524288,"source":"built-in"}
+```
+
+### Querying `tools.log` with `jq`
+
+Since `tools.log` is a JSON Lines file, use `jq -c` (compact) or `jq -r` (raw) to query it:
+
+**Filter by tool name:**
+```bash
+jq -c 'select(.tool == "shell")' ~/.opencode/log/tools.log
+```
+
+**Filter by session:**
+```bash
+jq -c 'select(.sessionId == "ses_abc")' ~/.opencode/log/tools.log
+```
+
+**Show only errors:**
+```bash
+jq -c 'select(.error != null)' ~/.opencode/log/tools.log
+```
+
+**Show only truncated outputs:**
+```bash
+jq -c 'select(.truncated == true)' ~/.opencode/log/tools.log
+```
+
+**Show slow tool calls (> 5 seconds):**
+```bash
+jq -c 'select(.durationMs > 5000)' ~/.opencode/log/tools.log
+```
+
+**Show only MCP tools:**
+```bash
+jq -c 'select(.source == "mcp")' ~/.opencode/log/tools.log
+```
+
+**Extract tool names and durations (summary):**
+```bash
+jq -r '[.tool, (.durationMs | tostring)] | join("\t")' ~/.opencode/log/tools.log | sort -k1 | uniq -c | sort -rn
+```
+
+**Show error messages with context:**
+```bash
+jq -r 'select(.error != null) | "✗ \(.tool) [\(.durationMs)ms]: \(.error)"' ~/.opencode/log/tools.log
+```
+
+**Count tool calls per session:**
+```bash
+jq -r '.sessionId' ~/.opencode/log/tools.log | sort | uniq -c | sort -rn
+```
+
+### Performance
+
+When `OPENCODE_LOG_TOOLS` is not set (or not `"1"`), the `toolsLog` function is a no-op — there is zero overhead per tool call. The environment variable is cached at module load time; no per-call check is performed.
+
+When enabled, writes are fire-and-forget (best-effort). An unclean process exit may drop the last buffered line(s), which is acceptable for a debugging aid.

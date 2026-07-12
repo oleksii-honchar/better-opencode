@@ -193,6 +193,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId },
             { args },
           )
+          const start = Date.now()
           const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.gen(function* () {
             yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
             return yield* Effect.promise(() => execute(args, opts))
@@ -205,6 +206,21 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
                 "message.id": input.processor.message.id,
               },
             }),
+            Effect.tapDefect((e) =>
+              Effect.sync(() => {
+                const msg = e instanceof Error ? e.message : String(e)
+                Log.toolsLog({
+                  tool: key,
+                  sessionId: ctx.sessionID,
+                  messageId: input.processor.message.id,
+                  callId: opts.toolCallId,
+                  durationMs: Date.now() - start,
+                  args,
+                  error: msg,
+                  source: "mcp",
+                })
+              }),
+            ),
           )
           const hookOutput = yield* plugin.trigger(
             "tool.execute.after",
@@ -247,6 +263,20 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           }
 
           const truncated = yield* truncate.output(textParts.join("\n\n"), {}, input.agent)
+
+          Log.toolsLog({
+            tool: key,
+            sessionId: ctx.sessionID,
+            messageId: input.processor.message.id,
+            callId: opts.toolCallId,
+            durationMs: Date.now() - start,
+            args,
+            output: truncated.content,
+            truncated: truncated.truncated,
+            ...(truncated.truncated ? { rawOutputLength: textParts.join("\n\n").length } : {}),
+            source: "mcp",
+          })
+
           const metadata = {
             ...result.metadata,
             truncated: truncated.truncated,
