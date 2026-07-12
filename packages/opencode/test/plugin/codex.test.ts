@@ -191,6 +191,11 @@ describe("plugin.codex", () => {
         },
         serverUrl: new URL("https://example.com"),
         $: {} as never,
+        llm: {
+          chatCompletionWithModel() {
+            return Promise.resolve({ content: "" })
+          },
+        },
       },
       {
         issuer: server.url.origin,

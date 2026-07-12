@@ -11,6 +11,11 @@ const pluginInput = {
   },
   serverUrl: new URL("https://example.com"),
   $: {} as never,
+  llm: {
+    chatCompletionWithModel() {
+      return Promise.resolve({ content: "" })
+    },
+  },
 }
 
 function makeHookInput(overrides: { providerID?: string; apiId?: string; reasoning?: boolean }) {
