@@ -142,7 +142,10 @@ export const layer = Layer.effect(
               id: modelID,
             } as Provider.Model
 
-            const sessionID = SessionID.make("plugin-" + crypto.randomUUID())
+            if (!request.sessionId) {
+              throw new Error("sessionId is required for chatCompletionWithModel — the caller must provide a valid session ID")
+            }
+            const sessionID = SessionID.make(request.sessionId)
             const user: MessageV2.User = {
               id: MessageID.ascending(),
               sessionID,

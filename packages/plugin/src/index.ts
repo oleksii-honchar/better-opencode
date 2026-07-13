@@ -65,6 +65,8 @@ export type PluginInput = {
   $: BunShell
   /** LLM service for plugin-initiated chat completions */
   llm: PluginLLMService
+  /** Current chat session ID (optional — may not be available at plugin init time) */
+  sessionId?: string
 }
 
 export type PluginOptions = Record<string, unknown>
@@ -230,6 +232,8 @@ export type PluginLLMService = {
     messages: Array<{ role: "system" | "user" | "assistant"; content: string }>
     /** Model name in provider/model format, resolved by opencode */
     model: string
+    /** Chat session ID — required for proper SessionID schema validation */
+    sessionId: string
   }): Promise<{
     /** Response content from the model */
     content: string
