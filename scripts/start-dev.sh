@@ -286,7 +286,61 @@ if [ "$TOOL_LOGS" = true ]; then
   echo "Tailing tool execution logs: $TOOLS_LOG"
   echo "Press Ctrl+C to stop."
   echo ""
-  tail -f "$TOOLS_LOG"
+
+  if ! command -v jq &> /dev/null; then
+    echo "WARNING: jq not found; printing raw tool log lines. Install jq for formatted JSONL output."
+    echo ""
+    tail -n +1 -f "$TOOLS_LOG"
+    exit 0
+  fi
+
+  tail -n +1 -f "$TOOLS_LOG" | while IFS= read -r line; do
+    if [ -z "$line" ]; then
+      echo ""
+      continue
+    fi
+
+    if formatted=$(printf '%s\n' "$line" | jq -r '
+      def pick_field($names):
+        first([$names[] as $name | .[$name] | select(. != null)][]?);
+      def as_text:
+        if . == null then null
+        elif type == "string" then .
+        else tojson
+        end;
+      def truncate($max):
+        as_text as $value
+        | if $value == null then null
+          elif ($value | length) > $max then ($value[0:$max] + "...")
+          else $value
+          end;
+      def field_line($label; $value):
+        if $value == null then empty else "  \($label): \($value)" end;
+
+      . as $record
+      | (pick_field(["timestamp", "time", "ts", "createdAt"]) // "unknown-time") as $timestamp
+      | (pick_field(["source", "level"]) // "unknown-source") as $source
+      | (pick_field(["tool", "toolName", "name"]) // "unknown-tool") as $tool
+      | [
+          "────────────────────────────────────────",
+          "\($timestamp)  \($source)  \($tool)",
+          field_line("session"; pick_field(["sessionID", "sessionId", "session_id"])),
+          field_line("message"; pick_field(["messageID", "messageId", "message_id"])),
+          field_line("call"; pick_field(["callID", "callId", "call_id", "toolCallID", "toolCallId"])),
+          field_line("duration"; (pick_field(["duration", "durationMs", "duration_ms", "elapsedMs"]) | if . == null then null else "\(.)ms" end)),
+          field_line("status"; (pick_field(["status", "state"]) | truncate(200))),
+          field_line("args"; (pick_field(["args", "arguments", "input"]) | truncate(1200))),
+          field_line("output"; (pick_field(["output", "result", "content"]) | truncate(1200))),
+          field_line("error"; (pick_field(["error", "err"]) | truncate(1200)))
+        ]
+      | map(select(. != null and . != ""))
+      | .[]
+    ' 2>/dev/null); then
+      printf '%s\n' "$formatted"
+    else
+      printf '%s\n' "$line"
+    fi
+  done
   exit 0
 fi
 
