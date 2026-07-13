@@ -81,7 +81,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --vscode      Use VSCode instead of VSCodium (default: VSCodium)"
       echo "  --server-only Same as default: run dev server in foreground (this tab)"
       echo "  --server-logs Tail dev server logs (requires running server)"
-      echo "  --tool-logs   Enable tool execution logging (OPENCODE_LOG_TOOLS=1)"
+      echo "  --tool-logs   Tail tool execution logs (requires running server)"
       echo "  --ide-only    Other tab: launch IDE; server must already listen on OPENCODE_PORT"
       echo "  --force       Force launch even if $VSCODE_APP is detected as running"
       echo "  --help, -h    Show this help message"
@@ -272,6 +272,24 @@ if [ "$SERVER_LOGS" = true ]; then
   exit 0
 fi
 
+# --- Tool logs tab (tail tools.log)
+if [ "$TOOL_LOGS" = true ]; then
+  LOG_DIR="$HOME/.local/share/opencode/log"
+  TOOLS_LOG="$LOG_DIR/tools.log"
+
+  if [ ! -f "$TOOLS_LOG" ]; then
+    echo "ERROR: Tools log not found at $TOOLS_LOG"
+    echo "Is the dev server running? Start it with: $0"
+    exit 1
+  fi
+
+  echo "Tailing tool execution logs: $TOOLS_LOG"
+  echo "Press Ctrl+C to stop."
+  echo ""
+  tail -f "$TOOLS_LOG"
+  exit 0
+fi
+
 # --- Dev server tab (foreground bun)
 if [ ! -d "$BETTER_OPENCODE_DIR" ]; then
   echo "ERROR: better-opencode directory not found: $BETTER_OPENCODE_DIR"
@@ -290,7 +308,7 @@ fi
 SCRIPT_HINT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 echo "better-opencode dev server (foreground) — leave this tab open; Ctrl+C stops."
 echo "Other tab: \"$SCRIPT_HINT\" --ide-only"
-echo "Log monitoring: \"$SCRIPT_HINT\" --server-logs"
+echo "Log monitoring: \"$SCRIPT_HINT\" --server-logs | --tool-logs"
 echo ""
 echo "  OpenChamber (VS Code / VSCodium): set User setting —"
 echo "    \"openchamber.apiUrl\": \"http://127.0.0.1:$OPENCODE_PORT\""
@@ -311,11 +329,7 @@ SERVER_ARGS=(
 
 export OPENCODE_DEV=1
 export OPENCODE_DISABLE_CHANNEL_DB=1
-
-if [ "$TOOL_LOGS" = true ]; then
-  export OPENCODE_LOG_TOOLS=1
-  echo "  Tool logging enabled (OPENCODE_LOG_TOOLS=1) — check ~/.local/share/opencode/log/tools.log"
-fi
+export OPENCODE_LOG_TOOLS=1
 
 exec env -u OPENCODE_SERVER_PASSWORD OPENCODE_PORT="$OPENCODE_PORT" \
   bun run --cwd packages/opencode --conditions=browser src/index.ts \
