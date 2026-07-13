@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-07-12T18:45:00Z"
+updatedAt: "2026-07-13T12:30:00Z"
 tags: []
 ---
 
@@ -60,3 +60,4 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0046-two-phase-implementation-strategy.adr.md]] — Two-Phase Implementation Strategy (ADR-0046, status: accepted)
 - [[0047-expose-llm-service-to-plugins-via-plugininput.adr.md]] — Expose LLM Service to Plugins via PluginInput (ADR-0047, status: accepted)
 - [[0048-manage-system-tools-through-meta-tool.adr.md]] — Manage System Tools Through Meta Tool (ADR-0048, status: accepted)
+- [[0049-line-count-log-rotation.adr.md]] — Line Count Log Rotation for tools.log (ADR-0049, status: accepted)
