@@ -30,6 +30,8 @@ FORCE=false
 MODE=server
 SERVER_LOGS=false
 TOOL_LOGS=false
+INCLUDE_TOOLS=""
+EXCLUDE_TOOLS=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --server-only)
@@ -72,6 +74,14 @@ while [[ $# -gt 0 ]]; do
       TOOL_LOGS=true
       shift
       ;;
+    --include-tools)
+      INCLUDE_TOOLS="$2"
+      shift 2
+      ;;
+    --exclude-tools)
+      EXCLUDE_TOOLS="$2"
+      shift 2
+      ;;
     --help|-h)
       echo "Usage: $0 [OPTIONS]"
       echo ""
@@ -82,6 +92,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --server-only Same as default: run dev server in foreground (this tab)"
       echo "  --server-logs Tail dev server logs (requires running server)"
       echo "  --tool-logs   Tail tool execution logs (requires running server)"
+      echo "  --include-tools TOOLS  Only show logs for comma-separated tools (with --tool-logs)"
+      echo "  --exclude-tools TOOLS  Hide logs for comma-separated tools (with --tool-logs)"
       echo "  --ide-only    Other tab: launch IDE; server must already listen on OPENCODE_PORT"
       echo "  --force       Force launch even if $VSCODE_APP is detected as running"
       echo "  --help, -h    Show this help message"
@@ -283,21 +295,113 @@ if [ "$TOOL_LOGS" = true ]; then
     exit 1
   fi
 
-  echo "Tailing tool execution logs: $TOOLS_LOG"
+  # Build include/exclude filter info for display
+  FILTER_INFO=""
+  if [ -n "$INCLUDE_TOOLS" ]; then
+    FILTER_INFO=" (include: $INCLUDE_TOOLS)"
+  fi
+  if [ -n "$EXCLUDE_TOOLS" ]; then
+    FILTER_INFO="${FILTER_INFO} (exclude: $EXCLUDE_TOOLS)"
+  fi
+
+  echo "Tailing tool execution logs: $TOOLS_LOG${FILTER_INFO}"
   echo "Press Ctrl+C to stop."
   echo ""
+
+  # Helper: check if tool passes include/exclude filter
+  # Returns 0 (true) if the line should be shown, 1 (false) if filtered out
+  _tool_log_should_show() {
+    local tool_name="$1"
+    # Include filter: if set, tool must be in the include list
+    if [ -n "$INCLUDE_TOOLS" ]; then
+      local IFS=','
+      for inc_tool in $INCLUDE_TOOLS; do
+        if [ "$tool_name" = "$inc_tool" ]; then
+          # Pass include check; now check exclude
+          break
+        fi
+      done
+      # If we didn't match any include tool, skip
+      if [ "$tool_name" != "$inc_tool" ]; then
+        return 1
+      fi
+    fi
+    # Exclude filter: if set and tool is in exclude list, skip
+    if [ -n "$EXCLUDE_TOOLS" ]; then
+      local IFS=','
+      for exc_tool in $EXCLUDE_TOOLS; do
+        if [ "$tool_name" = "$exc_tool" ]; then
+          return 1
+        fi
+      done
+    fi
+    return 0
+  }
 
   if ! command -v jq &> /dev/null; then
     echo "WARNING: jq not found; printing raw tool log lines. Install jq for formatted JSONL output."
     echo ""
-    tail -n +1 -f "$TOOLS_LOG"
+    tail -n +1 -f "$TOOLS_LOG" | while IFS= read -r line; do
+      if [ -z "$line" ]; then
+        echo ""
+        continue
+      fi
+      # Extract tool name using node -e for no-jq fallback
+      if [ -n "$INCLUDE_TOOLS" ] || [ -n "$EXCLUDE_TOOLS" ]; then
+        local_tool=$(printf '%s\n' "$line" | node -e '
+          const line = require("fs").readFileSync(0, "utf8").trim();
+          try {
+            const obj = JSON.parse(line);
+            process.stdout.write(obj.tool || obj.toolName || obj.name || "");
+          } catch { process.stdout.write(""); }
+        ' 2>/dev/null) || local_tool=""
+        if ! _tool_log_should_show "$local_tool"; then
+          continue
+        fi
+      fi
+      printf '%s\n' "$line"
+    done
     exit 0
   fi
+
+  # Build jq arguments for include/exclude filtering
+  # Always provide both --arg inc and --arg exc so jq variables are defined
+  JQ_INC_VAL="${INCLUDE_TOOLS:-}"
+  JQ_EXC_VAL="${EXCLUDE_TOOLS:-}"
+
+  # Build the filter select expression
+  # pick_field returns the tool name; we check against include/exclude lists
+  JQ_FILTER='
+    def pick_field($names):
+      first([$names[] as $name | .[$name] | select(. != null)][]?);
+    (pick_field(["tool", "toolName", "name"]) // "unknown-tool") as $tool
+    | if ($inc // "") != "" then
+        ($inc | split(",")) as $inc_arr
+        | if ($tool | IN($inc_arr[])) then
+            if ($exc // "") != "" then
+              ($exc | split(",")) as $exc_arr
+              | if ($tool | IN($exc_arr[])) then empty else . end
+            else . end
+          else empty end
+      elif ($exc // "") != "" then
+        ($exc | split(",")) as $exc_arr
+        | if ($tool | IN($exc_arr[])) then empty else . end
+      else . end
+  '
 
   tail -n +1 -f "$TOOLS_LOG" | while IFS= read -r line; do
     if [ -z "$line" ]; then
       echo ""
       continue
+    fi
+
+    # Apply include/exclude filter first (only when at least one filter is set)
+    if [ -n "$JQ_INC_VAL" ] || [ -n "$JQ_EXC_VAL" ]; then
+      passed=$(printf '%s\n' "$line" | jq -e "$JQ_FILTER" \
+        --arg inc "$JQ_INC_VAL" --arg exc "$JQ_EXC_VAL" 2>/dev/null) || true
+      if [ -z "$passed" ]; then
+        continue
+      fi
     fi
 
     if formatted=$(printf '%s\n' "$line" | jq -r '
