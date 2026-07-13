@@ -27,6 +27,24 @@ const TOOLS_LOG_ENABLED = process.env.OPENCODE_LOG_TOOLS === "1"
 const toolsKeep = 5
 let toolsWrite: ((msg: string) => void) | null = null
 
+// Max-lines rotation config
+const TOOLS_LOG_MAX_LINES = (() => {
+  const raw = process.env.TOOL_LOG_FILE_MAX_LINES
+  if (raw == null || raw === "") return 1000
+  const n = Number(raw)
+  return n > 0 ? n : null
+})()
+let toolsLineCount = 0
+let toolsRotating = false
+let toolsRotationPending = false
+let toolsRotationTimer: ReturnType<typeof setTimeout> | null = null
+
+function reopenToolsWriteStream() {
+  const toolsLogPath = path.join(Global.Path.log, "tools.log")
+  const stream = createWriteStream(toolsLogPath, { flags: "a" })
+  toolsWrite = (msg: string) => { stream.write(msg) }
+}
+
 let level: Level = "INFO"
 
 function shouldLog(input: Level): boolean {
@@ -94,6 +112,27 @@ export async function init(options: Options) {
   }
 }
 
+async function scheduleToolsRotation() {
+  if (toolsRotating) {
+    toolsRotationPending = true
+    return
+  }
+  toolsRotating = true
+  try {
+    await rotateToolsLog()
+    toolsLineCount = 0
+    reopenToolsWriteStream()
+    if (toolsRotationPending) {
+      toolsRotationPending = false
+      await rotateToolsLog()
+      toolsLineCount = 0
+      reopenToolsWriteStream()
+    }
+  } finally {
+    toolsRotating = false
+  }
+}
+
 export async function rotateToolsLog() {
   const dir = Global.Path.log
   const base = "tools"
@@ -119,11 +158,20 @@ export async function initToolsLog() {
   await fs.mkdir(dir, { recursive: true }).catch(() => {})
   // Rotate on start
   await rotateToolsLog()
+  toolsLineCount = 0
   // Open write stream
-  const toolsLogPath = path.join(dir, "tools.log")
-  const stream = createWriteStream(toolsLogPath, { flags: "a" })
-  toolsWrite = (msg: string) => {
-    stream.write(msg)
+  reopenToolsWriteStream()
+
+  if (TOOLS_LOG_MAX_LINES != null) {
+    const onExit = () => {
+      if (toolsLineCount >= TOOLS_LOG_MAX_LINES && !toolsRotating) {
+        void rotateToolsLog()
+        toolsLineCount = 0
+      }
+    }
+    process.on("exit", onExit)
+    process.on("SIGTERM", onExit)
+    process.on("SIGINT", onExit)
   }
 }
 
@@ -131,6 +179,13 @@ export function toolsLog(entry: Record<string, unknown>): void {
   if (!TOOLS_LOG_ENABLED || !toolsWrite) return
   const line = JSON.stringify({ timestamp: new Date().toISOString(), ...entry }) + "\n"
   toolsWrite(line)
+  if (TOOLS_LOG_MAX_LINES != null) {
+    toolsLineCount++
+    if (toolsLineCount >= TOOLS_LOG_MAX_LINES && !toolsRotating) {
+      if (toolsRotationTimer) clearTimeout(toolsRotationTimer)
+      toolsRotationTimer = setTimeout(scheduleToolsRotation, 100)
+    }
+  }
 }
 
 async function cleanup(dir: string) {

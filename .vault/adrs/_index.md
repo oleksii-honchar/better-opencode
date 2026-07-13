@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-07-10T15:35:00Z"
+updatedAt: "2026-07-12T18:45:00Z"
 tags: []
 ---
 
@@ -53,3 +53,10 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0039-single-post-execution-log-line.adr.md]] — Single Post-Execution Log Line per Tool Call (ADR-0039, status: accepted)
 - [[0040-log-truncated-output-plus-raw-length.adr.md]] — Log Truncated Output + Raw Length (ADR-0040, status: accepted)
 - [[0041-error-logging-in-same-file.adr.md]] — Error Logging in the Same File (ADR-0041, status: accepted)
+- [[0042-intent-delegation-architecture.adr.md]] — Intent Delegation Architecture (ADR-0042, status: accepted)
+- [[0043-select-qwen35-08b-composition-model.adr.md]] — Select Qwen3.5-0.8B as Composition Model (ADR-0043, status: accepted)
+- [[0044-execute-original-intent-on-failure.adr.md]] — Execute Original Intent on Failure (ADR-0044, status: accepted)
+- [[0045-accept-malformed-args-intention-in-meta-use.adr.md]] — Accept Malformed Args and Optional Intention in meta_use (ADR-0045, status: accepted)
+- [[0046-two-phase-implementation-strategy.adr.md]] — Two-Phase Implementation Strategy (ADR-0046, status: accepted)
+- [[0047-expose-llm-service-to-plugins-via-plugininput.adr.md]] — Expose LLM Service to Plugins via PluginInput (ADR-0047, status: accepted)
+- [[0048-manage-system-tools-through-meta-tool.adr.md]] — Manage System Tools Through Meta Tool (ADR-0048, status: accepted)

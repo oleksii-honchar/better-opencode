@@ -2,7 +2,7 @@
 type: index
 title: "Specifications"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-07-10T15:35:00Z"
+updatedAt: "2026-07-12T18:45:00Z"
 tags: []
 ---
 
@@ -19,3 +19,4 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 - [[0005-multi-provider-model-setup.spec.md]] — Multi-Provider Model Setup for Sub-Agents (kind: feature, status: completed)
 - [[0006-agent-model-variant-parsing.spec.md]] — Agent Model `:variant` Parsing (kind: feature, status: completed)
 - [[0007-meta-use-octocode-absolute-paths.spec.md]] — Fix meta_use Octocode Absolute-Path Failures (kind: bugfix, status: completed)
+- [[0008-extended-tool-logging.spec.md]] — Extended Tool Logging (kind: feature, status: completed)
