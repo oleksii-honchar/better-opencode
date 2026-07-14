@@ -17,3 +17,5 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0003-system-prompt-cache-invalidation.memory.md]] — system.transform hook invalidates Anthropic cache for plugin authors
 - [[0004-dev-db-channel-path.memory.md]] — Dev Mode Database Path Depends on InstallationChannel (opencode-local.db vs opencode.db)
 - [[0005-mcp-absolute-directory-argument-gotcha.memory.md]] — MCP Absolute Directory Arguments Can Be Mistaken for Attachment Files
+- [[0006-sessionid-schema-prefix-gotcha.memory.md]] — SessionID Schema Requires "ses" Prefix — Synthetic IDs Fail
+- [[0006-sessionid-schema-prefix-gotcha.memory.md]] — SessionID Schema Requires "ses" Prefix — Synthetic IDs Fail
