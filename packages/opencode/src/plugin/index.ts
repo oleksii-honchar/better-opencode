@@ -190,7 +190,9 @@ export const layer = Layer.effect(
               return { content, usage }
             })
 
-            return bridge.promise(collect)
+            // Create fresh EffectBridge at LLM call time — captures current context with LLM
+            const freshBridge = await Effect.runPromise(EffectBridge.make())
+            return freshBridge.promise(collect)
           },
         }
 
