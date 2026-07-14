@@ -190,9 +190,13 @@ export const layer = Layer.effect(
               return { content, usage }
             })
 
-            // Create fresh EffectBridge at LLM call time — captures current context with LLM
-            const freshBridge = await Effect.runPromise(EffectBridge.make())
-            return freshBridge.promise(collect)
+            // Acquire fresh context and pipe through collect
+            const effectWithContext = Effect.gen(function* () {
+              const freshContext = yield* Effect.context()
+              return yield* collect.pipe(Effect.provide(freshContext))
+            })
+
+            return bridge.promise(effectWithContext)
           },
         }
 

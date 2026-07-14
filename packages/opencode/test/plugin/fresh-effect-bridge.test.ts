@@ -5,55 +5,40 @@ import path from "path"
 const indexPath = path.join(__dirname, "../../src/plugin/index.ts")
 const source = fs.readFileSync(indexPath, "utf-8")
 
-describe("plugin.index — fresh EffectBridge at LLM call time", () => {
-  test("chatCompletionWithModel creates fresh EffectBridge at LLM call time", () => {
-    // The fresh bridge should be created via Effect.runPromise(EffectBridge.make())
-    // at the async level — captures current context with LLM at call time.
-    const freshBridgeMatch = source.match(/const freshBridge = await Effect\.runPromise\(EffectBridge\.make\(\)\)/)
-    expect(freshBridgeMatch).not.toBeNull()
+describe("plugin.index — fresh context via Effect.context() + Effect.provide()", () => {
+  test("effectWithContext acquires fresh context via Effect.context()", () => {
+    const match = source.match(/const effectWithContext = Effect\.gen\(function\* \(\) \{[\s\S]*?yield\* Effect\.context\(\)/)
+    if (!match) throw new Error("effectWithContext does not acquire Effect.context()")
   })
 
-  test("inner LLM logic runs through freshBridge.promise()", () => {
-    // After creating freshBridge, the collect Effect should be run through freshBridge.promise()
-    const freshBridgePromiseMatch = source.match(/freshBridge\.promise\(collect\)/)
-    expect(freshBridgePromiseMatch).not.toBeNull()
+  test("collect is piped through Effect.provide(freshContext)", () => {
+    const match = source.match(/collect\.pipe\(Effect\.provide\(freshContext\)\)/)
+    if (!match) throw new Error("collect is not piped with Effect.provide(freshContext)")
   })
 
-  test("fresh bridge used instead of stale bridge for LLM calls", () => {
-    // The chatCompletionWithModel should use freshBridge.promise(collect)
-    const freshBridgeUsedMatch = source.match(/freshBridge\.promise\(collect\)/)
-    expect(freshBridgeUsedMatch).not.toBeNull()
-
-    // Verify the old stale bridge pattern is NOT used for LLM calls
-    const staleBridgeMatch = source.match(/return bridge\.promise\(collect\)/)
-    expect(staleBridgeMatch).toBeNull()
+  test("bridge.promise(effectWithContext) is used for LLM calls", () => {
+    const match = source.match(/return bridge\.promise\(effectWithContext\)/)
+    if (!match) throw new Error("bridge.promise(effectWithContext) not found")
   })
 
-  test("fresh bridge created via await Effect.runPromise(EffectBridge.make()) at async level", () => {
-    // After creating freshBridge at async level, the LLM logic should be run through freshBridge.promise()
-    const freshBridgePromiseMatch = source.match(/const freshBridge = await Effect\.runPromise\(EffectBridge\.make\(\)\)[\s\S]*?freshBridge\.promise\(/)
-    expect(freshBridgePromiseMatch).not.toBeNull()
+  test("stale bridge pattern bridge.promise(collect) is NOT used", () => {
+    const match = source.match(/return bridge\.promise\(collect\)/)
+    if (match) throw new Error("Old stale bridge pattern bridge.promise(collect) still present")
   })
 
-  test("collect runs via freshBridge.promise(collect) instead of stale bridge.promise(collect)", () => {
-    // The chatCompletionWithModel should use freshBridge.promise(collect) not bridge.promise(collect)
-    const freshBridgePromiseMatch = source.match(/return freshBridge\.promise\(collect\)/)
-    expect(freshBridgePromiseMatch).not.toBeNull()
-
-    // Verify the old pattern is NOT used
-    const staleBridgeMatch = source.match(/return bridge\.promise\(collect\)/)
-    expect(staleBridgeMatch).toBeNull()
+  test("old freshBridge approach is NOT used", () => {
+    const match = source.match(/freshBridge\.promise\(collect\)/)
+    if (match) throw new Error("Old freshBridge.promise(collect) still present — should be removed")
   })
 
   test("original bridge preserved for publishPluginError", () => {
-    // The original bridge at line 129 should still exist for publishPluginError
-    const originalBridgeMatch = source.match(/const bridge = yield\* EffectBridge\.make\(\)/)
-    expect(originalBridgeMatch).not.toBeNull()
+    const bridgeMatch = source.match(/const bridge = yield\* EffectBridge\.make\(\)/)
+    if (!bridgeMatch) throw new Error("Original bridge variable not found")
 
     const publishErrorMatch = source.match(/function publishPluginError\(/)
-    expect(publishErrorMatch).not.toBeNull()
+    if (!publishErrorMatch) throw new Error("publishPluginError function not found")
 
     const bridgeForkMatch = source.match(/bridge\.fork\(bus\.publish/)
-    expect(bridgeForkMatch).not.toBeNull()
+    if (!bridgeForkMatch) throw new Error("bridge.fork(bus.publish) not found — original bridge not used for error publishing")
   })
 })
