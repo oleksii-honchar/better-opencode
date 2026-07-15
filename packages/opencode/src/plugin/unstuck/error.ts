@@ -62,7 +62,12 @@ export class LoopDetectedError extends Error {
     } else if (info.type === "self_diagnosis_loop") {
       message = `Model loop detected: self_diagnosis_loop — model self-diagnosed being stuck (threshold: ${info.threshold})`
     } else if (info.type === "xml_repetition") {
-      message = `Model loop detected: xml_repetition — XML tag '${info.xmlTag}' repeated ${info.xmlRepetitionCount} times (token limit exceeded: ${info.exceedsTokenLimit})`
+      if (info.exceedsTokenLimit) {
+        const toolInfo = info.toolName ? ` (tool: ${info.toolName})` : ""
+        message = `Model loop detected: xml_repetition — token limit exceeded${toolInfo}`
+      } else {
+        message = `Model loop detected: xml_repetition — XML tag '${info.xmlTag}' repeated ${info.xmlRepetitionCount} times (token limit exceeded: ${info.exceedsTokenLimit})`
+      }
     } else {
       message = `Model loop detected: ${info.type} (threshold: ${info.threshold})`
     }

@@ -193,6 +193,7 @@ export function wrapWithLoopDetection(
 ): LanguageModelV3 {
   let nudgeCount = 0
   const evidence = new EvidenceAccumulatorImpl()
+  let lastUserMessageCount = 0
 
   log.debug("wrapWithLoopDetection", {
     modelId: model.modelId,
@@ -214,6 +215,18 @@ export function wrapWithLoopDetection(
       if (!config.enabled) {
         log.debug("unstuck disabled, passing through")
         return model.doStream(args as any) as any
+      }
+
+      // CRITICAL: Reset detector for NEW user messages
+      const messages = args.prompt as Message[]
+      const userMessageCount = messages.filter((m) => m.role === "user" && !(m as any)._unstuckNudge).length
+      if (userMessageCount > lastUserMessageCount) {
+        // New user message detected — clear all state for fresh start
+        detector.clear()
+        evidence.clear()
+        nudgeCount = 0
+        lastUserMessageCount = userMessageCount
+        log.debug("new user message detected — detector, evidence, and nudgeCount cleared", { userMessageCount })
       }
 
       async function* wrappedStream(): AsyncGenerator<LanguageModelV3StreamPart, void, unknown> {

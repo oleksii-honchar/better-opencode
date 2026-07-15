@@ -1,5 +1,13 @@
 import type { EvidenceThresholds } from "./error"
 
+export interface ModelSpecificThresholds {
+  qwen: {
+    repetitionThreshold: number
+    maxToolInputTokens: number
+    partialTagThreshold: number
+  }
+}
+
 export const defaultEvidenceThresholds: EvidenceThresholds = {
   stepLoop: 2,
   toolLoop: 2,
@@ -29,6 +37,18 @@ export interface UnstuckConfig {
   xmlRepetitionWindowSize: number
   maxToolInputTokens: number
   maxTotalToolInputTokens: number
+  // Model ID for model-specific threshold overrides (e.g. qwen gets more sensitive detection)
+  modelId?: string
+  // Model-specific threshold configuration
+  modelSpecificThresholds?: ModelSpecificThresholds
+  // Model ID specifically for XML repetition detection (maps to XmlRepetitionConfig.modelId)
+  xmlRepetitionModelId?: string
+  // Threshold for partial/incomplete XML tags (maps to XmlRepetitionConfig.partialTagThreshold)
+  xmlPartialTagThreshold: number
+  // Enable/disable partial tag detection
+  xmlPartialTagDetection: boolean
+  // Multiplier for XML content token estimation (maps to XmlRepetitionConfig.xmlTokenEstimationMultiplier)
+  xmlTokenEstimationMultiplier: number
   strategy: "nudge-and-prune" | "abort" | "warn"
   maxNudges: number
   pruneCount: number
@@ -58,6 +78,10 @@ export const defaultConfig: UnstuckConfig = {
   xmlRepetitionWindowSize: 10,
   maxToolInputTokens: 4000,
   maxTotalToolInputTokens: 16000,
+  xmlRepetitionModelId: undefined,
+  xmlPartialTagThreshold: 2,
+  xmlPartialTagDetection: true,
+  xmlTokenEstimationMultiplier: 1.5,
   strategy: "nudge-and-prune",
   maxNudges: 2,
   pruneCount: 3,
@@ -67,12 +91,31 @@ export const defaultConfig: UnstuckConfig = {
   evidenceWindow: Infinity,
 }
 
+export function validateUnstuckConfig(config: UnstuckConfig): UnstuckConfig {
+  const result = { ...config }
+
+  if (result.xmlPartialTagThreshold < 1) {
+    result.xmlPartialTagThreshold = defaultConfig.xmlPartialTagThreshold
+  }
+
+  if (result.xmlTokenEstimationMultiplier < 1.0) {
+    result.xmlTokenEstimationMultiplier = defaultConfig.xmlTokenEstimationMultiplier
+  }
+
+  if (result.xmlRepetitionThreshold < 1) {
+    result.xmlRepetitionThreshold = defaultConfig.xmlRepetitionThreshold
+  }
+
+  return result
+}
+
 export function mergeConfig(partial: Partial<UnstuckConfig>): UnstuckConfig {
-  return {
+  const merged = {
     ...defaultConfig,
     ...partial,
     evidenceThresholds: partial.evidenceThresholds
       ? { ...defaultConfig.evidenceThresholds, ...partial.evidenceThresholds }
       : defaultConfig.evidenceThresholds,
   }
+  return validateUnstuckConfig(merged)
 }

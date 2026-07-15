@@ -18,6 +18,6 @@ Mental models, domain vocabulary, and architectural patterns used in better-open
 - [[0004-subagent-delegation.concept.md]] — Subagent delegation via Task(): blocking call via Effect fiber, child session creation, subagent permissions, background mode
 - [[0005-agent-meta-tool-plugin.concept.md]] — Agent Meta Tool Plugin: dynamic skill/tool management via system prompt and tool definition interception
 - [[0006-opencode-observability.concept.md]] — OpenCode Observability (OTEL): telemetry pipeline, data sources, Grafana dashboards
-- [[0007-unstuck-loop-detection.concept.md]] — Unstuck Loop Detection System: fingerprint-based detection, evidence accumulation, nudge-and-prune, cross-stream history, 6 detection types (including xml_repetition)
+- [[0007-unstuck-loop-detection.concept.md]] — Unstuck Loop Detection System: fingerprint-based detection, evidence accumulation, nudge-and-prune, cross-stream history, user message reset, 6 detection types (xml_repetition with partial/prefix tag detection, model-specific thresholds)
 - [[0008-agent-model-selection.concept.md]] — Agent Model Selection from Frontmatter: three fields (models, model, modelPreset), resolution chain, provider-model format
 - [[0009-agent-model-variant-parsing.concept.md]] — Agent Model Variant Parsing (`:variant` Syntax): inline variant extraction, precedence rules, single/multi-model propagation

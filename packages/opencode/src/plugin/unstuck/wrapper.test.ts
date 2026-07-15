@@ -748,3 +748,172 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
     expect(detector.getState().historyLength).toBe(2)
   })
 })
+
+describe("wrapWithLoopDetection — new user message resets state", () => {
+  test("detector.clear() resets all state — historyLength=0, currentReasoningLength=0, currentToolsCount=0", () => {
+    const detector = new LoopDetectorImpl()
+
+    // Seed history by manually pushing via finalizeStep
+    detector.consumeChunk(
+      { type: "tool-input-start", id: "call-1", toolName: "ReadFile" },
+      defaultConfig,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-1", toolName: "ReadFile", input: { path: "/test" } },
+      defaultConfig,
+    )
+    detector.finalizeStep(defaultConfig, "tool-calls")
+
+    expect(detector.getState().historyLength).toBe(1)
+
+    // Clear
+    detector.clear()
+
+    expect(detector.getState().historyLength).toBe(0)
+    expect(detector.getState().currentReasoningLength).toBe(0)
+    expect(detector.getState().currentToolsCount).toBe(0)
+  })
+
+  test("evidence.clear() removes all records — evidence.count === 0", () => {
+    const { EvidenceAccumulatorImpl } = require("./loop-detector")
+    const ev = new EvidenceAccumulatorImpl()
+
+    expect(ev.count).toBe(0)
+
+    ev.add({ type: "step_loop", threshold: 3 }, 10, defaultConfig)
+    ev.add({ type: "step_loop", threshold: 3 }, 20, defaultConfig)
+
+    expect(ev.count).toBe(2)
+
+    ev.clear()
+
+    expect(ev.count).toBe(0)
+  })
+
+  test("new user message triggers reset of detector, evidence, and nudgeCount", async () => {
+    let callCount = 0
+
+    // Simple clean chunks that accumulate history without triggering loops
+    const cleanChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "1", delta: "Clean response" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() {
+        throw new Error("not implemented")
+      },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        return { stream: createMockStream(cleanChunks) }
+      },
+    }
+
+    const detector = new LoopDetectorImpl()
+    const config: UnstuckConfig = { ...defaultConfig, strategy: "abort" }
+    const wrapped = wrapWithLoopDetection(model, detector, config)
+
+    // First call — 1 user message
+    await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+    // After first call, detector has history (1 step)
+    expect(detector.getState().historyLength).toBe(1)
+
+    // Second call — 2 user messages (new user message detected → should reset)
+    await collectStream(wrapped, [
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Previous response" },
+      { role: "user", content: "New message" },
+    ])
+
+    // After second call, detector should have been reset at start (new user message)
+    // then accumulated 1 step from cleanChunks
+    // Without the fix: historyLength = 2 (accumulated, not reset)
+    // With the fix: historyLength = 1 (reset then 1 new step)
+    expect(detector.getState().historyLength).toBe(1)
+  })
+
+  test("tool response messages do NOT trigger reset", async () => {
+    let callCount = 0
+
+    const cleanChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "1", delta: "Clean response" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() {
+        throw new Error("not implemented")
+      },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        return { stream: createMockStream(cleanChunks) }
+      },
+    }
+
+    const detector = new LoopDetectorImpl()
+    const config: UnstuckConfig = { ...defaultConfig, strategy: "abort" }
+    const wrapped = wrapWithLoopDetection(model, detector, config)
+
+    // First call — 1 user message
+    await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+    const historyAfterFirst = detector.getState().historyLength
+
+    // Second call — same 1 user message + tool response (no new user message)
+    await collectStream(wrapped, [
+      { role: "user", content: "Hello" },
+      { role: "tool", content: "Tool output" },
+    ])
+
+    // History should have accumulated (not reset) — 2 steps total
+    expect(detector.getState().historyLength).toBe(historyAfterFirst + 1)
+  })
+
+  test("nudge messages do NOT trigger reset", async () => {
+    let callCount = 0
+
+    const cleanChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "1", delta: "Clean response" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() {
+        throw new Error("not implemented")
+      },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        return { stream: createMockStream(cleanChunks) }
+      },
+    }
+
+    const detector = new LoopDetectorImpl()
+    const config: UnstuckConfig = { ...defaultConfig, strategy: "abort" }
+    const wrapped = wrapWithLoopDetection(model, detector, config)
+
+    // First call — 1 user message
+    await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+    const historyAfterFirst = detector.getState().historyLength
+
+    // Second call — same 1 user message + nudge message (nudge excluded from count)
+    await collectStream(wrapped, [
+      { role: "user", content: "Hello" },
+      { role: "user", content: { type: "text", text: "nudge" }, _unstuckNudge: true },
+    ])
+
+    // History should have accumulated (not reset) — nudge doesn't count as new user message
+    expect(detector.getState().historyLength).toBe(historyAfterFirst + 1)
+  })
+})

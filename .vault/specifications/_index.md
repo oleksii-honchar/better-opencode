@@ -21,3 +21,4 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 - [[0007-meta-use-octocode-absolute-paths.spec.md]] — Fix meta_use Octocode Absolute-Path Failures (kind: bugfix, status: completed)
 - [[0008-extended-tool-logging.spec.md]] — Extended Tool Logging (kind: feature, status: completed)
 - [[0009-xml-repetition-detection.spec.md]] — Real-time XML Repetition Detection for Tool Call Streaming (kind: feature, status: completed)
+- [[0010-enhanced-xml-detection.spec.md]] — Enhanced XML Repetition Detection — Partial/Malformed Tag Support (kind: feature, status: completed)

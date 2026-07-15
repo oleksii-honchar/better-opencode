@@ -7,12 +7,35 @@ const log = Log.create({ service: "unstuck" })
 const XML_TAG_PATTERN = /<(\w+?)(\s[^>]*)?>.*?<\/\1>/gs
 // Matches self-closing tags: <tagName .../>
 const XML_SELF_CLOSING_PATTERN = /<(\w+?)(\s[^>]*)?\/>/g
+// Opening tags only — catches partial/malformed: <tag ...>
+export const XML_OPENING_TAG_PATTERN = /<(\w+?)(\s[^>]*)?>/g
+// Closing tags only: </tag>
+export const XML_CLOSING_TAG_PATTERN = /<\/(\w+?)>/g
+// Malformed patterns — catches Qwen-style: <tag, <tag=, etc. (no closing >)
+// Stops at < (start of another tag) to avoid consuming across tag boundaries
+export const XML_MALFORMED_PATTERN = /<\/?(\w+)\s*(?:[^><]{0,20})?(?![^<]*>)/g
+
+export interface ModelSpecificThresholds {
+  qwen: {
+    repetitionThreshold: number
+    maxToolInputTokens: number
+    partialTagThreshold: number
+  }
+}
 
 export interface XmlRepetitionConfig {
   repetitionThreshold: number
   windowSize: number
   maxToolInputTokens: number
   maxTotalTokens: number
+  // Threshold for partial/incomplete tags (more sensitive — default 2)
+  partialTagThreshold?: number
+  // Model ID for model-specific threshold overrides
+  modelId?: string
+  // Model-specific threshold configuration
+  modelSpecificThresholds?: ModelSpecificThresholds
+  // Multiplier for XML content token estimation (more conservative — default 1.5)
+  xmlTokenEstimationMultiplier?: number
 }
 
 export interface RepetitionDetected {
@@ -29,19 +52,42 @@ export interface RepetitionState {
   totalTokens: number
 }
 
+type TagCompleteness = "complete" | "partial" | "prefix"
+
 interface TagEntry {
   tagName: string
   fingerprint: string
+  completeness: TagCompleteness
 }
 
 export class XmlRepetitionDetector {
   private config: XmlRepetitionConfig
+  private modelId: string | undefined
   private tagWindow: TagEntry[] = []
   private currentToolTokens: number = 0
   private totalTokens: number = 0
 
   constructor(config: XmlRepetitionConfig) {
     this.config = config
+    this.modelId = config.modelId
+  }
+
+  // Returns effective thresholds — qwen overrides when modelId contains "qwen" (case-insensitive)
+  private getEffectiveThresholds() {
+    const isQwen = this.modelId?.toLowerCase().includes("qwen") ?? false
+    if (isQwen && this.config.modelSpecificThresholds?.qwen) {
+      const qwen = this.config.modelSpecificThresholds.qwen
+      return {
+        repetitionThreshold: qwen.repetitionThreshold,
+        maxToolInputTokens: qwen.maxToolInputTokens,
+        partialTagThreshold: qwen.partialTagThreshold,
+      }
+    }
+    return {
+      repetitionThreshold: this.config.repetitionThreshold,
+      maxToolInputTokens: this.config.maxToolInputTokens,
+      partialTagThreshold: this.config.partialTagThreshold ?? 2,
+    }
   }
 
   reset(): void {
@@ -58,17 +104,23 @@ export class XmlRepetitionDetector {
     this.totalTokens = 0
   }
 
-  consumeDelta(_toolName: string, text: string, tokens: number): RepetitionDetected | undefined {
+  consumeDelta(_toolName: string, text: string, _tokens?: number): RepetitionDetected | undefined {
+    const thresholds = this.getEffectiveThresholds()
+    const multiplier = this.config.xmlTokenEstimationMultiplier ?? 1.5
+
+    // XML-aware token estimation (sole source of truth — no external tokens needed)
+    const effectiveTokens = this.estimateTokens(text, multiplier)
+
     // Accumulate tokens
-    this.currentToolTokens += tokens
-    this.totalTokens += tokens
+    this.currentToolTokens += effectiveTokens
+    this.totalTokens += effectiveTokens
 
     // Check per-tool token limit
-    if (this.currentToolTokens > this.config.maxToolInputTokens) {
+    if (this.currentToolTokens > thresholds.maxToolInputTokens) {
       log.info("XmlRepetitionDetector — per-tool token limit exceeded", {
         tool: _toolName,
         tokens: this.currentToolTokens,
-        limit: this.config.maxToolInputTokens,
+        limit: thresholds.maxToolInputTokens,
       })
       return {
         type: "xml_repetition",
@@ -94,11 +146,40 @@ export class XmlRepetitionDetector {
       }
     }
 
-    // Extract and process XML tags
+    const partialThreshold = thresholds.partialTagThreshold
+
+    // Extract complete and partial tags (opening/closing pairs, opening-only, closing-only)
     const tags = this.extractTags(text)
-    for (const tagName of tags) {
-      this.processTag(tagName)
-      const detection = this.checkRepetition()
+    for (const entry of tags) {
+      this.processTag(entry)
+      // Log partial tag detection for diagnostics
+      if (entry.completeness !== "complete") {
+        const count = this.countByTag(entry.tagName)
+        log.debug("XmlRepetitionDetector — partial tag detected", {
+          tagName: entry.tagName,
+          completeness: entry.completeness,
+          count,
+        })
+      }
+      // Complete tags use repetitionThreshold; partial tags use partialTagThreshold
+      const threshold = entry.completeness === "complete" ? thresholds.repetitionThreshold : partialThreshold
+      const detection = this.checkRepetition(threshold)
+      if (detection) {
+        return detection
+      }
+    }
+
+    // Also extract and process prefix tags with partial threshold
+    const prefixes = this.extractTagPrefixes(text)
+    for (const entry of prefixes) {
+      this.processTag(entry)
+      const count = this.countByTag(entry.tagName)
+      log.debug("XmlRepetitionDetector — prefix tag detected", {
+        tagName: entry.tagName,
+        completeness: entry.completeness,
+        count,
+      })
+      const detection = this.checkRepetition(partialThreshold)
       if (detection) {
         return detection
       }
@@ -115,34 +196,80 @@ export class XmlRepetitionDetector {
     }
   }
 
-  private extractTags(text: string): string[] {
-    const tags: string[] = []
+  private extractTags(text: string): TagEntry[] {
+    const tags: TagEntry[] = []
 
-    // Extract opening/closing pairs
+    // Track character ranges covered by complete tags (to avoid double-counting as partial)
+    const coveredRanges: Array<[number, number]> = []
+
+    const addRange = (start: number, end: number) => {
+      coveredRanges.push([start, end])
+    }
+
+    const isCovered = (pos: number): boolean => {
+      for (const [start, end] of coveredRanges) {
+        if (pos >= start && pos <= end) return true
+      }
+      return false
+    }
+
+    // Extract opening/closing pairs — complete tags
     let match: RegExpExecArray | null
     const tagRegex = new RegExp(XML_TAG_PATTERN)
     while ((match = tagRegex.exec(text)) !== null) {
       const tagName = match[1].toLowerCase()
-      tags.push(tagName)
+      addRange(match.index, match.index + match[0].length - 1)
+      tags.push({ tagName, fingerprint: this.fnv1a(tagName), completeness: "complete" })
     }
 
-    // Extract self-closing tags
+    // Extract self-closing tags — complete tags
     const selfClosingRegex = new RegExp(XML_SELF_CLOSING_PATTERN)
     while ((match = selfClosingRegex.exec(text)) !== null) {
       const tagName = match[1].toLowerCase()
-      tags.push(tagName)
+      addRange(match.index, match.index + match[0].length - 1)
+      tags.push({ tagName, fingerprint: this.fnv1a(tagName), completeness: "complete" })
+    }
+
+    // Extract opening-only tags (not part of a complete pair) — partial tags
+    const openingRegex = new RegExp(XML_OPENING_TAG_PATTERN)
+    while ((match = openingRegex.exec(text)) !== null) {
+      if (isCovered(match.index)) continue
+      const tagName = match[1].toLowerCase()
+      tags.push({ tagName, fingerprint: this.fnv1a(tagName), completeness: "partial" })
+    }
+
+    // Extract closing-only tags (not part of a complete pair) — partial tags
+    const closingRegex = new RegExp(XML_CLOSING_TAG_PATTERN)
+    while ((match = closingRegex.exec(text)) !== null) {
+      if (isCovered(match.index)) continue
+      const tagName = match[1].toLowerCase()
+      tags.push({ tagName, fingerprint: this.fnv1a(tagName), completeness: "partial" })
     }
 
     return tags
   }
 
-  private processTag(tagName: string): void {
-    // Normalize: lowercase (already done in extraction), collapse whitespace
-    const normalized = tagName.toLowerCase().replace(/\s+/g, "")
-    const fingerprint = this.fnv1a(normalized)
+  // Extracts tag prefixes from malformed/incomplete XML (no closing >)
+  // Uses XML_MALFORMED_PATTERN to catch Qwen-style: <parameter, <parameter=, etc.
+  private extractTagPrefixes(text: string): TagEntry[] {
+    const tags: TagEntry[] = []
 
-    // Add to sliding window
-    this.tagWindow.push({ tagName: normalized, fingerprint })
+    let match: RegExpExecArray | null
+    const malformedRegex = new RegExp(XML_MALFORMED_PATTERN)
+    while ((match = malformedRegex.exec(text)) !== null) {
+      const tagName = match[1].toLowerCase()
+      tags.push({ tagName, fingerprint: this.fnv1a(tagName), completeness: "prefix" })
+    }
+
+    return tags
+  }
+
+  private processTag(entry: TagEntry): void {
+    // Normalize: lowercase (already done in extraction), collapse whitespace
+    const normalized = entry.tagName.toLowerCase().replace(/\s+/g, "")
+
+    // Add to sliding window (use entry's fingerprint and completeness)
+    this.tagWindow.push({ ...entry, tagName: normalized })
 
     // Maintain window size
     if (this.tagWindow.length > this.config.windowSize) {
@@ -150,7 +277,17 @@ export class XmlRepetitionDetector {
     }
   }
 
-  private checkRepetition(): RepetitionDetected | undefined {
+  // Count occurrences of a tag name in the current window (by fingerprint)
+  private countByTag(tagName: string): number {
+    const fp = this.fnv1a(tagName)
+    let count = 0
+    for (const entry of this.tagWindow) {
+      if (entry.fingerprint === fp) count++
+    }
+    return count
+  }
+
+  private checkRepetition(threshold: number): RepetitionDetected | undefined {
     // Count occurrences of each fingerprint in the window
     const counts = new Map<string, number>()
     const nameByFp = new Map<string, string>()
@@ -160,12 +297,12 @@ export class XmlRepetitionDetector {
     }
 
     for (const [fp, count] of counts) {
-      if (count >= this.config.repetitionThreshold) {
+      if (count >= threshold) {
         const tagName = nameByFp.get(fp) ?? "unknown"
         log.info("XmlRepetitionDetector — repetition detected", {
           tagName,
           count,
-          threshold: this.config.repetitionThreshold,
+          threshold,
         })
         return {
           type: "xml_repetition",
@@ -178,6 +315,16 @@ export class XmlRepetitionDetector {
     }
 
     return undefined
+  }
+
+  // XML-aware token estimation: applies multiplier when text contains both < and >
+  private estimateTokens(text: string, multiplier: number): number {
+    const isXml = text.includes("<") && text.includes(">")
+    const base = text.length / 4
+    if (isXml) {
+      return Math.ceil(base * multiplier)
+    }
+    return Math.ceil(base)
   }
 
   // FNV-1a hash — same as in loop-detector.ts, kept local to avoid circular deps

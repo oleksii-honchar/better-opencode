@@ -153,6 +153,8 @@ export class LoopDetectorImpl implements LoopDetector {
             windowSize: config.xmlRepetitionWindowSize,
             maxToolInputTokens: config.maxToolInputTokens,
             maxTotalTokens: config.maxTotalToolInputTokens,
+            modelId: config.modelId,
+            modelSpecificThresholds: config.modelSpecificThresholds,
           })
         }
         this.currentToolName = chunk.toolName
@@ -163,14 +165,11 @@ export class LoopDetectorImpl implements LoopDetector {
       case "tool-input-delta": {
         this.currentToolInputAccum[chunk.id] = (this.currentToolInputAccum[chunk.id] ?? "") + chunk.text
 
-        // XML repetition detection
+        // XML repetition detection — token estimation handled by XmlRepetitionDetector (XML-aware)
         if (this.xmlRepetitionDetector && this.currentToolName) {
-          const tokens = Math.ceil(chunk.text.length / 4)
-          this.totalToolTokens += tokens
           const repetition = this.xmlRepetitionDetector.consumeDelta(
             this.currentToolName,
             chunk.text,
-            tokens,
           )
           if (repetition) {
             log.info("loop detected", { type: "xml_repetition", tagName: repetition.tagName, repetitionCount: repetition.repetitionCount, exceedsTokenLimit: repetition.exceedsTokenLimit, toolName: this.currentToolName })
@@ -413,8 +412,8 @@ export class LoopDetectorImpl implements LoopDetector {
     return {
       type: "xml_repetition",
       threshold: repetition.repetitionCount,
-      xmlTag: repetition.tagName || undefined,
-      xmlRepetitionCount: repetition.repetitionCount || undefined,
+      xmlTag: repetition.tagName !== "" ? repetition.tagName : undefined,
+      xmlRepetitionCount: repetition.repetitionCount > 0 ? repetition.repetitionCount : undefined,
       toolName,
       exceedsTokenLimit: repetition.exceedsTokenLimit,
     }
@@ -434,7 +433,6 @@ export class LoopDetectorImpl implements LoopDetector {
     this.inReasoning = false
     this.sentenceTracker.reset()
     this.xmlRepetitionDetector?.reset()
-    // totalToolTokens is preserved across resets (same stream episode)
   }
 
   clear(): void {
@@ -447,7 +445,6 @@ export class LoopDetectorImpl implements LoopDetector {
     this.inReasoning = false
     this.sentenceTracker.reset()
     this.xmlRepetitionDetector?.clear()
-    this.totalToolTokens = 0
   }
 
   getState(): DetectorState {
