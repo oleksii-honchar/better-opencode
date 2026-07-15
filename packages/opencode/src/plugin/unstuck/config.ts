@@ -6,6 +6,7 @@ export const defaultEvidenceThresholds: EvidenceThresholds = {
   sentenceLoop: 1,
   selfDiagnosis: 2,
   patternLoop: 2,
+  xmlRepetition: 1,
 }
 
 export interface UnstuckConfig {
@@ -23,6 +24,11 @@ export interface UnstuckConfig {
   enableSelfDiagnosisDetection: boolean
   enablePatternLoopDetection: boolean
   patternLoopThreshold: number
+  enableXmlRepetition: boolean
+  xmlRepetitionThreshold: number
+  xmlRepetitionWindowSize: number
+  maxToolInputTokens: number
+  maxTotalToolInputTokens: number
   strategy: "nudge-and-prune" | "abort" | "warn"
   maxNudges: number
   pruneCount: number
@@ -47,6 +53,11 @@ export const defaultConfig: UnstuckConfig = {
   enableSelfDiagnosisDetection: true,
   enablePatternLoopDetection: true,
   patternLoopThreshold: 4,
+  enableXmlRepetition: true,
+  xmlRepetitionThreshold: 4,
+  xmlRepetitionWindowSize: 10,
+  maxToolInputTokens: 4000,
+  maxTotalToolInputTokens: 16000,
   strategy: "nudge-and-prune",
   maxNudges: 2,
   pruneCount: 3,

@@ -2,6 +2,7 @@ import * as Log from "@opencode-ai/core/util/log"
 import { defaultEvidenceThresholds, type UnstuckConfig } from "./config"
 import { LoopDetectedError, type EvidenceAccumulator, type EvidenceRecord, type LoopDetectedInfo, type StepRecord } from "./error"
 import { SentenceTracker } from "./sentence-tracker"
+import { XmlRepetitionDetector, type RepetitionDetected } from "./xml-repetition-detector"
 
 const log = Log.create({ service: "unstuck" })
 
@@ -145,11 +146,37 @@ export class LoopDetectorImpl implements LoopDetector {
 
       case "tool-input-start": {
         log.debug("consumeChunk", { type: "tool-input-start", id: chunk.id, toolName: chunk.toolName })
+        // Initialize xmlRepetitionDetector on first tool-input-start if enabled
+        if (config.enableXmlRepetition && !this.xmlRepetitionDetector) {
+          this.xmlRepetitionDetector = new XmlRepetitionDetector({
+            repetitionThreshold: config.xmlRepetitionThreshold,
+            windowSize: config.xmlRepetitionWindowSize,
+            maxToolInputTokens: config.maxToolInputTokens,
+            maxTotalTokens: config.maxTotalToolInputTokens,
+          })
+        }
+        this.currentToolName = chunk.toolName
+        this.xmlRepetitionDetector?.reset()
         break
       }
 
       case "tool-input-delta": {
         this.currentToolInputAccum[chunk.id] = (this.currentToolInputAccum[chunk.id] ?? "") + chunk.text
+
+        // XML repetition detection
+        if (this.xmlRepetitionDetector && this.currentToolName) {
+          const tokens = Math.ceil(chunk.text.length / 4)
+          this.totalToolTokens += tokens
+          const repetition = this.xmlRepetitionDetector.consumeDelta(
+            this.currentToolName,
+            chunk.text,
+            tokens,
+          )
+          if (repetition) {
+            log.info("loop detected", { type: "xml_repetition", tagName: repetition.tagName, repetitionCount: repetition.repetitionCount, exceedsTokenLimit: repetition.exceedsTokenLimit, toolName: this.currentToolName })
+            return this.mapRepetitionToLoopInfo(repetition, this.currentToolName)
+          }
+        }
         break
       }
 
@@ -382,6 +409,17 @@ export class LoopDetectorImpl implements LoopDetector {
     return undefined
   }
 
+  private mapRepetitionToLoopInfo(repetition: RepetitionDetected, toolName: string): LoopDetectedInfo {
+    return {
+      type: "xml_repetition",
+      threshold: repetition.repetitionCount,
+      xmlTag: repetition.tagName || undefined,
+      xmlRepetitionCount: repetition.repetitionCount || undefined,
+      toolName,
+      exceedsTokenLimit: repetition.exceedsTokenLimit,
+    }
+  }
+
   private computeStepFingerprint(reasoningFp: string, textFp: string, toolSigs: string[]): string {
     return `${reasoningFp}|${textFp}|${toolSigs.join(";")}`
   }
@@ -395,6 +433,8 @@ export class LoopDetectorImpl implements LoopDetector {
     // history is preserved for evidence accumulation within the same stream episode
     this.inReasoning = false
     this.sentenceTracker.reset()
+    this.xmlRepetitionDetector?.reset()
+    // totalToolTokens is preserved across resets (same stream episode)
   }
 
   clear(): void {
@@ -406,6 +446,8 @@ export class LoopDetectorImpl implements LoopDetector {
     this.history = []
     this.inReasoning = false
     this.sentenceTracker.reset()
+    this.xmlRepetitionDetector?.clear()
+    this.totalToolTokens = 0
   }
 
   getState(): DetectorState {
@@ -452,6 +494,9 @@ export class EvidenceAccumulatorImpl implements EvidenceAccumulator {
     }
     if (this.countByType("pattern_loop") >= (thresholds.patternLoop ?? 2)) {
       return { met: true, type: "pattern_loop" }
+    }
+    if (this.countByType("xml_repetition") >= (thresholds.xmlRepetition ?? 1)) {
+      return { met: true, type: "xml_repetition" }
     }
     return { met: false }
   }
