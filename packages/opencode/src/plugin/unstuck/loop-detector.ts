@@ -4,7 +4,7 @@ import { LoopDetectedError, type EvidenceAccumulator, type EvidenceRecord, type 
 import { SentenceTracker } from "./sentence-tracker"
 import { XmlRepetitionDetector, type RepetitionDetected } from "./xml-repetition-detector"
 
-const log = Log.create({ service: "unstuck" })
+const log = Log.create({ service: "unstuck-plugin" })
 
 function arraysEqual(a: readonly unknown[], b: readonly unknown[]): boolean {
   if (a.length !== b.length) return false

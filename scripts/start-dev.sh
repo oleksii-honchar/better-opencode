@@ -266,34 +266,39 @@ if [ "$MODE" = "ide-only" ]; then
   exit 0
 fi
 
-# --- Server logs tab (tail dev.log)
+# --- Server logs tab (tail dev.log — restart-safe)
 if [ "$SERVER_LOGS" = true ]; then
   LOG_DIR="$HOME/.local/share/opencode/log"
   DEV_LOG="$LOG_DIR/dev.log"
 
-  if [ ! -f "$DEV_LOG" ]; then
-    echo "ERROR: Dev log not found at $DEV_LOG"
-    echo "Is the dev server running? Start it with: $0"
-    exit 1
-  fi
-
   echo "Tailing dev server logs: $DEV_LOG"
   echo "Press Ctrl+C to stop."
   echo ""
-  tail -f "$DEV_LOG"
+
+  # Restart-safe log watching loop
+  while true; do
+    # Wait for log file to exist (handles initial start and restart)
+    while [ ! -f "$DEV_LOG" ]; do
+      echo "[waiting] Dev log not found at $DEV_LOG"
+      echo "Is the dev server running? Start it with: $0"
+      echo "Waiting 2 seconds..."
+      sleep 2
+    done
+
+    echo "[connected] Tailing $DEV_LOG"
+
+    tail -f "$DEV_LOG" || true
+
+    echo "[disconnected] Log stream ended — waiting for restart..."
+    sleep 2
+  done
   exit 0
 fi
 
-# --- Tool logs tab (tail tools.log)
+# --- Tool logs tab (tail tools.log — restart-safe)
 if [ "$TOOL_LOGS" = true ]; then
   LOG_DIR="$HOME/.local/share/opencode/log"
   TOOLS_LOG="$LOG_DIR/tools.log"
-
-  if [ ! -f "$TOOLS_LOG" ]; then
-    echo "ERROR: Tools log not found at $TOOLS_LOG"
-    echo "Is the dev server running? Start it with: $0"
-    exit 1
-  fi
 
   # Build include/exclude filter info for display
   FILTER_INFO=""
@@ -338,112 +343,130 @@ if [ "$TOOL_LOGS" = true ]; then
     return 0
   }
 
-  if ! command -v jq &> /dev/null; then
-    echo "WARNING: jq not found; printing raw tool log lines. Install jq for formatted JSONL output."
-    echo ""
+  # Restart-safe log watching loop
+  while true; do
+    # Wait for log file to exist (handles initial start and restart)
+    while [ ! -f "$TOOLS_LOG" ]; do
+      echo "[waiting] Tools log not found at $TOOLS_LOG"
+      echo "Is the dev server running? Start it with: $0"
+      echo "Waiting 2 seconds..."
+      sleep 2
+    done
+
+    echo "[connected] Tailing $TOOLS_LOG"
+
+    if ! command -v jq &> /dev/null; then
+      echo "WARNING: jq not found; printing raw tool log lines. Install jq for formatted JSONL output."
+      echo ""
+      tail -n +1 -f "$TOOLS_LOG" | while IFS= read -r line; do
+        if [ -z "$line" ]; then
+          echo ""
+          continue
+        fi
+        # Extract tool name using node -e for no-jq fallback
+        if [ -n "$INCLUDE_TOOLS" ] || [ -n "$EXCLUDE_TOOLS" ]; then
+          local_tool=$(printf '%s\n' "$line" | node -e '
+            const line = require("fs").readFileSync(0, "utf8").trim();
+            try {
+              const obj = JSON.parse(line);
+              process.stdout.write(obj.tool || obj.toolName || obj.name || "");
+            } catch { process.stdout.write(""); }
+          ' 2>/dev/null) || local_tool=""
+          if ! _tool_log_should_show "$local_tool"; then
+            continue
+          fi
+        fi
+        printf '%s\n' "$line"
+      done || true
+      echo "[disconnected] Log stream ended — waiting for restart..."
+      sleep 2
+      continue
+    fi
+
+    # Build jq arguments for include/exclude filtering
+    # Always provide both --arg inc and --arg exc so jq variables are defined
+    JQ_INC_VAL="${INCLUDE_TOOLS:-}"
+    JQ_EXC_VAL="${EXCLUDE_TOOLS:-}"
+
+    # Build the filter select expression
+    # pick_field returns the tool name; we check against include/exclude lists
+    JQ_FILTER='
+      def pick_field($names):
+        first([$names[] as $name | .[$name] | select(. != null)][]?);
+      (pick_field(["tool", "toolName", "name"]) // "unknown-tool") as $tool
+      | if ($inc // "") != "" then
+          ($inc | split(",")) as $inc_arr
+          | if ($tool | IN($inc_arr[])) then
+              if ($exc // "") != "" then
+                ($exc | split(",")) as $exc_arr
+                | if ($tool | IN($exc_arr[])) then empty else . end
+              else . end
+            else empty end
+          elif ($exc // "") != "" then
+            ($exc | split(",")) as $exc_arr
+            | if ($tool | IN($exc_arr[])) then empty else . end
+          else . end
+    '
+
     tail -n +1 -f "$TOOLS_LOG" | while IFS= read -r line; do
       if [ -z "$line" ]; then
         echo ""
         continue
       fi
-      # Extract tool name using node -e for no-jq fallback
-      if [ -n "$INCLUDE_TOOLS" ] || [ -n "$EXCLUDE_TOOLS" ]; then
-        local_tool=$(printf '%s\n' "$line" | node -e '
-          const line = require("fs").readFileSync(0, "utf8").trim();
-          try {
-            const obj = JSON.parse(line);
-            process.stdout.write(obj.tool || obj.toolName || obj.name || "");
-          } catch { process.stdout.write(""); }
-        ' 2>/dev/null) || local_tool=""
-        if ! _tool_log_should_show "$local_tool"; then
+
+      # Apply include/exclude filter first (only when at least one filter is set)
+      if [ -n "$JQ_INC_VAL" ] || [ -n "$JQ_EXC_VAL" ]; then
+        passed=$(printf '%s\n' "$line" | jq -e "$JQ_FILTER" \
+          --arg inc "$JQ_INC_VAL" --arg exc "$JQ_EXC_VAL" 2>/dev/null) || true
+        if [ -z "$passed" ]; then
           continue
         fi
       fi
-      printf '%s\n' "$line"
-    done
-    exit 0
-  fi
 
-  # Build jq arguments for include/exclude filtering
-  # Always provide both --arg inc and --arg exc so jq variables are defined
-  JQ_INC_VAL="${INCLUDE_TOOLS:-}"
-  JQ_EXC_VAL="${EXCLUDE_TOOLS:-}"
-
-  # Build the filter select expression
-  # pick_field returns the tool name; we check against include/exclude lists
-  JQ_FILTER='
-    def pick_field($names):
-      first([$names[] as $name | .[$name] | select(. != null)][]?);
-    (pick_field(["tool", "toolName", "name"]) // "unknown-tool") as $tool
-    | if ($inc // "") != "" then
-        ($inc | split(",")) as $inc_arr
-        | if ($tool | IN($inc_arr[])) then
-            if ($exc // "") != "" then
-              ($exc | split(",")) as $exc_arr
-              | if ($tool | IN($exc_arr[])) then empty else . end
-            else . end
-          else empty end
-      elif ($exc // "") != "" then
-        ($exc | split(",")) as $exc_arr
-        | if ($tool | IN($exc_arr[])) then empty else . end
-      else . end
-  '
-
-  tail -n +1 -f "$TOOLS_LOG" | while IFS= read -r line; do
-    if [ -z "$line" ]; then
-      echo ""
-      continue
-    fi
-
-    # Apply include/exclude filter first (only when at least one filter is set)
-    if [ -n "$JQ_INC_VAL" ] || [ -n "$JQ_EXC_VAL" ]; then
-      passed=$(printf '%s\n' "$line" | jq -e "$JQ_FILTER" \
-        --arg inc "$JQ_INC_VAL" --arg exc "$JQ_EXC_VAL" 2>/dev/null) || true
-      if [ -z "$passed" ]; then
-        continue
-      fi
-    fi
-
-    if formatted=$(printf '%s\n' "$line" | jq -r '
-      def pick_field($names):
-        first([$names[] as $name | .[$name] | select(. != null)][]?);
-      def as_text:
-        if . == null then null
-        elif type == "string" then .
-        else tojson
-        end;
-      def truncate($max):
-        as_text as $value
-        | if $value == null then null
-          elif ($value | length) > $max then ($value[0:$max] + "...")
-          else $value
+      if formatted=$(printf '%s\n' "$line" | jq -r '
+        def pick_field($names):
+          first([$names[] as $name | .[$name] | select(. != null)][]?);
+        def as_text:
+          if . == null then null
+          elif type == "string" then .
+          else tojson
           end;
-      def field_line($label; $value):
-        if $value == null then empty else "  \($label): \($value)" end;
+        def truncate($max):
+          as_text as $value
+          | if $value == null then null
+            elif ($value | length) > $max then ($value[0:$max] + "...")
+            else $value
+            end;
+        def field_line($label; $value):
+          if $value == null then empty else "  \($label): \($value)" end;
 
-      . as $record
-      | (pick_field(["timestamp", "time", "ts", "createdAt"]) // "unknown-time") as $timestamp
-      | (pick_field(["source", "level"]) // "unknown-source") as $source
-      | (pick_field(["tool", "toolName", "name"]) // "unknown-tool") as $tool
-      | [
-          "────────────────────────────────────────",
-          "\($timestamp)  \($source)  \($tool)",
-          field_line("session"; pick_field(["sessionID", "sessionId", "session_id"])),
-          field_line("message"; pick_field(["messageID", "messageId", "message_id"])),
-          field_line("call"; pick_field(["callID", "callId", "call_id", "toolCallID", "toolCallId"])),
-          field_line("duration"; (pick_field(["duration", "durationMs", "duration_ms", "elapsedMs"]) | if . == null then null else "\(.)ms" end)),
-          field_line("status"; (pick_field(["status", "state"]) | truncate(200))),
-          field_line("args"; (pick_field(["args", "arguments", "input"]) | truncate(1200))),
-          field_line("output"; (pick_field(["output", "result", "content"]) | truncate(1200))),
-          field_line("error"; (pick_field(["error", "err"]) | truncate(1200)))
-        ]
-      | map(select(. != null and . != ""))
-      | .[]
-    ' 2>/dev/null); then
-      printf '%s\n' "$formatted"
-    else
-      printf '%s\n' "$line"
-    fi
+        . as $record
+        | (pick_field(["timestamp", "time", "ts", "createdAt"]) // "unknown-time") as $timestamp
+        | (pick_field(["source", "level"]) // "unknown-source") as $source
+        | (pick_field(["tool", "toolName", "name"]) // "unknown-tool") as $tool
+        | [
+            "────────────────────────────────────────",
+            "\($timestamp)  \($source)  \($tool)",
+            field_line("session"; pick_field(["sessionID", "sessionId", "session_id"])),
+            field_line("message"; pick_field(["messageID", "messageId", "message_id"])),
+            field_line("call"; pick_field(["callID", "callId", "call_id", "toolCallID", "toolCallId"])),
+            field_line("duration"; (pick_field(["duration", "durationMs", "duration_ms", "elapsedMs"]) | if . == null then null else "\(.)ms" end)),
+            field_line("status"; (pick_field(["status", "state"]) | truncate(200))),
+            field_line("args"; (pick_field(["args", "arguments", "input"]) | truncate(1200))),
+            field_line("output"; (pick_field(["output", "result", "content"]) | truncate(1200))),
+            field_line("error"; (pick_field(["error", "err"]) | truncate(1200)))
+          ]
+        | map(select(. != null and . != ""))
+        | .[]
+      ' 2>/dev/null); then
+        printf '%s\n' "$formatted"
+      else
+        printf '%s\n' "$line"
+      fi
+    done || true
+
+    echo "[disconnected] Log stream ended — waiting for restart..."
+    sleep 2
   done
   exit 0
 fi

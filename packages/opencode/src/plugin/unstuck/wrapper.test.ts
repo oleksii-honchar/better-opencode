@@ -301,10 +301,9 @@ describe("wrapWithLoopDetection — max nudges exceeded", () => {
 })
 
 describe("defaultNudgeMessage — xml_repetition", () => {
-  test("produces specific nudge message for xml_repetition type", async () => {
-    // Extract defaultNudgeMessage via the wrapper's nudge flow
-    // We test it indirectly: when xml_repetition is detected with threshold=1,
-    // the nudge message should contain XML repetition guidance
+  test("produces context-aware nudge with tag name and tool name", async () => {
+    // When xml_repetition is detected with xmlTag and toolName,
+    // the nudge message should reference the specific tag and tool
     let callCount = 0
     let receivedPrompt: any[] = []
 
@@ -333,8 +332,6 @@ describe("defaultNudgeMessage — xml_repetition", () => {
       async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
         callCount++
         receivedPrompt = args.prompt as any[]
-        // Call 1: xml_repetition detected, threshold=1 → immediate nudge
-        // Call 2: recovery
         if (callCount === 1) {
           return { stream: createMockStream(xmlRepetitionChunks) }
         }
@@ -363,10 +360,11 @@ describe("defaultNudgeMessage — xml_repetition", () => {
     // Should have called doStream twice (original + nudge)
     expect(callCount).toBe(2)
 
-    // The nudge message should mention XML repetition
+    // The nudge message should reference the specific tag and tool
     const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>
-    expect(lastContent[0]?.text).toContain("repeating XML tags")
-    expect(lastContent[0]?.text).toContain("XML tag repetition")
+    expect(lastContent[0]?.text).toContain("parameter")
+    expect(lastContent[0]?.text).toContain("ReadFile")
+    expect(lastContent[0]?.text).toContain("schema")
   })
 })
 
@@ -915,5 +913,11 @@ describe("wrapWithLoopDetection — new user message resets state", () => {
 
     // History should have accumulated (not reset) — nudge doesn't count as new user message
     expect(detector.getState().historyLength).toBe(historyAfterFirst + 1)
+  })
+})
+
+describe("defaultConfig", () => {
+  test("maxNudges defaults to 10", () => {
+    expect(defaultConfig.maxNudges).toBe(10)
   })
 })

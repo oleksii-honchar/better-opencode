@@ -5,7 +5,7 @@ import { LoopDetectedError, type LoopDetectedInfo } from "./error"
 import type { LoopDetector, StreamChunk } from "./loop-detector"
 import { EvidenceAccumulatorImpl } from "./loop-detector"
 
-const log = Log.create({ service: "unstuck" })
+const log = Log.create({ service: "unstuck-plugin" })
 
 type Message = {
   role: "user" | "assistant" | "system" | "tool"
@@ -29,7 +29,15 @@ function defaultNudgeMessage(info: LoopDetectedInfo): string {
     return "You are oscillating between two states — this is a pattern loop. Break out and take a fundamentally different approach."
   }
   if (info.type === "xml_repetition") {
-    return "You are repeating XML tags. You've produced an XML tag repetition. Stop and provide the actual input."
+    if (info.exceedsTokenLimit) {
+      const toolInfo = info.toolName ? ` for tool '${info.toolName}'` : ""
+      return `Your tool input${toolInfo} has exceeded the token limit. You're generating too much content. Stop and provide a concise, complete tool input with only the required parameters.`
+    }
+    if (info.xmlTag) {
+      const toolInfo = info.toolName ? ` for tool '${info.toolName}'` : ""
+      return `You're repeating the XML tag '<${info.xmlTag}>'${toolInfo}. This indicates you're stuck in a loop producing incomplete parameters. Stop the repetition and compose a complete, valid tool call with all required parameters based on the tool schema provided.`
+    }
+    return "You're repeating XML tags while constructing a tool call. Stop the repetition and provide a complete, valid tool input with proper parameters."
   }
   return "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction."
 }
@@ -132,10 +140,14 @@ async function* streamWithDetection(
         }
         const loopInfo = detector.consumeChunk(mappedChunk, config)
         if (loopInfo) {
-          log.debug("loop detected by detector", {
+          const logLevel = loopInfo.type === "xml_repetition" ? log.info : log.debug
+          logLevel("loop detected by detector", {
             type: loopInfo.type,
             threshold: loopInfo.threshold,
             chunkCount,
+            xmlTag: loopInfo.xmlTag,
+            toolName: loopInfo.toolName,
+            exceedsTokenLimit: loopInfo.exceedsTokenLimit,
           })
           throw new LoopDetectedError(loopInfo)
         }
@@ -250,8 +262,12 @@ export function wrapWithLoopDetection(
               chunkCount,
               type: error.info.type,
               threshold: error.info.threshold,
+              xmlTag: error.info.xmlTag,
+              toolName: error.info.toolName,
+              exceedsTokenLimit: error.info.exceedsTokenLimit,
               strategy: config.strategy,
               nudgeCount,
+              evidenceCount: evidence.count,
             })
 
             // --- Warn mode: log and rethrow ---

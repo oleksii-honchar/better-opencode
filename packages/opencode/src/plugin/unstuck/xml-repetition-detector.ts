@@ -1,6 +1,6 @@
 import * as Log from "@opencode-ai/core/util/log"
 
-const log = Log.create({ service: "unstuck" })
+const log = Log.create({ service: "unstuck-plugin" })
 
 // Regex patterns for XML tag extraction
 // Matches opening/closing pairs: <tagName ...>...</tagName>

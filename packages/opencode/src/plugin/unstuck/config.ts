@@ -83,7 +83,7 @@ export const defaultConfig: UnstuckConfig = {
   xmlPartialTagDetection: true,
   xmlTokenEstimationMultiplier: 1.5,
   strategy: "nudge-and-prune",
-  maxNudges: 2,
+  maxNudges: 10,
   pruneCount: 3,
   nudgeMessage: "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction.",
   logLevel: "info",
