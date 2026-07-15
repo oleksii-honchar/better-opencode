@@ -63,3 +63,4 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0049-line-count-log-rotation.adr.md]] — Line Count Log Rotation for tools.log (ADR-0049, status: accepted)
 - [[0050-pass-original-session-id.adr.md]] — Pass Original Session ID Through Plugin LLM Service (ADR-0050, status: accepted)
 - [[0050-pass-original-session-id.adr.md]] — Pass Original Session ID Through Plugin LLM Service (ADR-0050, status: accepted)
+- [[0051-xml-repetition-detection.adr.md]] — Real-time XML Repetition Detection in Tool Call Streaming (ADR-0051, status: accepted)

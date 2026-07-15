@@ -6,3 +6,5 @@ export { LoopDetectorImpl, normalizeAndFingerprint, computeToolSignature } from 
 export type { LoopDetector, StreamChunk, DetectorState } from "./loop-detector"
 export { SentenceTracker } from "./sentence-tracker"
 export { wrapWithLoopDetection } from "./wrapper"
+export { XmlRepetitionDetector } from "./xml-repetition-detector"
+export type { RepetitionDetected } from "./xml-repetition-detector"

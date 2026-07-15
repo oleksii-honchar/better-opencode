@@ -300,6 +300,144 @@ describe("wrapWithLoopDetection — max nudges exceeded", () => {
   })
 })
 
+describe("defaultNudgeMessage — xml_repetition", () => {
+  test("produces specific nudge message for xml_repetition type", async () => {
+    // Extract defaultNudgeMessage via the wrapper's nudge flow
+    // We test it indirectly: when xml_repetition is detected with threshold=1,
+    // the nudge message should contain XML repetition guidance
+    let callCount = 0
+    let receivedPrompt: any[] = []
+
+    // Simulate xml_repetition detection via tool-input-delta with repeated XML tags
+    const xmlRepetitionChunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-0", toolName: "ReadFile" },
+    ]
+    // Feed enough identical XML tags to trigger xml_repetition (threshold=4)
+    for (let i = 0; i < 5; i++) {
+      xmlRepetitionChunks.push({ type: "tool-input-delta", id: "call-0", delta: "<parameter>value</parameter>" })
+    }
+
+    const recoveryChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "recovery-text", delta: "Recovery response" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() {
+        throw new Error("not implemented")
+      },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        receivedPrompt = args.prompt as any[]
+        // Call 1: xml_repetition detected, threshold=1 → immediate nudge
+        // Call 2: recovery
+        if (callCount === 1) {
+          return { stream: createMockStream(xmlRepetitionChunks) }
+        }
+        return { stream: createMockStream(recoveryChunks) }
+      },
+    }
+
+    const detector = new LoopDetectorImpl()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      maxNudges: 2,
+      strategy: "nudge-and-prune",
+      enableXmlRepetition: true,
+      xmlRepetitionThreshold: 4,
+      xmlRepetitionWindowSize: 10,
+      maxToolInputTokens: 4000,
+      maxTotalToolInputTokens: 16000,
+      detectToolOnlyLoops: false,
+      loopThreshold: 10,
+      nudgeMessage: undefined,
+    }
+    const wrapped = wrapWithLoopDetection(model, detector, config)
+
+    await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+    // Should have called doStream twice (original + nudge)
+    expect(callCount).toBe(2)
+
+    // The nudge message should mention XML repetition
+    const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>
+    expect(lastContent[0]?.text).toContain("repeating XML tags")
+    expect(lastContent[0]?.text).toContain("XML tag repetition")
+  })
+})
+
+describe("wrapWithLoopDetection — xml_repetition thresholdKey mapping", () => {
+  test("xml_repetition uses xmlRepetition thresholdKey when below threshold", async () => {
+    let callCount = 0
+    let receivedPrompt: any[] = []
+
+    // Simulate xml_repetition detection via tool-input-delta with repeated XML tags
+    const xmlRepetitionChunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-0", toolName: "ReadFile" },
+    ]
+    // Feed enough identical XML tags to trigger xml_repetition (threshold=4)
+    for (let i = 0; i < 5; i++) {
+      xmlRepetitionChunks.push({ type: "tool-input-delta", id: "call-0", delta: "<parameter>value</parameter>" })
+    }
+
+    // Recovery chunks — clean finish
+    const recoveryChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "recovery-text", delta: "Recovery response" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() {
+        throw new Error("not implemented")
+      },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        receivedPrompt = args.prompt as any[]
+        // Call 1: xml_repetition detected, evidence=1, below custom threshold=2 → restart
+        // Call 2: recovery (no loop)
+        if (callCount === 1) {
+          return { stream: createMockStream(xmlRepetitionChunks) }
+        }
+        return { stream: createMockStream(recoveryChunks) }
+      },
+    }
+
+    const detector = new LoopDetectorImpl()
+    // Set xmlRepetition threshold to 2 so 1 detection is below threshold
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      maxNudges: 2,
+      strategy: "nudge-and-prune",
+      enableXmlRepetition: true,
+      xmlRepetitionThreshold: 4,
+      xmlRepetitionWindowSize: 10,
+      maxToolInputTokens: 4000,
+      maxTotalToolInputTokens: 16000,
+      detectToolOnlyLoops: false,
+      loopThreshold: 10,
+      evidenceThresholds: { ...defaultConfig.evidenceThresholds, xmlRepetition: 2 },
+    }
+    const wrapped = wrapWithLoopDetection(model, detector, config)
+
+    const initialMessages = [{ role: "user", content: "Hello" }]
+    await collectStream(wrapped, initialMessages)
+
+    // Should have called doStream twice (original + restart below threshold)
+    expect(callCount).toBe(2)
+
+    // Second call should use original args (no nudge injected — below threshold)
+    expect(receivedPrompt).toEqual(initialMessages)
+  })
+})
+
 describe("wrapWithLoopDetection — evidence accumulation", () => {
   test("below threshold — continues stream without nudge", async () => {
     let callCount = 0

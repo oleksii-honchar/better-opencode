@@ -2,11 +2,13 @@
 type: concept
 title: "Unstuck Loop Detection System"
 createdAt: "2026-06-21T00:00:00Z"
-tags: [unstuck, loop-detection, fingerprint, nudge-and-prune]
+tags: [unstuck, loop-detection, fingerprint, nudge-and-prune, xml-repetition]
 see_also:
   - "../specifications/0004-unstuck-loop-detection.spec.md"
+  - "../specifications/0009-xml-repetition-detection.spec.md"
   - "../adrs/0016-clear-detector-history.adr.md"
   - "../adrs/0020-detector-state-sharing.adr.md"
+  - "../adrs/0051-xml-repetition-detection.adr.md"
 ---
 
 # CONCEPT-0007: Unstuck Loop Detection System
@@ -24,7 +26,7 @@ LLM agents frequently enter behavioral loops (e.g., 697+ iterations of the same 
 ## Key Details
 
 - **Architecture:** Two-level — `LoopDetectorImpl` (detection) + `wrapWithLoopDetection` (stream wrapper)
-- **Detection types:** 5 types — `step_loop` (identical step fingerprints), `tool_loop` (identical tools with gap tolerance), `sentence_loop` (periodic sentence repetition within a step), `self_diagnosis_loop` (model acknowledges being stuck), `pattern_loop` (period-2 alternating pattern)
+- **Detection types:** 6 types — `step_loop` (identical step fingerprints), `tool_loop` (identical tools with gap tolerance), `sentence_loop` (periodic sentence repetition within a step), `self_diagnosis_loop` (model acknowledges being stuck), `pattern_loop` (period-2 alternating pattern), `xml_repetition` (repeating XML tags within tool input stream)
 - **Fingerprinting:** FNV-1a hash of normalized thinking text + tool signatures → step fingerprint
 - **Evidence accumulation:** Multiple detection events must be accumulated before intervention (thresholds: 2 for step/tool/pattern, 1 for self-diagnosis/sentence)
 - **Intervention strategies:** `nudge-and-prune` (inject user message + prune looping messages), `abort` (throw), `warn` (log and rethrow)

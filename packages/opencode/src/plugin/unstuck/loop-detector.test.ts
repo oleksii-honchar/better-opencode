@@ -1707,13 +1707,17 @@ describe("LoopDetector — xml_repetition integration", () => {
         { type: "tool-input-end", id: `call-${i}`, toolName: "ReadFile", input: { path: "/foo" } },
         config,
       )
+      detector.consumeChunk(
+        { type: "finish", finishReason: "tool-calls" },
+        config,
+      )
     }
 
-    const result = detector.consumeChunk(
-      { type: "finish", finishReason: "tool-calls" },
-      config,
-    )
+    const state = detector.getState()
+    expect(state.historyLength).toBe(3)
 
+    // Re-check via finalizeStep to trigger detection
+    const result = detector.finalizeStep(config, "tool-calls")
     expect(result).toBeDefined()
     expect(result?.type).toBe("step_loop")
   })
@@ -1737,13 +1741,17 @@ describe("LoopDetector — xml_repetition integration", () => {
         { type: "tool-input-end", id: `call-${i}`, toolName: "ReadFile", input: { path: "/foo" } },
         config,
       )
+      detector.consumeChunk(
+        { type: "finish", finishReason: "tool-calls" },
+        config,
+      )
     }
 
-    const result = detector.consumeChunk(
-      { type: "finish", finishReason: "tool-calls" },
-      config,
-    )
+    const state = detector.getState()
+    expect(state.historyLength).toBe(3)
 
+    // Re-check via finalizeStep to trigger detection
+    const result = detector.finalizeStep(config, "tool-calls")
     expect(result).toBeDefined()
     expect(result?.type).toBe("tool_loop")
   })
@@ -1757,8 +1765,8 @@ describe("LoopDetector — xml_repetition integration", () => {
 
     detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, config)
 
-    // 1 char = ceil(1/4) = 1 token — should trigger with limit 1
-    const result = detector.consumeChunk({ type: "tool-input-delta", id: "call-0", text: "a" }, config)
+    // 5 chars = ceil(5/4) = 2 tokens — exceeds limit 1
+    const result = detector.consumeChunk({ type: "tool-input-delta", id: "call-0", text: "abcde" }, config)
     expect(result).toBeDefined()
     expect(result?.type).toBe("xml_repetition")
     expect(result?.exceedsTokenLimit).toBe(true)

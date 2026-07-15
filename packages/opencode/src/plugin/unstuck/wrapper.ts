@@ -28,6 +28,9 @@ function defaultNudgeMessage(info: LoopDetectedInfo): string {
   if (info.type === "pattern_loop") {
     return "You are oscillating between two states — this is a pattern loop. Break out and take a fundamentally different approach."
   }
+  if (info.type === "xml_repetition") {
+    return "You are repeating XML tags. You've produced an XML tag repetition. Stop and provide the actual input."
+  }
   return "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction."
 }
 
@@ -270,6 +273,7 @@ export function wrapWithLoopDetection(
                 toolLoop: evidence.countByType("tool_loop"),
                 sentenceLoop: evidence.countByType("sentence_loop"),
                 selfDiagnosis: evidence.countByType("self_diagnosis_loop"),
+                xmlRepetition: evidence.countByType("xml_repetition"),
               },
             })
 
@@ -282,6 +286,7 @@ export function wrapWithLoopDetection(
                 : error.info.type === "sentence_loop" ? "sentenceLoop"
                 : error.info.type === "self_diagnosis_loop" ? "selfDiagnosis"
                 : error.info.type === "pattern_loop" ? "patternLoop"
+                : error.info.type === "xml_repetition" ? "xmlRepetition"
                 : "stepLoop"
               log.info("loop detected but evidence below threshold — continuing stream", {
                 type: error.info.type,

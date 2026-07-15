@@ -368,12 +368,30 @@ export const Info = Schema.Struct({
           sentenceLoop: Schema.optional(PositiveInt).annotate({
             description: "Number of sentence_loop detections before intervention (default: 1)",
           }),
+          xmlRepetition: Schema.optional(PositiveInt).annotate({
+            description: "Number of xml_repetition detections before intervention (default: 1)",
+          }),
         }),
       ).annotate({
         description: "Evidence thresholds for each loop type before nudge-and-prune intervention is triggered",
       }),
       evidenceWindow: Schema.optional(PositiveInt).annotate({
         description: "Maximum age of evidence records before they expire (in seconds, default: Infinity — no eviction)",
+      }),
+      enableXmlRepetition: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable XML tag repetition detection during tool input streaming (default: true)",
+      }),
+      xmlRepetitionThreshold: Schema.optional(PositiveInt).annotate({
+        description: "Number of identical XML tags to trigger repetition detection (default: 4)",
+      }),
+      xmlRepetitionWindowSize: Schema.optional(PositiveInt).annotate({
+        description: "Lookback window size for XML tag repetition (default: 10)",
+      }),
+      maxToolInputTokens: Schema.optional(PositiveInt).annotate({
+        description: "Maximum tokens per tool call before interruption (default: 4000)",
+      }),
+      maxTotalToolInputTokens: Schema.optional(PositiveInt).annotate({
+        description: "Maximum total tokens across all tool calls before interruption (default: 16000)",
       }),
     }),
   ).annotate({

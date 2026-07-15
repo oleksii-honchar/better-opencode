@@ -64,7 +64,7 @@ export class XmlRepetitionDetector {
     this.totalTokens += tokens
 
     // Check per-tool token limit
-    if (this.currentToolTokens >= this.config.maxToolInputTokens) {
+    if (this.currentToolTokens > this.config.maxToolInputTokens) {
       log.info("XmlRepetitionDetector — per-tool token limit exceeded", {
         tool: _toolName,
         tokens: this.currentToolTokens,
@@ -80,7 +80,7 @@ export class XmlRepetitionDetector {
     }
 
     // Check total token limit
-    if (this.totalTokens >= this.config.maxTotalTokens) {
+    if (this.totalTokens > this.config.maxTotalTokens) {
       log.info("XmlRepetitionDetector — total token limit exceeded", {
         tokens: this.totalTokens,
         limit: this.config.maxTotalTokens,
