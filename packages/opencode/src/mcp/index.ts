@@ -8,6 +8,7 @@ import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
 import {
   CallToolResultSchema,
   ListToolsResultSchema,
+  McpError,
   ToolSchema,
   type Tool as MCPToolDef,
   ToolListChangedNotificationSchema,
@@ -128,6 +129,17 @@ function isOutputSchemaValidationError(error: Error) {
   )
 }
 
+/**
+ * Detects MCP output schema validation errors that indicate structured
+ * content mismatches (e.g., missing optional fields like pagination in
+ * the JSON Schema produced by toJsonSchemaCompat).
+ */
+function isStructuredOutputValidationError(error: unknown): boolean {
+  if (!(error instanceof McpError)) return false
+  if (error.code !== -32602) return false
+  return error.message.startsWith("Structured content does not match the tool's output schema")
+}
+
 function listTools(key: string, client: MCPClient, timeout: number) {
   return Effect.tryPromise({
     try: () => client.listTools(undefined, { timeout }),
@@ -197,17 +209,18 @@ export function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?:
     execute: async (args: unknown) => {
       // Resolve opencode://attachment URIs in args before forwarding
       const resolvedArgs = resolveAttachmentUris(args)
+      const callParams = {
+        name: mcpTool.name,
+        arguments: (resolvedArgs || {}) as Record<string, unknown>,
+      }
       log.debug("MCP tool execute", {
         toolName: mcpTool.name,
-        argKeys: Object.keys((resolvedArgs || {}) as Record<string, unknown>),
+        argKeys: Object.keys(callParams.arguments),
         argTypes: typeof resolvedArgs,
       })
       try {
         return await client.callTool(
-          {
-            name: mcpTool.name,
-            arguments: (resolvedArgs || {}) as Record<string, unknown>,
-          },
+          callParams,
           CallToolResultSchema,
           {
             resetTimeoutOnProgress: true,
@@ -215,6 +228,29 @@ export function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?:
           },
         )
       } catch (error) {
+        // MCP SDK v1.27+ validates structuredContent against the tool's outputSchema JSON Schema.
+        // The server's Zod validation is already sufficient; AJV validation of the JSON Schema
+        // produced by toJsonSchemaCompat can produce false positives (e.g., missing optional
+        // fields like pagination). Re-fetch via the Protocol layer which bypasses
+        // getToolOutputValidator() while still validating CallToolResultSchema.
+        if (isStructuredOutputValidationError(error)) {
+          const mcpError = error as McpError
+          log.warn("MCP structuredContent validation false positive — re-fetching without outputSchema check", {
+            toolName: mcpTool.name,
+            error: mcpError.message,
+          })
+          return await client.request(
+            {
+              method: "tools/call",
+              params: callParams,
+            },
+            CallToolResultSchema,
+            {
+              resetTimeoutOnProgress: true,
+              timeout,
+            },
+          )
+        }
         log.warn("MCP tool call failed", { toolName: mcpTool.name, error })
         throw error
       }
