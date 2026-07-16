@@ -199,7 +199,20 @@ export function buildToolSchema(inputSchema: JSONSchema7): JSONSchema7 {
 }
 
 // Convert MCP tool definition to AI SDK Tool type
-export function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number): Tool {
+export function convertMcpTool(
+  mcpTool: MCPToolDef,
+  client: MCPClient,
+  timeout?: number,
+  toolOptions?: {
+    mcpServerName?: string
+    features?: {
+      mcpFilePathBase64Encode?: {
+        enable?: boolean
+        includeMCP?: string[]
+      }
+    }
+  },
+): Tool {
   const inputSchema = mcpTool.inputSchema
   const schema = buildToolSchema(inputSchema as JSONSchema7)
 
@@ -207,8 +220,14 @@ export function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?:
     description: mcpTool.description ?? "",
     inputSchema: jsonSchema(schema),
     execute: async (args: unknown) => {
-      // Resolve opencode://attachment URIs in args before forwarding
-      const resolvedArgs = resolveAttachmentUris(args)
+      // Build attachment resolution options from toolOptions
+      const feat = toolOptions?.features?.mcpFilePathBase64Encode
+      const attachmentOptions: AttachmentResolutionOptions = {
+        currentMcpServer: toolOptions?.mcpServerName,
+        featureEnabled: feat?.enable ?? true,
+        includeMCP: feat?.includeMCP,
+      }
+      const resolvedArgs = resolveAttachmentUris(args, attachmentOptions)
       const callParams = {
         name: mcpTool.name,
         arguments: (resolvedArgs || {}) as Record<string, unknown>,
@@ -258,6 +277,32 @@ export function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?:
   })
 }
 
+/** Options controlling whether file paths are resolved to base64 for a given MCP server */
+export interface AttachmentResolutionOptions {
+  /** MCP server name (client key from opencode.json, e.g., "hugging-kreuzberg") */
+  currentMcpServer?: string
+  /** Only resolve file paths for these MCP server names */
+  includeMCP?: string[]
+  /** Feature master switch — when false, disables all file-path resolution */
+  featureEnabled?: boolean
+}
+
+/**
+ * Inclusion gate: should we resolve this file path to base64?
+ * No options → legacy behavior (resolve everything).
+ * Feature disabled → no resolution at all.
+ * Empty/unset includeMCP → legacy fallback (resolve all).
+ * Server in include list → resolve.
+ * Server NOT in include list → skip resolution.
+ */
+function shouldResolveFilePath(options?: AttachmentResolutionOptions): boolean {
+  if (!options) return true
+  if (options.featureEnabled === false) return false
+  if (!options.includeMCP || options.includeMCP.length === 0) return true
+  if (options.includeMCP.includes(options.currentMcpServer ?? "")) return true
+  return false
+}
+
 /**
  * Recursively resolves opencode://attachment URIs and absolute file paths
  * in args to base64 strings. Walks the entire arg tree (objects, arrays)
@@ -265,8 +310,9 @@ export function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?:
  * and any absolute file path with the base64-encoded file content.
  *
  * File paths are limited to 10MB; errors are thrown with details.
+ * When options are provided, file-path resolution is gated by inclusion rules.
  */
-export function resolveAttachmentUris(args: unknown): unknown {
+export function resolveAttachmentUris(args: unknown, options?: AttachmentResolutionOptions): unknown {
   if (typeof args === "string") {
     if (args.startsWith("opencode://attachment/")) {
       const base64 = resolveAttachment(args)
@@ -276,7 +322,7 @@ export function resolveAttachmentUris(args: unknown): unknown {
       }
       // If not found, keep original — the tool will handle the error
       log.warn("attachment URI not resolved", { uri: args })
-    } else if (args.startsWith("/")) {
+    } else if (args.startsWith("/") && shouldResolveFilePath(options)) {
       // Detect absolute file paths and convert to base64.
       // Only convert if the file actually exists — non-existent paths
       // may be write destinations (e.g., screenshot filePath) and should
@@ -309,12 +355,12 @@ export function resolveAttachmentUris(args: unknown): unknown {
     return args
   }
   if (Array.isArray(args)) {
-    return args.map(resolveAttachmentUris)
+    return args.map((v) => resolveAttachmentUris(v, options))
   }
   if (args !== null && typeof args === "object") {
     const result: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
-      result[key] = resolveAttachmentUris(value)
+      result[key] = resolveAttachmentUris(value, options)
     }
     return result
   }
@@ -880,7 +926,10 @@ export const layer = Layer.effect(
               const timeout = entry?.timeout ?? defaultTimeout
               for (const mcpTool of filteredTools) {
                 const toolKey = sanitize(clientName) + "_" + sanitize(mcpTool.name)
-                result[toolKey] = convertMcpTool(mcpTool, client, timeout)
+                result[toolKey] = convertMcpTool(mcpTool, client, timeout, {
+                  mcpServerName: clientName,
+                  features: cfg.features,
+                })
                 ;(result[toolKey] as any).server = clientName
               }
 
@@ -896,7 +945,10 @@ export const layer = Layer.effect(
               const timeout = entry?.timeout ?? defaultTimeout
               for (const mcpTool of listed) {
                 const toolKey = sanitize(clientName) + "_" + sanitize(mcpTool.name)
-                result[toolKey] = convertMcpTool(mcpTool, client, timeout)
+                result[toolKey] = convertMcpTool(mcpTool, client, timeout, {
+                  mcpServerName: clientName,
+                  features: cfg.features,
+                })
                 ;(result[toolKey] as any).server = clientName
               }
             }

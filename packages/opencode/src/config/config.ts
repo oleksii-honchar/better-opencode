@@ -25,6 +25,7 @@ import { containsPath, type InstanceContext } from "../project/instance-context"
 import { NonNegativeInt, PositiveInt, type DeepMutable } from "@opencode-ai/core/schema"
 import { ConfigAgent } from "./agent"
 import { ConfigAttachment } from "./attachment"
+import { ConfigFeatures } from "./features"
 import { ConfigCommand } from "./command"
 import { ConfigFormatter } from "./formatter"
 import { ConfigLayout } from "./layout"
@@ -253,6 +254,9 @@ export const Info = Schema.Struct({
   ).annotate({ description: "Tool visibility filters. When a filter is disabled, the tool is hidden from models." }),
   attachment: Schema.optional(ConfigAttachment.Info).annotate({
     description: "Attachment processing configuration, including image size limits and resizing behavior",
+  }),
+  features: Schema.optional(ConfigFeatures.Info).annotate({
+    description: "Feature flags for opt-in behaviors (e.g., MCP file path base64 encoding)",
   }),
   enterprise: Schema.optional(
     Schema.Struct({
