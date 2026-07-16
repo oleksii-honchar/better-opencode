@@ -908,7 +908,7 @@ describe("wrapWithLoopDetection — new user message resets state", () => {
     // Second call — same 1 user message + nudge message (nudge excluded from count)
     await collectStream(wrapped, [
       { role: "user", content: "Hello" },
-      { role: "user", content: { type: "text", text: "nudge" }, _unstuckNudge: true },
+      { role: "user", content: { type: "text", text: "nudge" }, _unstuckNudge: true } as any,
     ])
 
     // History should have accumulated (not reset) — nudge doesn't count as new user message

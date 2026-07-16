@@ -105,6 +105,8 @@ export class LoopDetectorImpl implements LoopDetector {
   private currentReasoning = ""
   private currentText = ""
   private currentTools: string[] = []
+  private currentToolName = ""
+  private xmlRepetitionDetector?: XmlRepetitionDetector
   private history: StepRecord[] = []
   private inReasoning = false
   private sentenceTracker = new SentenceTracker()
