@@ -137,7 +137,7 @@ function isOutputSchemaValidationError(error: Error) {
 function isStructuredOutputValidationError(error: unknown): boolean {
   if (!(error instanceof McpError)) return false
   if (error.code !== -32602) return false
-  return error.message.startsWith("Structured content does not match the tool's output schema")
+  return error.message.includes("Structured content does not match the tool's output schema")
 }
 
 function listTools(key: string, client: MCPClient, timeout: number) {
