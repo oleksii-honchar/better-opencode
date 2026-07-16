@@ -63,10 +63,10 @@ function makeToolPart(input: unknown, status: MessageV2.ToolState["status"] = "c
 }
 
 describe("session.message-v2.toModelMessagesValidation", () => {
-  test("valid input (object) succeeds with JSON string", () => {
+  test("valid input (object) succeeds with raw object (no JSON.stringify)", () => {
     const part = makeToolPart({ query: "foo" })
     const result = Effect.runSync(MessageV2.toModelMessagesValidation(part))
-    expect(result).toBe('{"query":"foo"}')
+    expect(result).toEqual({ query: "foo" })
   })
 
   test("valid input (string) succeeds with original string", () => {
@@ -75,10 +75,10 @@ describe("session.message-v2.toModelMessagesValidation", () => {
     expect(result).toBe('{"query":"foo"}')
   })
 
-  test("valid input (empty object) succeeds with {} string", () => {
+  test("valid input (empty object) succeeds with raw empty object", () => {
     const part = makeToolPart({})
     const result = Effect.runSync(MessageV2.toModelMessagesValidation(part))
-    expect(result).toBe("{}")
+    expect(result).toEqual({})
   })
 
   test("undefined input fails with InvalidRequestReason mentioning undefined", () => {
@@ -119,22 +119,9 @@ describe("session.message-v2.toModelMessagesValidation", () => {
     expect(error.message).toContain("arguments")
   })
 
-  test("empty string input fails with InvalidRequestReason about empty arguments", () => {
+  test("empty string input succeeds with raw empty string (no serialization)", () => {
     const part = makeToolPart("")
-    let capturedError: unknown = undefined
-    const result = Effect.runSync(
-      MessageV2.toModelMessagesValidation(part)
-        .pipe(
-          Effect.catch((e) => { capturedError = e; return Effect.succeed("caught") }),
-        ),
-    )
-    expect(result).toBe("caught")
-    expect(capturedError instanceof LLMError).toBe(true)
-    const error = capturedError as LLMError
-    expect(error.reason._tag).toBe("InvalidRequest")
-    expect(error.message).toContain("call_test")
-    expect(error.message).toContain("test_tool")
-    expect(error.message).toContain("empty")
-    expect(error.message).toContain("arguments")
+    const result = Effect.runSync(MessageV2.toModelMessagesValidation(part))
+    expect(result).toBe("")
   })
 })

@@ -637,14 +637,14 @@ function makeInvalidRequest(message: string): LLMError {
 }
 
 /**
- * Validate and serialize a tool call's input to JSON. Ensures
- * `part.state.input` is present (not `undefined`/`null`) and produces
- * a non-empty JSON string. Returns an Effect that succeeds with the
- * serialized string or fails with `InvalidRequestReason`.
+ * Validate a tool call's input. Ensures `part.state.input` is present
+ * (not `undefined`/`null`). Returns an Effect that succeeds with the
+ * raw input value or fails with `InvalidRequestReason`. Does NOT
+ * serialize to JSON — protocol layer handles that via `encodeJson`.
  */
 export const toModelMessagesValidation = (
   part: ToolPart,
-): Effect.Effect<string, LLMError, never> => {
+): Effect.Effect<unknown, LLMError, never> => {
   const input = part.state.input
   if (input === undefined || input === null) {
     const missing = input === undefined ? "undefined" : "null"
@@ -660,21 +660,7 @@ export const toModelMessagesValidation = (
       ),
     )
   }
-  const json = typeof input === "string" ? input : JSON.stringify(input)
-  if (json.length === 0) {
-    return Effect.logWarning(
-      `Validation failure: tool call "${part.callID}" for tool "${part.tool}" produced empty "arguments" after serialization, message ${part.messageID}, part ${part.id}`,
-    ).pipe(
-      Effect.flatMap(() =>
-        Effect.fail(
-          makeInvalidRequest(
-            `Tool call "${part.callID}" for tool "${part.tool}" produced empty "arguments" after serialization`,
-          ),
-        ),
-      ),
-    )
-  }
-  return Effect.succeed(json)
+  return Effect.succeed(input)
 }
 
 export const toModelMessagesEffect = Effect.fnUntraced(function* (
@@ -860,12 +846,12 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
                   }
                 : outputText
 
-            const validatedInput = yield* toModelMessagesValidation(part)
+            yield* toModelMessagesValidation(part)
             assistantMessage.parts.push({
               type: ("tool-" + part.tool) as `tool-${string}`,
               state: "output-available",
               toolCallId: part.callID,
-              input: validatedInput,
+              input: part.state.input,
               output,
               ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
               ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
@@ -874,23 +860,23 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           if (part.state.status === "error") {
             const output = part.state.metadata?.interrupted === true ? part.state.metadata.output : undefined
             if (typeof output === "string") {
-              const validatedInput = yield* toModelMessagesValidation(part)
+              yield* toModelMessagesValidation(part)
               assistantMessage.parts.push({
                 type: ("tool-" + part.tool) as `tool-${string}`,
                 state: "output-available",
                 toolCallId: part.callID,
-                input: validatedInput,
+                input: part.state.input,
                 output,
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
               })
             } else {
-              const validatedInput = yield* toModelMessagesValidation(part)
+              yield* toModelMessagesValidation(part)
               assistantMessage.parts.push({
                 type: ("tool-" + part.tool) as `tool-${string}`,
                 state: "output-error",
                 toolCallId: part.callID,
-                input: validatedInput,
+                input: part.state.input,
                 errorText: part.state.error,
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
@@ -900,12 +886,12 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           // Handle pending/running tool calls to prevent dangling tool_use blocks
           // Anthropic/Claude APIs require every tool_use to have a corresponding tool_result
           if (part.state.status === "pending" || part.state.status === "running") {
-            const validatedInput = yield* toModelMessagesValidation(part)
+            yield* toModelMessagesValidation(part)
             assistantMessage.parts.push({
               type: ("tool-" + part.tool) as `tool-${string}`,
               state: "output-error",
               toolCallId: part.callID,
-              input: validatedInput,
+              input: part.state.input,
               errorText: "[Tool execution was interrupted]",
               ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
               ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),

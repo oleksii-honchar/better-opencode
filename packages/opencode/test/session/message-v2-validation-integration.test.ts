@@ -389,7 +389,7 @@ describe("session.message-v2.toModelMessagesEffect validation integration", () =
     expect(error.message).toContain("call-bad")
   })
 
-  test("completed tool with empty string input fails with LLMError", async () => {
+  test("completed tool with empty string input succeeds (no serialization validation)", async () => {
     const userID = "m-user"
     const assistantID = "m-assistant"
 
@@ -406,18 +406,10 @@ describe("session.message-v2.toModelMessagesEffect validation integration", () =
       },
     ]
 
-    let capturedError: unknown = undefined
-    try {
-      await MessageV2.toModelMessages(input, model)
-    } catch (e) {
-      capturedError = e
-    }
-
-    expect(capturedError).toBeDefined()
-    expect(capturedError instanceof LLMError).toBe(true)
-    const error = capturedError as LLMError
-    expect(error.reason._tag).toBe("InvalidRequest")
-    expect(error.message).toContain("empty")
+    const result = await MessageV2.toModelMessages(input, model)
+    expect(result).toHaveLength(3)
+    const assistantMsg = result.find((m) => m.role === "assistant")
+    expect(assistantMsg).toBeDefined()
   })
 
   test("completed tool with empty object input succeeds ({} is valid)", async () => {
@@ -443,7 +435,7 @@ describe("session.message-v2.toModelMessagesEffect validation integration", () =
     expect(assistantMsg).toBeDefined()
   })
 
-  test("validated JSON string is used as input (serialized form)", async () => {
+  test("tool call input is raw object (not double-serialized)", async () => {
     const userID = "m-user"
     const assistantID = "m-assistant"
 
@@ -461,13 +453,12 @@ describe("session.message-v2.toModelMessagesEffect validation integration", () =
     ]
 
     const result = await MessageV2.toModelMessages(input, model)
-    // The tool-call input should be the serialized JSON string
+    // The tool-call input should be the raw object (no JSON.stringify from validation)
     const assistantMsg = result.find((m) => m.role === "assistant")
     const content = assistantMsg?.content as any[]
     const toolCall = content?.find((p) => p.type === "tool-call")
     expect(toolCall).toBeDefined()
-    // After validation, input is the JSON string (which AI SDK then parses)
-    // The key point: the input value comes from validation, not raw part.state.input
-    expect(toolCall.input).toBe('{"cmd":"ls"}')
+    // Input is now the raw object — protocol layer handles serialization via encodeJson
+    expect(toolCall.input).toEqual({ cmd: "ls" })
   })
 })
