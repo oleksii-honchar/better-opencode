@@ -244,6 +244,13 @@ export const Info = Schema.Struct({
   layout: Schema.optional(ConfigLayout.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermission.Info),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
+  toolFilter: Schema.optional(
+    Schema.Struct({
+      applyPatch: Schema.optional(
+        Schema.Struct({ enabled: Schema.optional(Schema.Boolean) }),
+      ),
+    }),
+  ).annotate({ description: "Tool visibility filters. When a filter is disabled, the tool is hidden from models." }),
   attachment: Schema.optional(ConfigAttachment.Info).annotate({
     description: "Attachment processing configuration, including image size limits and resizing behavior",
   }),

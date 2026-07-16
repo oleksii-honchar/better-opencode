@@ -111,3 +111,32 @@ describe("Config Schema — unstuck xml_repetition fields", () => {
     expect(parsed.unstuck?.maxTotalToolInputTokens).toBe(20000)
   })
 })
+
+describe("Config Schema — toolFilter", () => {
+  test("toolFilter is optional — defaults to undefined", () => {
+    const parsed = Schema.decodeSync(Info)({} as Parameters<typeof Schema.decodeSync>[1])
+    expect(parsed.toolFilter).toBeUndefined()
+  })
+
+  test("toolFilter.applyPatch.enabled can be set to true", () => {
+    const parsed = Schema.decodeSync(Info)({
+      toolFilter: { applyPatch: { enabled: true } },
+    } as Parameters<typeof Schema.decodeSync>[1])
+    expect(parsed.toolFilter?.applyPatch?.enabled).toBe(true)
+  })
+
+  test("toolFilter.applyPatch.enabled can be set to false", () => {
+    const parsed = Schema.decodeSync(Info)({
+      toolFilter: { applyPatch: { enabled: false } },
+    } as Parameters<typeof Schema.decodeSync>[1])
+    expect(parsed.toolFilter?.applyPatch?.enabled).toBe(false)
+  })
+
+  test("backward compatible — existing config without toolFilter still parses", () => {
+    const parsed = Schema.decodeSync(Info)({
+      tools: { edit: true },
+    } as Parameters<typeof Schema.decodeSync>[1])
+    expect(parsed.tools).toEqual({ edit: true })
+    expect(parsed.toolFilter).toBeUndefined()
+  })
+})
