@@ -2,6 +2,7 @@ CREATE TABLE `session_message` (
 	`id` text PRIMARY KEY,
 	`session_id` text NOT NULL,
 	`type` text NOT NULL,
+	`seq` integer,
 	`time_created` integer NOT NULL,
 	`time_updated` integer NOT NULL,
 	`data` text NOT NULL,
