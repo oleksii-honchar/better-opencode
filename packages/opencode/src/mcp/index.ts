@@ -8,7 +8,6 @@ import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
 import {
   CallToolResultSchema,
   ListToolsResultSchema,
-  McpError,
   ToolSchema,
   type Tool as MCPToolDef,
   ToolListChangedNotificationSchema,
@@ -35,6 +34,7 @@ import { resolve as resolveAttachment } from "@/session/attachment"
 import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { LenientJsonSchemaValidator } from "./lenient-validator"
 
 const log = Log.create({ service: "mcp" })
 const DEFAULT_TIMEOUT = 30_000
@@ -127,17 +127,6 @@ function isOutputSchemaValidationError(error: Error) {
   return /can't resolve reference|resolves to more than one schema|outputSchema|schema.*reference|reference.*schema/i.test(
     error.message,
   )
-}
-
-/**
- * Detects MCP output schema validation errors that indicate structured
- * content mismatches (e.g., missing optional fields like pagination in
- * the JSON Schema produced by toJsonSchemaCompat).
- */
-function isStructuredOutputValidationError(error: unknown): boolean {
-  if (!(error instanceof McpError)) return false
-  if (error.code !== -32602) return false
-  return error.message.includes("Structured content does not match the tool's output schema")
 }
 
 function listTools(key: string, client: MCPClient, timeout: number) {
@@ -237,42 +226,14 @@ export function convertMcpTool(
         argKeys: Object.keys(callParams.arguments),
         argTypes: typeof resolvedArgs,
       })
-      try {
-        return await client.callTool(
-          callParams,
-          CallToolResultSchema,
-          {
-            resetTimeoutOnProgress: true,
-            timeout,
-          },
-        )
-      } catch (error) {
-        // MCP SDK v1.27+ validates structuredContent against the tool's outputSchema JSON Schema.
-        // The server's Zod validation is already sufficient; AJV validation of the JSON Schema
-        // produced by toJsonSchemaCompat can produce false positives (e.g., missing optional
-        // fields like pagination). Re-fetch via the Protocol layer which bypasses
-        // getToolOutputValidator() while still validating CallToolResultSchema.
-        if (isStructuredOutputValidationError(error)) {
-          const mcpError = error as McpError
-          log.warn("MCP structuredContent validation false positive — re-fetching without outputSchema check", {
-            toolName: mcpTool.name,
-            error: mcpError.message,
-          })
-          return await client.request(
-            {
-              method: "tools/call",
-              params: callParams,
-            },
-            CallToolResultSchema,
-            {
-              resetTimeoutOnProgress: true,
-              timeout,
-            },
-          )
-        }
-        log.warn("MCP tool call failed", { toolName: mcpTool.name, error })
-        throw error
-      }
+      return await client.callTool(
+        callParams,
+        CallToolResultSchema,
+        {
+          resetTimeoutOnProgress: true,
+          timeout,
+        },
+      )
     },
   })
 }
@@ -473,7 +434,7 @@ export const layer = Layer.effect(
         (t) =>
           Effect.tryPromise({
             try: () => {
-              const client = new Client({ name: "opencode", version: InstallationVersion })
+              const client = new Client({ name: "opencode", version: InstallationVersion }, { jsonSchemaValidator: new LenientJsonSchemaValidator() })
               return withTimeout(client.connect(t), timeout).then(() => client)
             },
             catch: (e) => (e instanceof Error ? e : new Error(String(e))),
@@ -1075,7 +1036,7 @@ export const layer = Layer.effect(
 
       return yield* Effect.tryPromise({
         try: () => {
-          const client = new Client({ name: "opencode", version: InstallationVersion })
+          const client = new Client({ name: "opencode", version: InstallationVersion }, { jsonSchemaValidator: new LenientJsonSchemaValidator() })
           return client
             .connect(transport)
             .then(() => ({ authorizationUrl: "", oauthState, client }) satisfies AuthResult)
