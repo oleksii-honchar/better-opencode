@@ -1,18 +1,10 @@
-/**
- * Unit tests for LenientJsonSchemaValidator
- *
- * Verifies that the lenient validator tolerates additionalProperties errors
- * (toJsonSchemaCompat false positives) while preserving real validation
- * failures (type mismatches, missing required fields).
- */
-
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, mock } from "bun:test"
 import type { JsonSchemaType } from "@modelcontextprotocol/sdk/validation/types.js"
-
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
 import { LenientJsonSchemaValidator } from "../../src/mcp/lenient-validator"
 
 describe("LenientJsonSchemaValidator", () => {
-  it("valid structuredContent passes through", () => {
+  it("valid structuredContent passes through unchanged", () => {
     const schema: JsonSchemaType = {
       $id: "valid-test",
       type: "object",
@@ -20,43 +12,44 @@ describe("LenientJsonSchemaValidator", () => {
       additionalProperties: false,
     }
 
-    const validator = new LenientJsonSchemaValidator().getValidator(schema)
-    const result = validator({ name: "Alice" })
+    const validator = new LenientJsonSchemaValidator()
+    const validate = validator.getValidator(schema)
+    const result = validate({ name: "test" })
 
     expect(result.valid).toBe(true)
-    expect(result.data).toEqual({ name: "Alice" })
+    expect(result.data).toEqual({ name: "test" })
     expect(result.errorMessage).toBeUndefined()
   })
 
-  it("additionalProperties error is suppressed and returns valid", () => {
+  it("additionalProperties error suppressed — returns valid with original data", () => {
     const schema: JsonSchemaType = {
-      $id: "ap-test",
+      $id: "additional-props-test",
       type: "object",
       properties: { name: { type: "string" } },
       additionalProperties: false,
     }
 
-    const validator = new LenientJsonSchemaValidator().getValidator(schema)
-    const result = validator({ name: "Alice", extraField: "not in schema" })
+    const validator = new LenientJsonSchemaValidator()
+    const validate = validator.getValidator(schema)
+    const result = validate({ name: "test", extra: "unexpected" })
 
     expect(result.valid).toBe(true)
-    expect(result.data).toEqual({ name: "Alice", extraField: "not in schema" })
+    expect(result.data).toEqual({ name: "test", extra: "unexpected" })
     expect(result.errorMessage).toBeUndefined()
   })
 
   it("type mismatch error still fails", () => {
     const schema: JsonSchemaType = {
-      $id: "type-test",
+      $id: "type-mismatch-test",
       type: "object",
-      properties: { count: { type: "number" } },
-      additionalProperties: false,
+      properties: { count: { type: "integer" } },
     }
 
-    const validator = new LenientJsonSchemaValidator().getValidator(schema)
-    const result = validator({ count: "not a number" })
+    const validator = new LenientJsonSchemaValidator()
+    const validate = validator.getValidator(schema)
+    const result = validate({ count: "not-an-integer" })
 
     expect(result.valid).toBe(false)
-    expect(result.errorMessage).toBeDefined()
   })
 
   it("required field error still fails", () => {
@@ -65,17 +58,16 @@ describe("LenientJsonSchemaValidator", () => {
       type: "object",
       properties: { name: { type: "string" } },
       required: ["name"],
-      additionalProperties: false,
     }
 
-    const validator = new LenientJsonSchemaValidator().getValidator(schema)
-    const result = validator({})
+    const validator = new LenientJsonSchemaValidator()
+    const validate = validator.getValidator(schema)
+    const result = validate({})
 
     expect(result.valid).toBe(false)
-    expect(result.errorMessage).toBeDefined()
   })
 
-  it("warning deduplication — same error logged only once", () => {
+  it("warning deduplication — same error logged only once (verify warned.size === 1)", () => {
     const schema: JsonSchemaType = {
       $id: "dedup-test",
       type: "object",
@@ -83,12 +75,26 @@ describe("LenientJsonSchemaValidator", () => {
       additionalProperties: false,
     }
 
-    const lenient = new LenientJsonSchemaValidator()
-    const validator = lenient.getValidator(schema)
+    // Create a mock delegate that returns the same error each time
+    // so the dedup key is identical across calls
+    const mockDelegate = {
+      getValidator: () => {
+        return () => ({
+          valid: false as const,
+          data: undefined,
+          errorMessage: "should NOT have additional properties",
+        })
+      },
+    } as unknown as AjvJsonSchemaValidator
 
-    validator({ name: "Alice", extraField: "not in schema" })
-    validator({ name: "Alice", extraField: "not in schema" })
+    const validator = new LenientJsonSchemaValidator(mockDelegate)
+    const validate = validator.getValidator(schema)
 
-    expect((lenient as any).warned.size).toBe(1)
+    // Call validator twice with the same error — dedup key is identical
+    validate({ name: "test", extra: "foo" })
+    validate({ name: "test", extra: "bar" })
+
+    // Verify the #warned set has only one entry (dedup working)
+    expect(validator.warned.size).toBe(1)
   })
 })

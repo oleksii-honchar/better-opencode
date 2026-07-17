@@ -7,49 +7,54 @@ import type {
 } from "@modelcontextprotocol/sdk/validation/types.js"
 import * as Log from "@opencode-ai/core/util/log"
 
+const TOLERATED_ERROR_RE = /additional properties|excess property/i
+
 const log = Log.create({ service: "mcp.lenient-validator" })
 
-/**
- * Regex that matches AJV's additionalProperties / excess property errors.
- * These are false positives caused by toJsonSchemaCompat() conversion bugs
- * and should be tolerated (log warning, return valid).
- */
-const ADDITIONAL_PROPERTIES_RE = /additional properties|excess property/i
-
 export class LenientJsonSchemaValidator implements jsonSchemaValidator {
-  private readonly delegate: AjvJsonSchemaValidator
-  private readonly warned = new Set<string>()
+  #delegate: AjvJsonSchemaValidator
+  #warned = new Set<string>()
 
   constructor(delegate?: AjvJsonSchemaValidator) {
-    this.delegate = delegate ?? new AjvJsonSchemaValidator()
+    this.#delegate = delegate ?? new AjvJsonSchemaValidator()
+  }
+
+  /** @internal — exposed for testing only */
+  get warned(): Set<string> {
+    return this.#warned
   }
 
   getValidator<T>(schema: JsonSchemaType): JsonSchemaValidator<T> {
-    const delegateValidator = this.delegate.getValidator<T>(schema)
+    const inner = this.#delegate.getValidator<T>(schema)
 
     return (input: unknown): JsonSchemaValidatorResult<T> => {
-      const result = delegateValidator(input)
+      const result = inner(input)
 
       if (result.valid) {
         return result
       }
 
-      // Check if this is an additionalProperties / excess property error
-      if (ADDITIONAL_PROPERTIES_RE.test(result.errorMessage)) {
-        // Deduplicate warnings: log once per unique schema+error combo
-        const errorKey = `${schema.$id ?? "unknown"}-${result.errorMessage.substring(0, 50)}`
-        if (!this.warned.has(errorKey)) {
-          this.warned.add(errorKey)
-          log.warn("additionalProperties error tolerated (toJsonSchemaCompat false positive)", {
-            errorKey,
-            errorMessage: result.errorMessage,
-          })
-        }
-        return { valid: true, data: input as T, errorMessage: undefined }
+      if (!TOLERATED_ERROR_RE.test(result.errorMessage)) {
+        return result
       }
 
-      // Type mismatch, required field, etc. — pass through as failure
-      return result
+      const key = dedupKey(schema, result.errorMessage)
+
+      if (!this.#warned.has(key)) {
+        this.#warned.add(key)
+        log.warn("tolerated additionalProperties validation error (toJsonSchemaCompat false positive)", {
+          key,
+          error: result.errorMessage,
+        })
+      }
+
+      return { valid: true, data: input as T, errorMessage: undefined }
     }
   }
+}
+
+function dedupKey(schema: JsonSchemaType, errorMessage: string): string {
+  const id = schema.$id ?? "unknown"
+  const prefix = errorMessage.slice(0, 50)
+  return `${id}-${prefix}`
 }
