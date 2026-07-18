@@ -64,7 +64,7 @@ export interface Interface {
   readonly init: () => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Plugin") {}
+export class Service extends Context.Service<Service, Interface>()("@opencode/Plugin") { }
 
 // Built-in plugins that are directly imported (not installed from npm)
 const INTERNAL_PLUGINS: PluginInstance[] = [
@@ -345,12 +345,18 @@ export const layer = Layer.effect(
       // Cache LLM service on first trigger (it IS available in this scope in production)
       // Use serviceOption so the Interface return type stays Effect.Effect<Output> (no LLM dependency)
       if (!_cachedLLM) {
+        log.debug("Attempting to cache LLM service from Effect context", {})
         const maybeLLM = yield* Effect.serviceOption(LLM.Service)
+        log.debug("Effect.serviceOption returned", {
+          rawResult: JSON.stringify(maybeLLM as any),
+          tag: (maybeLLM as any)._tag,
+          fullKeys: Object.keys(maybeLLM as any).join(","),
+        })
         if (maybeLLM._tag === "Some") {
           _cachedLLM = maybeLLM.value
           log.info("LLM service cached for plugin trigger", {})
         } else {
-          log.warn("LLM service not available on first trigger — chatCompletionWithModel will fail", {})
+          log.warn("LLM service not available on first trigger — chatCompletionWithModel will fail", { name })
         }
       }
 

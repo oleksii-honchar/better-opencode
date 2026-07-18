@@ -274,7 +274,13 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             output: truncated.content,
             truncated: truncated.truncated,
             ...(truncated.truncated ? { rawOutputLength: textParts.join("\n\n").length } : {}),
-            ...(result.structuredContent !== undefined && { structuredContent: result.structuredContent }),
+            ...(result.structuredContent !== undefined && {
+              structuredContent: (() => {
+                const s = JSON.stringify(result.structuredContent);
+                return s.length > 500 ? s.slice(0, 500) + '...' : s;
+              })(),
+              scLength: JSON.stringify(result.structuredContent).length,
+            }),
             source: "mcp",
           })
 

@@ -27,11 +27,24 @@ function buildMcpEffect(params: {
   sessionID: string
   messageID: string
   callID: string | null
-  mcpExecute: () => Promise<{ content: Array<{ type: string; text?: string }>; metadata: Record<string, unknown> }>
+  mcpExecute: () => Promise<{
+    content: Array<{ type: string; text?: string }>
+    metadata: Record<string, unknown>
+    structuredContent?: unknown
+  }>
   truncateResult: { content: string; truncated: boolean; outputPath?: string }
   rawOutputLength?: number
 }) {
   const { mcpToolName, args, sessionID, messageID, callID, mcpExecute, truncateResult, rawOutputLength } = params
+
+  // Mirror the trim logic from tools.ts: structuredContent in toolsLog is trimmed to 500 chars
+  function trimStructuredContent(sc: unknown): { structuredContent: string; scLength: number } {
+    const s = JSON.stringify(sc)
+    return {
+      structuredContent: s.length > 500 ? s.slice(0, 500) + "..." : s,
+      scLength: s.length,
+    }
+  }
 
   return Effect.gen(function* () {
     const start = Date.now()
@@ -78,6 +91,9 @@ function buildMcpEffect(params: {
       output: truncateResult.content,
       truncated: truncateResult.truncated,
       ...(truncateResult.truncated && rawOutputLength ? { rawOutputLength } : {}),
+      ...(result.structuredContent !== undefined
+        ? trimStructuredContent(result.structuredContent)
+        : {}),
       source: "mcp",
     })
 
@@ -299,6 +315,143 @@ describe("MCP tool instrumentation — toolsLog", () => {
       const entry = toolsLogCalls[0]
       expect(entry.error).toBe("string error")
       expect(entry.source).toBe("mcp")
+    })
+  })
+
+  describe("structuredContent in toolsLog — trimmed", () => {
+    test("adds trimmed structuredContent and scLength when structuredContent is a short object (< 500 chars)", async () => {
+      const mcpToolName = "mcp:test:tool"
+      const args = { query: "test" }
+      const sessionID = "ses_test"
+      const messageID = "msg_test"
+      const callID = "call_sc_short"
+
+      const structuredContent = { key: "value", name: "short data" }
+      const expectedScString = JSON.stringify(structuredContent)
+
+      const mcpExecute = async () => ({
+        content: [{ type: "text" as const, text: "result" }],
+        metadata: {},
+        structuredContent,
+      })
+
+      await Effect.runPromise(
+        buildMcpEffect({
+          mcpToolName,
+          args,
+          sessionID,
+          messageID,
+          callID,
+          mcpExecute,
+          truncateResult: { content: "result", truncated: false },
+        }),
+      )
+
+      expect(toolsLogCalls).toHaveLength(1)
+      const entry = toolsLogCalls[0]
+      expect(entry.structuredContent).toBe(expectedScString)
+      expect(entry.scLength).toBe(expectedScString.length)
+    })
+
+    test("trims structuredContent to 500 chars with ellipsis and adds scLength when payload exceeds 500 chars", async () => {
+      const mcpToolName = "mcp:test:tool"
+      const args = { query: "big" }
+      const sessionID = "ses_test"
+      const messageID = "msg_test"
+      const callID = "call_sc_long"
+
+      // Build an object whose JSON representation is > 500 chars
+      const bigObject: Record<string, string> = {}
+      for (let i = 0; i < 40; i++) {
+        bigObject[`key_${i}`] = "x".repeat(20)
+      }
+      const fullJson = JSON.stringify(bigObject)
+      expect(fullJson.length).toBeGreaterThan(500)
+
+      const mcpExecute = async () => ({
+        content: [{ type: "text" as const, text: "result" }],
+        metadata: {},
+        structuredContent: bigObject,
+      })
+
+      await Effect.runPromise(
+        buildMcpEffect({
+          mcpToolName,
+          args,
+          sessionID,
+          messageID,
+          callID,
+          mcpExecute,
+          truncateResult: { content: "result", truncated: false },
+        }),
+      )
+
+      expect(toolsLogCalls).toHaveLength(1)
+      const entry = toolsLogCalls[0]
+      expect(entry.structuredContent).toBe(fullJson.slice(0, 500) + "...")
+      expect(entry.scLength).toBe(fullJson.length)
+    })
+
+    test("does NOT add structuredContent or scLength when structuredContent is undefined", async () => {
+      const mcpToolName = "mcp:test:tool"
+      const args = { query: "none" }
+      const sessionID = "ses_test"
+      const messageID = "msg_test"
+      const callID = "call_sc_none"
+
+      const mcpExecute = async () => ({
+        content: [{ type: "text" as const, text: "result" }],
+        metadata: {},
+        // no structuredContent
+      })
+
+      await Effect.runPromise(
+        buildMcpEffect({
+          mcpToolName,
+          args,
+          sessionID,
+          messageID,
+          callID,
+          mcpExecute,
+          truncateResult: { content: "result", truncated: false },
+        }),
+      )
+
+      expect(toolsLogCalls).toHaveLength(1)
+      const entry = toolsLogCalls[0]
+      expect(entry.structuredContent).toBeUndefined()
+      expect(entry.scLength).toBeUndefined()
+    })
+
+    test("does NOT add structuredContent or scLength when structuredContent is undefined (explicit)", async () => {
+      const mcpToolName = "mcp:test:tool"
+      const args = { query: "undef" }
+      const sessionID = "ses_test"
+      const messageID = "msg_test"
+      const callID = "call_sc_undef"
+
+      const mcpExecute = async () => ({
+        content: [{ type: "text" as const, text: "result" }],
+        metadata: {},
+        structuredContent: undefined,
+      })
+
+      await Effect.runPromise(
+        buildMcpEffect({
+          mcpToolName,
+          args,
+          sessionID,
+          messageID,
+          callID,
+          mcpExecute,
+          truncateResult: { content: "result", truncated: false },
+        }),
+      )
+
+      expect(toolsLogCalls).toHaveLength(1)
+      const entry = toolsLogCalls[0]
+      expect(entry.structuredContent).toBeUndefined()
+      expect(entry.scLength).toBeUndefined()
     })
   })
 
