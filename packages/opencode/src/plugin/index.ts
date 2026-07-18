@@ -348,6 +348,9 @@ export const layer = Layer.effect(
         const maybeLLM = yield* Effect.serviceOption(LLM.Service)
         if (maybeLLM._tag === "Some") {
           _cachedLLM = maybeLLM.value
+          log.info("LLM service cached for plugin trigger", {})
+        } else {
+          log.warn("LLM service not available on first trigger — chatCompletionWithModel will fail", {})
         }
       }
 
