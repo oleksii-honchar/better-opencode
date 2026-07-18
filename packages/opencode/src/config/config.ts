@@ -389,7 +389,7 @@ export const Info = Schema.Struct({
       evidenceWindow: Schema.optional(PositiveInt).annotate({
         description: "Maximum age of evidence records before they expire (in seconds, default: Infinity — no eviction)",
       }),
-      enableXmlRepetition: Schema.optional(Schema.Boolean).annotate({
+      enableXmlRepetitionGuard: Schema.optional(Schema.Boolean).annotate({
         description: "Enable XML tag repetition detection during tool input streaming (default: true)",
       }),
       xmlRepetitionThreshold: Schema.optional(PositiveInt).annotate({

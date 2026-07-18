@@ -149,7 +149,7 @@ export class LoopDetectorImpl implements LoopDetector {
       case "tool-input-start": {
         log.debug("consumeChunk", { type: "tool-input-start", id: chunk.id, toolName: chunk.toolName })
         // Initialize xmlRepetitionDetector on first tool-input-start if enabled
-        if (config.enableXmlRepetition && !this.xmlRepetitionDetector) {
+        if (config.enableXmlRepetitionGuard && !this.xmlRepetitionDetector) {
           this.xmlRepetitionDetector = new XmlRepetitionDetector({
             repetitionThreshold: config.xmlRepetitionThreshold,
             windowSize: config.xmlRepetitionWindowSize,
