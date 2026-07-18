@@ -1,8 +1,8 @@
 ---
 name: better-opencode-generalist
 description: "Manage the better-opencode fork: sync with upstream, resolve rebase conflicts, build and install, create feature branches, merge fork changes. Use when user mentions better-opencode, update fork, sync with upstream, rebase patched/dev, merge feature branch, build better-opencode, start dev server, fork changes, upstream sync, cherry-pick fork."
-version: "1.0"
-updatedAt: "2026-05-18T12:00:00+0300"
+version: "1.1"
+updatedAt: "2026-07-18T10:00:00+0300"
 author: "oleksii-honchar"
 status: "draft"
 tags: ["better-opencode", "fork-management", "git", "rebase", "upstream-sync"]
@@ -26,6 +26,37 @@ Full-lifecycle specialist for the `better-opencode` fork: investigates sync issu
 5. `references/experience-log.md` — Session-tagged lessons learned (grows over time)
 
 ## Rules
+
+### Cardio Rule — Targeted Testing Only
+
+**Never run full test suites.** Every approach to running tests broadly is wrong for this repo:
+
+| What NOT to do | Why it's wrong |
+|---|---|
+| `bun run test` (root) | Intentionally blocked — `exit 1` in root `package.json` |
+| `bun turbo <pkg>#test` | Triggers `^build` dependency first — builds everything, takes minutes |
+| `bun test` inside a package | Runs all tests in that package with no filter — too broad |
+| `bun turbo test` or `bun turbo test:ci` | Same problem — slow build cascade, runs everything |
+
+**Only acceptable approach — target specific test files directly:**
+
+```bash
+bun test packages/opencode/src/path/to/file.test.ts
+bun test packages/core/src/path/to/file.test.ts --timeout 30000
+bun test packages/opencode/src --filter "some-pattern"
+```
+
+**Why:**
+- No turbo build cascade — bun runs the file directly
+- Seconds instead of minutes
+- You know exactly which tests you're running
+- Failed assertions point directly to the feature you changed
+
+**When to run which:**
+- **After editing a file + its test:** `bun test packages/opencode/src/that-file.test.ts`
+- **After editing a feature layer:** `bun test packages/opencode/src/feature-dir/`
+- **After a typecheck-only change (no logic change):** skip tests — `bun turbo typecheck` is enough
+- **Before pushing (sanity check):** targeted tests only — CI runs the full suite
 
 ### Code Search Decision Guide
 
@@ -186,6 +217,37 @@ cd ~/www/misc/better-opencode
 "openchamber.apiUrl": "http://127.0.0.1:4096"
 ```
 
+### Phase 6: Targeted Testing (post-change verification)
+
+**Goal:** Verify your code change by running only the relevant tests — never the full suite.
+
+Run this after any logic change (not needed after pure typecheck-only changes).
+
+1. **Find the relevant test file(s):**
+   ```bash
+   # Tests are co-located next to their source files
+   # If you edited src/foo/bar.ts, the test is src/foo/bar.test.ts
+   ls packages/opencode/src/path/to/feature/*.test.ts
+   ```
+
+2. **Run targeted test(s):**
+   ```bash
+   # Single file
+   bun test packages/opencode/src/path/to/feature/bar.test.ts
+
+   # All tests in a feature directory
+   bun test packages/opencode/src/path/to/feature/
+
+   # Pattern match across a package
+   bun test packages/opencode/src --filter "feature-name"
+   ```
+
+3. **If tests fail:**
+   - Fix the code, re-run the same targeted test
+   - `bun test --rerun-every 2000` — watch mode with 2s debounce
+
+**Turbo typecheck is separate and fast** — always run `bun turbo typecheck` after rebase/merge (see Phase 1-3). It does NOT trigger builds.
+
 ## Gotchas
 
 - **Never push to upstream** — `upstream` is read-only. Always push to `origin` (oleksii-honchar/better-opencode).
@@ -194,6 +256,7 @@ cd ~/www/misc/better-opencode
 - **Fork features must be preserved during sync** — This is the #1 risk. Never use `-X theirs` or blindly accept upstream's version when our feature code is involved.
 - **When fork commits conflict heavily with upstream** — Don't cherry-pick old fork commits. Extract diffs from an already-adapted merge commit vs upstream base, then apply as separate patches.
 - **Typecheck after every merge/rebase** — `bun turbo typecheck` is mandatory. Upstream changes may break our feature code silently.
+- **Never run full test suites** — `bun run test` (root) is blocked; `bun turbo <pkg>#test` triggers `^build` first (minutes). Use `bun test path/to/file.test.ts` instead — seconds, no build cascade.
 - **Bun CA trust** — Bun does NOT use macOS Keychain for TLS. For dev server with Caddy TLS, set `NODE_EXTRA_CA_CERTS` or place cert at `~/.config/better-opencode/extra-ca.pem`.
 - **Two IDE instances fight over ports** — Close VSCodium/VS Code before starting `start-dev.sh --ide-only`, or use `--force`.
 - **`openchamber.apiUrl` must be set** — Without it, the VSCode extension spawns its own `opencode serve` on a random port instead of connecting to your dev server.
@@ -203,6 +266,7 @@ cd ~/www/misc/better-opencode
 - [ ] Upstream sync: `patched/dev` is on top of `upstream/dev` (0 commits behind)
 - [ ] Fork features preserved: no feature code lost during conflict resolution
 - [ ] Typecheck passes: `bun turbo typecheck` succeeds with 0 errors
+- [ ] Targeted tests pass (if logic changed): `bun test packages/<pkg>/src/path/to/changed-file.test.ts`
 - [ ] Build succeeds: `./build-and-install.sh --install --clean` completes
 - [ ] Binary works: `~/bin/better-opencode --version` returns expected version
 - [ ] Force-push confirmed with user (if applicable)
@@ -223,6 +287,7 @@ cd ~/www/misc/better-opencode
 - [ ] Upstream sync completed before making changes (if syncing was part of the task)
 - [ ] Conflict resolution preserves fork features (no `-X theirs` on feature code)
 - [ ] Typecheck passes after any rebase/merge
+- [ ] Targeted tests pass after any logic change (not just typecheck-only)
 - [ ] Build succeeds after any code change
 - [ ] Feature branch rebased onto `patched/dev` before merge (if applicable)
 - [ ] Experience log updated with lessons learned (if new pattern discovered)
