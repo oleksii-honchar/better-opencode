@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -11,6 +11,7 @@ import { Config } from "../../src/config/config"
 import { Env } from "../../src/env"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
 import { Plugin } from "../../src/plugin/index"
+import { LLM } from "../../src/session/llm"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -27,6 +28,10 @@ const configLayer = Config.layer.pipe(
   Layer.provide(NpmTest.noop),
   Layer.provide(FetchHttpClient.layer),
 )
+const LLMTest = Layer.succeed(LLM.Service, LLM.Service.of({
+  stream: () => Stream.empty,
+}))
+
 const it = testEffect(
   Layer.mergeAll(
     Plugin.layer.pipe(
@@ -34,6 +39,7 @@ const it = testEffect(
       Layer.provide(configLayer),
       Layer.provide(RuntimeFlags.layer({ disableDefaultPlugins: true })),
     ),
+    LLMTest,
     CrossSpawnSpawner.defaultLayer,
   ),
 )

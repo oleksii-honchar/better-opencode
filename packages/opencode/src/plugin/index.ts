@@ -37,6 +37,8 @@ import type { MessageV2 } from "@/session/message-v2"
 import { SessionID, MessageID } from "@/session/schema"
 import { ProviderID, ModelID } from "@/provider/schema"
 
+let _cachedLLM: LLM.Interface | undefined
+
 const log = Log.create({ service: "plugin" })
 
 type State = {
@@ -160,8 +162,10 @@ export const layer = Layer.effect(
 
             const messages = request.messages as LLM.StreamInput["messages"]
 
+            const llmSrv = _cachedLLM
+            if (!llmSrv) throw new Error("LLM service not yet available — Plugin.trigger must be called first")
+
             const collect = Effect.gen(function* () {
-              const llmSrv = yield* LLM.Service
               const stream = llmSrv.stream({
                 user,
                 sessionID,
@@ -337,6 +341,12 @@ export const layer = Layer.effect(
     >(name: Name, input: Input, output: Output) {
       if (!name) return output
       const s = yield* InstanceState.get(state)
+
+      // Cache LLM service on first trigger (it IS available in this scope)
+      if (!_cachedLLM) {
+        _cachedLLM = yield* LLM.Service
+      }
+
       for (const hook of s.hooks) {
         const fn = hook[name] as any
         if (!fn) continue

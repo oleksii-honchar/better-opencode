@@ -333,3 +333,92 @@ describe("MCP tool instrumentation — toolsLog", () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Helper: construct output object the same way tools.ts does (line 286-297)
+// ---------------------------------------------------------------------------
+
+function buildOutput(result: {
+  content: Array<{ type: string; text?: string }>
+  structuredContent?: unknown
+}) {
+  return {
+    title: "",
+    metadata: {},
+    output: "test output",
+    attachments: [],
+    content: result.content,
+    ...(result.structuredContent !== undefined && { structuredContent: result.structuredContent }),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tests: structuredContent forwarding in output object
+// ---------------------------------------------------------------------------
+
+describe("structuredContent forwarding in output", () => {
+  describe("when result has structuredContent", () => {
+    test("includes structuredContent when it is an object", () => {
+      const structuredContent = { key: "value", nested: { a: 1 } }
+      const result = { content: [{ type: "text" as const, text: "hello" }], structuredContent }
+
+      const output = buildOutput(result)
+
+      expect(output).toHaveProperty("structuredContent")
+      expect(output.structuredContent).toEqual(structuredContent)
+    })
+
+    test("includes structuredContent when it is a string", () => {
+      const structuredContent = JSON.stringify({ key: "value" })
+      const result = { content: [{ type: "text" as const, text: "hello" }], structuredContent }
+
+      const output = buildOutput(result)
+
+      expect(output).toHaveProperty("structuredContent")
+      expect(output.structuredContent).toBe(structuredContent)
+    })
+
+    test("includes structuredContent when it is an array", () => {
+      const structuredContent = [{ id: 1 }, { id: 2 }]
+      const result = { content: [{ type: "text" as const, text: "hello" }], structuredContent }
+
+      const output = buildOutput(result)
+
+      expect(output).toHaveProperty("structuredContent")
+      expect(output.structuredContent).toEqual(structuredContent)
+    })
+
+    test("includes structuredContent with value null (null !== undefined)", () => {
+      const result = { content: [{ type: "text" as const, text: "hello" }], structuredContent: null }
+
+      const output = buildOutput(result)
+
+      // null !== undefined, so conditional spread includes it
+      expect(output).toHaveProperty("structuredContent")
+      expect(output.structuredContent).toBeNull()
+    })
+  })
+
+  describe("when result has no structuredContent", () => {
+    test("does NOT include structuredContent property when it is undefined", () => {
+      const result: { content: Array<{ type: string; text?: string }>; structuredContent?: undefined } = {
+        content: [{ type: "text" as const, text: "hello" }],
+      }
+
+      const output = buildOutput(result)
+
+      expect(output).not.toHaveProperty("structuredContent")
+    })
+
+    test("does NOT include structuredContent property when explicitly undefined", () => {
+      const result = {
+        content: [{ type: "text" as const, text: "hello" }],
+        structuredContent: undefined,
+      }
+
+      const output = buildOutput(result)
+
+      expect(output).not.toHaveProperty("structuredContent")
+    })
+  })
+})
