@@ -453,7 +453,7 @@ if [ "$TOOL_LOGS" = true ]; then
             field_line("duration"; (pick_field(["duration", "durationMs", "duration_ms", "elapsedMs"]) | if . == null then null else "\(.)ms" end)),
             field_line("status"; (pick_field(["status", "state"]) | truncate(200))),
             field_line("args"; (pick_field(["args", "arguments", "input"]) | truncate(1200))),
-            field_line("output"; (pick_field(["output", "result", "content"]) | truncate(1200))),
+            field_line("output"; (    pick_field(["output", "result", "content", "structuredContent"]) | truncate(1200))),
             field_line("error"; (pick_field(["error", "err"]) | truncate(1200)))
           ]
         | map(select(. != null and . != ""))
