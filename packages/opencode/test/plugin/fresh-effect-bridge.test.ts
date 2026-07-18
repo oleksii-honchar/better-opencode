@@ -14,9 +14,22 @@ describe("plugin.index — fix effectWithContext self-defeating pattern", () => 
     if (!bridgePromiseCollectMatch) throw new Error("bridge.promise(collect) not found — should be used directly")
   })
 
-  test("collect Effect yields LLM.Service (reads from bridge context)", () => {
-    const collectMatch = source.match(/const collect = Effect\.gen\(function\* \(\) \{[\s\S]*?yield\* LLM\.Service/)
-    if (!collectMatch) throw new Error("yield* LLM.Service not found inside collect Effect")
+  test("chatCompletionWithModel throws clear error when _cachedLLM is not set", () => {
+    const errorMsg = "LLM service not yet available — Plugin.trigger must be called first"
+    if (!source.includes(errorMsg)) throw new Error(`Expected error message not found: "${errorMsg}"`)
+  })
+
+  test("collect Effect no longer uses yield* LLM.Service — uses _cachedLLM via local ref", () => {
+    // Pattern changed: before collect, _cachedLLM is read into local llmSrv
+    if (!source.includes("const llmSrv = _cachedLLM")) {
+      throw new Error("_cachedLLM should be referenced before collect Effect")
+    }
+    // collect Effect itself should use llmSrv.stream, not yield* LLM.Service
+    const collectMatch = source.match(/const collect = Effect\.gen\(function\* \(\) \{[\s\S]*?return \{ content, usage \}\s*\}\)/)
+    if (!collectMatch) throw new Error("collect Effect block not found in source")
+    if (collectMatch[0].includes("yield* LLM.Service")) {
+      throw new Error("yield* LLM.Service should NOT be inside collect Effect anymore")
+    }
   })
 
   test("original bridge preserved for publishPluginError", () => {
