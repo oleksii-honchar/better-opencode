@@ -342,9 +342,13 @@ export const layer = Layer.effect(
       if (!name) return output
       const s = yield* InstanceState.get(state)
 
-      // Cache LLM service on first trigger (it IS available in this scope)
+      // Cache LLM service on first trigger (it IS available in this scope in production)
+      // Use serviceOption so the Interface return type stays Effect.Effect<Output> (no LLM dependency)
       if (!_cachedLLM) {
-        _cachedLLM = yield* LLM.Service
+        const maybeLLM = yield* Effect.serviceOption(LLM.Service)
+        if (maybeLLM._tag === "Some") {
+          _cachedLLM = maybeLLM.value
+        }
       }
 
       for (const hook of s.hooks) {
