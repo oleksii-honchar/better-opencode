@@ -1471,7 +1471,7 @@ describe("EvidenceAccumulator — xml_repetition threshold", () => {
 
 describe("UnstuckConfig — new xml_repetition fields", () => {
   test("defaultConfig includes new fields with correct defaults", () => {
-    expect(defaultConfig.enableXmlRepetition).toBe(true)
+    expect(defaultConfig.enableXmlRepetitionGuard).toBe(true)
     expect(defaultConfig.xmlRepetitionThreshold).toBe(4)
     expect(defaultConfig.xmlRepetitionWindowSize).toBe(10)
     expect(defaultConfig.maxToolInputTokens).toBe(4000)
@@ -1490,13 +1490,13 @@ describe("UnstuckConfig — new xml_repetition fields", () => {
 describe("mergeConfig — new fields", () => {
   test("mergeConfig spreads new fields from partial", () => {
     const merged = mergeConfig({
-      enableXmlRepetition: false,
+      enableXmlRepetitionGuard: false,
       xmlRepetitionThreshold: 6,
       xmlRepetitionWindowSize: 20,
       maxToolInputTokens: 8000,
       maxTotalToolInputTokens: 32000,
     })
-    expect(merged.enableXmlRepetition).toBe(false)
+    expect(merged.enableXmlRepetitionGuard).toBe(false)
     expect(merged.xmlRepetitionThreshold).toBe(6)
     expect(merged.xmlRepetitionWindowSize).toBe(20)
     expect(merged.maxToolInputTokens).toBe(8000)
@@ -1508,7 +1508,7 @@ describe("mergeConfig — new fields", () => {
       loopThreshold: 5,
     })
     expect(merged.loopThreshold).toBe(5)
-    expect(merged.enableXmlRepetition).toBe(true)
+    expect(merged.enableXmlRepetitionGuard).toBe(true)
     expect(merged.xmlRepetitionThreshold).toBe(4)
     expect(merged.xmlRepetitionWindowSize).toBe(10)
     expect(merged.maxToolInputTokens).toBe(4000)
@@ -1534,7 +1534,7 @@ describe("mergeConfig — new fields", () => {
 describe("LoopDetector — xml_repetition integration", () => {
   const configWithXml: UnstuckConfig = {
     ...defaultConfig,
-    enableXmlRepetition: true,
+    enableXmlRepetitionGuard: true,
     xmlRepetitionThreshold: 4,
     xmlRepetitionWindowSize: 10,
     maxToolInputTokens: 4000,
@@ -1543,8 +1543,8 @@ describe("LoopDetector — xml_repetition integration", () => {
     detectToolOnlyLoops: false,
   }
 
-  test("detector is initialized when enableXmlRepetition is true", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+  test("detector is initialized when enableXmlRepetitionGuard is true", () => {
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     // If the detector is initialized, consuming delta should not throw
     expect(() => {
       detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, configWithXml)
@@ -1552,16 +1552,16 @@ describe("LoopDetector — xml_repetition integration", () => {
     }).not.toThrow()
   })
 
-  test("detector is NOT initialized when enableXmlRepetition is false", () => {
-    const detector = createDetector({ enableXmlRepetition: false })
-    const config: UnstuckConfig = { ...defaultConfig, enableXmlRepetition: false, loopThreshold: 10, detectToolOnlyLoops: false }
+  test("detector is NOT initialized when enableXmlRepetitionGuard is false", () => {
+    const detector = createDetector({ enableXmlRepetitionGuard: false })
+    const config: UnstuckConfig = { ...defaultConfig, enableXmlRepetitionGuard: false, loopThreshold: 10, detectToolOnlyLoops: false }
     // Should not throw and should not detect anything
     const result = detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, config)
     expect(result).toBeUndefined()
   })
 
   test("tool-input-start resets xmlRepetitionDetector and sets currentToolName", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, configWithXml)
     // Feed some XML tags
     detector.consumeChunk({ type: "tool-input-delta", id: "call-0", text: "<parameter>value</parameter>" }, configWithXml)
@@ -1583,7 +1583,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("tool-input-delta returns LoopDetectedInfo when repetition detected", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, configWithXml)
 
     // Feed 4 identical XML tags (threshold is 4)
@@ -1603,7 +1603,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("tool-input-end clears currentToolName", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, configWithXml)
     detector.consumeChunk({ type: "tool-input-delta", id: "call-0", text: "<parameter>value</parameter>" }, configWithXml)
     detector.consumeChunk({ type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } }, configWithXml)
@@ -1619,7 +1619,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("per-tool token limit triggers detection with exceedsTokenLimit: true", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     const config: UnstuckConfig = {
       ...configWithXml,
       maxToolInputTokens: 100, // Very low limit for testing
@@ -1636,7 +1636,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("total token limit triggers detection across tool calls", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     const config: UnstuckConfig = {
       ...configWithXml,
       maxToolInputTokens: 100000, // Very high — won't trigger per-tool
@@ -1658,7 +1658,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("reset() clears detector state and total tokens", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     const config: UnstuckConfig = {
       ...configWithXml,
       maxTotalToolInputTokens: 500,
@@ -1684,7 +1684,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("clear() clears detector state and total tokens", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     const config: UnstuckConfig = {
       ...configWithXml,
       maxTotalToolInputTokens: 1000,
@@ -1706,10 +1706,10 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("existing detection types remain unaffected — step_loop still detected", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     const config: UnstuckConfig = {
       ...defaultConfig,
-      enableXmlRepetition: true,
+      enableXmlRepetitionGuard: true,
       loopThreshold: 3,
     }
 
@@ -1738,10 +1738,10 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("existing detection types remain unaffected — tool_loop still detected", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     const config: UnstuckConfig = {
       ...defaultConfig,
-      enableXmlRepetition: true,
+      enableXmlRepetitionGuard: true,
       loopThreshold: 10,
       detectToolOnlyLoops: true,
       toolLoopThreshold: 3,
@@ -1772,7 +1772,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("token estimation is delegated to XmlRepetitionDetector (not hardcoded)", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     const config: UnstuckConfig = {
       ...configWithXml,
       maxToolInputTokens: 1, // 1 token = 4 chars minimum
@@ -1790,7 +1790,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   test("XML content in tool-input-delta triggers token limit earlier due to XML multiplier", () => {
     // When text contains XML (< and >), the detector applies a 1.5x multiplier,
     // so the same text triggers token limits sooner than non-XML text.
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     // 4 chars → non-XML: ceil(4/4)=1 token; XML: ceil(4/4*1.5)=2 tokens
     const config: UnstuckConfig = {
       ...configWithXml,
@@ -1815,7 +1815,7 @@ describe("LoopDetector — xml_repetition integration", () => {
     // Verifies that XmlRepetitionDetector's internal XML-aware estimation is the sole source of truth.
     // The loop-detector should NOT compute Math.ceil(text.length / 4) separately.
     // Test: XML text with multiplier triggers earlier than non-XML text of same length.
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     const config: UnstuckConfig = {
       ...configWithXml,
       maxToolInputTokens: 1,
@@ -1830,7 +1830,7 @@ describe("LoopDetector — xml_repetition integration", () => {
     expect(xmlResult?.exceedsTokenLimit).toBe(true)
 
     // Now test with a fresh detector — non-XML text of same length should NOT exceed
-    const detector2 = createDetector({ enableXmlRepetition: true })
+    const detector2 = createDetector({ enableXmlRepetitionGuard: true })
     detector2.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, config)
     const nonXmlResult = detector2.consumeChunk({ type: "tool-input-delta", id: "call-0", text: "abcd" }, config)
     // 1 token = limit of 1, NOT exceeded (strict >)
@@ -1838,7 +1838,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("finalizeStep does not trigger xml_repetition from step-level detection", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     const config: UnstuckConfig = {
       ...configWithXml,
       loopThreshold: 10,
@@ -1854,7 +1854,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("mapRepetitionToLoopInfo with empty tagName and zero repetitionCount produces undefined fields", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     const config: UnstuckConfig = {
       ...configWithXml,
       maxToolInputTokens: 1, // Very low — will trigger token limit on first delta
@@ -1873,7 +1873,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("mapRepetitionToLoopInfo with actual values preserves tagName and repetitionCount", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, configWithXml)
 
     // Feed 4 identical XML tags (threshold is 4) — triggers actual repetition detection
@@ -1891,7 +1891,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("LoopDetectedError with token limit exceeded does not contain 'undefined' in message", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     const config: UnstuckConfig = {
       ...configWithXml,
       maxToolInputTokens: 1,
@@ -1909,7 +1909,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   })
 
   test("LoopDetectedError with actual repetition shows correct tag and count", () => {
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, configWithXml)
 
     for (let i = 0; i < 3; i++) {
@@ -1934,7 +1934,7 @@ describe("LoopDetector — xml_repetition integration", () => {
     }
     const config: UnstuckConfig = {
       ...defaultConfig,
-      enableXmlRepetition: true,
+      enableXmlRepetitionGuard: true,
       xmlRepetitionThreshold: 4,
       xmlRepetitionWindowSize: 10,
       maxToolInputTokens: 4000,
@@ -1945,7 +1945,7 @@ describe("LoopDetector — xml_repetition integration", () => {
       modelSpecificThresholds: qwenThresholds,
     }
 
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, config)
 
     // With qwen threshold of 3, 3 tags should trigger (vs default 4)
@@ -1963,7 +1963,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   test("modelId flows to XmlRepetitionDetector — non-qwen uses default thresholds", () => {
     const config: UnstuckConfig = {
       ...defaultConfig,
-      enableXmlRepetition: true,
+      enableXmlRepetitionGuard: true,
       xmlRepetitionThreshold: 4,
       xmlRepetitionWindowSize: 10,
       maxToolInputTokens: 4000,
@@ -1973,7 +1973,7 @@ describe("LoopDetector — xml_repetition integration", () => {
       modelId: "gpt-4o",
     }
 
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, config)
 
     // 3 tags — below default threshold of 4
@@ -1998,7 +1998,7 @@ describe("LoopDetector — xml_repetition integration", () => {
     }
     const config: UnstuckConfig = {
       ...defaultConfig,
-      enableXmlRepetition: true,
+      enableXmlRepetitionGuard: true,
       xmlRepetitionThreshold: 4,
       xmlRepetitionWindowSize: 10,
       maxToolInputTokens: 4000,
@@ -2009,7 +2009,7 @@ describe("LoopDetector — xml_repetition integration", () => {
       modelSpecificThresholds: qwenThresholds,
     }
 
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, config)
 
     // 3000 tokens — under default 4000 but over qwen 2500
@@ -2022,7 +2022,7 @@ describe("LoopDetector — xml_repetition integration", () => {
   test("modelId not set — graceful fallback to defaults", () => {
     const config: UnstuckConfig = {
       ...defaultConfig,
-      enableXmlRepetition: true,
+      enableXmlRepetitionGuard: true,
       xmlRepetitionThreshold: 4,
       xmlRepetitionWindowSize: 10,
       maxToolInputTokens: 4000,
@@ -2032,7 +2032,7 @@ describe("LoopDetector — xml_repetition integration", () => {
       // No modelId
     }
 
-    const detector = createDetector({ enableXmlRepetition: true })
+    const detector = createDetector({ enableXmlRepetitionGuard: true })
     detector.consumeChunk({ type: "tool-input-start", id: "call-0", toolName: "ReadFile" }, config)
 
     // 3 tags — below default threshold of 4

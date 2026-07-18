@@ -46,7 +46,7 @@ Implement real-time XML tag repetition detection within the existing unstuck plu
 
 - **New component**: `XmlRepetitionDetector` class — tracks token count per tool input, extracts and hashes XML tags from stream deltas, sliding window detection of tag repetition
 - **Integration point**: `LoopDetectorImpl.consumeChunk()` — calls detector on `tool-input-delta` chunks, returns `LoopDetectedError` when threshold exceeded
-- **Extended config**: `enableXmlRepetition`, `xmlRepetitionThreshold`, `xmlRepetitionWindowSize`, `maxToolInputTokens`, `maxTotalToolInputTokens`
+- **Extended config**: `enableXmlRepetitionGuard`, `xmlRepetitionThreshold`, `xmlRepetitionWindowSize`, `maxToolInputTokens`, `maxTotalToolInputTokens`
 - **Token counting**: Character-based estimation (1 token ≈ 4 characters) — fast enough for real-time stream processing
 
 ## Alternatives Considered

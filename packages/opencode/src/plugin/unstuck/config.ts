@@ -32,7 +32,7 @@ export interface UnstuckConfig {
   enableSelfDiagnosisDetection: boolean
   enablePatternLoopDetection: boolean
   patternLoopThreshold: number
-  enableXmlRepetition: boolean
+  enableXmlRepetitionGuard: boolean
   xmlRepetitionThreshold: number
   xmlRepetitionWindowSize: number
   maxToolInputTokens: number
@@ -88,7 +88,7 @@ export const defaultConfig: UnstuckConfig = {
   // Number of steps in an alternating pattern to declare a pattern loop
   patternLoopThreshold: 4,
   // Enable XML repetition detection for tool input streaming (catches repeated <tag>...</tag> in tool calls)
-  enableXmlRepetition: true,
+  enableXmlRepetitionGuard: true,
   // Number of identical XML tags in the sliding window to declare an XML repetition loop
   xmlRepetitionThreshold: 4,
   // Sliding window size for XML tag repetition counting

@@ -3,22 +3,22 @@ import { Schema } from "effect"
 import { Info } from "./config"
 
 describe("Config Schema — unstuck xml_repetition fields", () => {
-  test("enableXmlRepetition field exists with default true", () => {
+  test("enableXmlRepetitionGuard field exists with default true", () => {
     const parsed = Schema.decodeSync(Info)({}
 )
     // When no unstuck config is provided, the field is optional — defaults come from UnstuckConfig.mergeConfig
     // We verify the schema accepts the field
     const withField = Schema.decodeSync(Info)({
-      unstuck: { enableXmlRepetition: true },
+      unstuck: { enableXmlRepetitionGuard: true },
     }
 )
-    expect(withField.unstuck?.enableXmlRepetition).toBe(true)
+    expect(withField.unstuck?.enableXmlRepetitionGuard).toBe(true)
 
     const withFalse = Schema.decodeSync(Info)({
-      unstuck: { enableXmlRepetition: false },
+      unstuck: { enableXmlRepetitionGuard: false },
     }
 )
-    expect(withFalse.unstuck?.enableXmlRepetition).toBe(false)
+    expect(withFalse.unstuck?.enableXmlRepetitionGuard).toBe(false)
   })
 
   test("xmlRepetitionThreshold field exists with default 4", () => {
@@ -104,14 +104,14 @@ describe("Config Schema — unstuck xml_repetition fields", () => {
     expect(parsed.unstuck?.loopThreshold).toBe(3)
     expect(parsed.unstuck?.strategy).toBe("nudge-and-prune")
     // New fields are optional — should be undefined when not provided
-    expect(parsed.unstuck?.enableXmlRepetition).toBeUndefined()
+    expect(parsed.unstuck?.enableXmlRepetitionGuard).toBeUndefined()
     expect(parsed.unstuck?.xmlRepetitionThreshold).toBeUndefined()
   })
 
   test("all five new fields can be set together", () => {
     const parsed = Schema.decodeSync(Info)({
       unstuck: {
-        enableXmlRepetition: false,
+        enableXmlRepetitionGuard: false,
         xmlRepetitionThreshold: 5,
         xmlRepetitionWindowSize: 15,
         maxToolInputTokens: 5000,
@@ -119,7 +119,7 @@ describe("Config Schema — unstuck xml_repetition fields", () => {
       },
     }
 )
-    expect(parsed.unstuck?.enableXmlRepetition).toBe(false)
+    expect(parsed.unstuck?.enableXmlRepetitionGuard).toBe(false)
     expect(parsed.unstuck?.xmlRepetitionThreshold).toBe(5)
     expect(parsed.unstuck?.xmlRepetitionWindowSize).toBe(15)
     expect(parsed.unstuck?.maxToolInputTokens).toBe(5000)

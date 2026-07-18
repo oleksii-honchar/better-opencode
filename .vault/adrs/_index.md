@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-07-13T12:30:00Z"
+updatedAt: "2026-07-17T12:00:00Z"
 tags: []
 ---
 
@@ -62,6 +62,7 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0048-manage-system-tools-through-meta-tool.adr.md]] — Manage System Tools Through Meta Tool (ADR-0048, status: accepted)
 - [[0049-line-count-log-rotation.adr.md]] — Line Count Log Rotation for tools.log (ADR-0049, status: accepted)
 - [[0050-pass-original-session-id.adr.md]] — Pass Original Session ID Through Plugin LLM Service (ADR-0050, status: accepted)
-- [[0050-pass-original-session-id.adr.md]] — Pass Original Session ID Through Plugin LLM Service (ADR-0050, status: accepted)
 - [[0051-xml-repetition-detection.adr.md]] — Real-time XML Repetition Detection in Tool Call Streaming (ADR-0051, status: accepted)
 - [[0052-enhanced-xml-detection.adr.md]] — Enhanced XML Repetition Detection — Partial/Malformed Tag Support (ADR-0052, status: accepted)
+- [[0053-lenient-json-schema-validator.adr.md]] — Lenient JSON Schema Validator for MCP Tool Output Validation (ADR-0053, status: accepted)
+- [[0054-inclusion-based-mcp-path-encoding.adr.md]] — Inclusion-Based Opt-In for MCP File Path Base64 Encoding (ADR-0054, status: accepted)
