@@ -2,7 +2,7 @@
 type: index
 title: "Atomic Memories"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-07-10T15:35:00Z"
+updatedAt: "2026-07-25T13:50:00Z"
 tags: []
 ---
 
@@ -19,3 +19,4 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0005-mcp-absolute-directory-argument-gotcha.memory.md]] — MCP Absolute Directory Arguments Can Be Mistaken for Attachment Files
 - [[0006-sessionid-schema-prefix-gotcha.memory.md]] — SessionID Schema Requires "ses" Prefix — Synthetic IDs Fail
 - [[0006-sessionid-schema-prefix-gotcha.memory.md]] — SessionID Schema Requires "ses" Prefix — Synthetic IDs Fail
+- [[0007-no-agent-events.memory.md]] — No Agent-to-Agent Communication Events on the Bus
