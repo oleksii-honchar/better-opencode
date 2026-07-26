@@ -54,6 +54,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { AgentAttachment, FileAttachment, ReferenceAttachment, Source } from "@opencode-ai/core/session-prompt"
 import { Reference } from "@/reference/reference"
 import { store as storeAttachment, trackForMessage, hasAttachments as hasMessageAttachments } from "@/session/attachment"
+import { DynamicSkillScanner } from "@/skill/dynamic-scanner"
 
 const FILE_ATTACHMENTS_SYSTEM_PROMPT = `## File Attachments
   You can see files that have been attached by the user.
@@ -1164,6 +1165,13 @@ export const layer = Layer.effect(
           variant: input.variant,
         },
         { message: info, parts: resolvedParts },
+      )
+
+      // Dynamic skill discovery: scan parts for file paths and discover skills.
+      // Non-blocking: forked so it never delays message processing.
+      yield* DynamicSkillScanner.scanParts(resolvedParts as MessageV2.Part[], input.sessionID).pipe(
+        Effect.forkChild,
+        Effect.ignore,
       )
 
       const parts = yield* Effect.forEach(resolvedParts, (part) =>

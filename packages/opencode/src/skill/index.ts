@@ -80,7 +80,9 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Ski
 
 type State = {
   skills: Record<string, Info>
+  dynamicSkills: Record<string, Info>
   dirs: Set<string>
+  promoted: boolean
 }
 
 type DiscoveryState = {
@@ -99,6 +101,8 @@ export interface Interface {
   readonly all: () => Effect.Effect<Info[]>
   readonly dirs: () => Effect.Effect<string[]>
   readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
+  readonly registerDynamic: (newSkills: Info[]) => Effect.Effect<{ added: number; skipped: number }>
+  readonly promoteDynamicToStartup: () => Effect.Effect<{ promoted: number }>
 }
 
 const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.Interface) {
@@ -268,7 +272,7 @@ export const layer = Layer.effect(
     )
     const state = yield* InstanceState.make(
       Effect.fn("Skill.state")(function* () {
-        const s: State = { skills: {}, dirs: new Set() }
+        const s: State = { skills: {}, dynamicSkills: {}, dirs: new Set(), promoted: false }
         // Register the built-in skill BEFORE disk discovery so a user-disk
         // skill with the same name can override it.
         s.skills[CUSTOMIZE_OPENCODE_SKILL_NAME] = {
@@ -305,12 +309,47 @@ export const layer = Layer.effect(
 
     const available = Effect.fn("Skill.available")(function* (agent?: Agent.Info) {
       const s = yield* InstanceState.get(state)
+      // Only return startup skills (skills) — excludes dynamicSkills until promotion
+      // This preserves KV cache: system prompt stays stable during conversation
       const list = Object.values(s.skills).toSorted((a, b) => a.name.localeCompare(b.name))
       if (!agent) return list
       return list.filter((skill) => Permission.evaluate("skill", skill.name, agent.permission).action !== "deny")
     })
 
-    return Service.of({ get, require, all, dirs, available })
+    const registerDynamic = Effect.fn("Skill.registerDynamic")(function* (newSkills: Info[]) {
+      const s = yield* InstanceState.get(state)
+      let added = 0
+      let skipped = 0
+      for (const skill of newSkills) {
+        if (s.skills[skill.name] || s.dynamicSkills[skill.name]) {
+          skipped++
+        } else {
+          s.dynamicSkills[skill.name] = skill
+          added++
+        }
+      }
+      log.info("registerDynamic", { added, skipped, tag: "dynamic-skills" })
+      return { added, skipped }
+    })
+
+    const promoteDynamicToStartup = Effect.fn("Skill.promoteDynamicToStartup")(function* () {
+      const s = yield* InstanceState.get(state)
+      // Idempotent: no-op if already promoted
+      if (s.promoted) {
+        return { promoted: 0 }
+      }
+      const count = Object.keys(s.dynamicSkills).length
+      // Move all dynamic skills into startup skills
+      for (const [name, info] of Object.entries(s.dynamicSkills)) {
+        s.skills[name] = info
+      }
+      s.dynamicSkills = {}
+      s.promoted = true
+      log.info("promoteDynamicToStartup", { promoted: count, tag: "dynamic-skills" })
+      return { promoted: count }
+    })
+
+    return Service.of({ get, require, all, dirs, available, registerDynamic, promoteDynamicToStartup })
   }),
 )
 
@@ -351,3 +390,4 @@ export function fmt(list: Info[], opts: { verbose: boolean }) {
 }
 
 export * as Skill from "."
+export * as DynamicSkillScanner from "./dynamic-scanner"

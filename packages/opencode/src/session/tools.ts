@@ -18,6 +18,7 @@ import { SessionProcessor } from "./processor"
 import { PartID, MessageID, SessionID } from "./schema"
 import * as Log from "@opencode-ai/core/util/log"
 import { EffectBridge } from "@/effect/bridge"
+import { DynamicSkillScanner, type InjectDiscoveredSkillsResult } from "@/skill/dynamic-scanner"
 
 const log = Log.create({ service: "session.tools" })
 
@@ -166,6 +167,18 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
                 modelID: ModelID.make(input.model.api.id),
               })
             }
+            // Dynamic skill discovery: scan tool args for file paths and inject discovered skills
+            yield* DynamicSkillScanner.scanToolArgs(item.id, args, ctx.sessionID).pipe(Effect.ignore, Effect.forkChild)
+            const injectResult: InjectDiscoveredSkillsResult = yield* DynamicSkillScanner.injectDiscoveredSkills(ctx.sessionID)
+            if (injectResult.injected > 0 && injectResult.xml) {
+              yield* flushInjectedMessages({
+                injected: [{ role: "user", text: injectResult.xml }],
+                sessionID: ctx.sessionID,
+                agent: input.agent.name,
+                providerID: input.model.providerID,
+                modelID: ModelID.make(input.model.api.id),
+              })
+            }
             if (options.abortSignal?.aborted) {
               yield* input.processor.completeToolCall(options.toolCallId, output)
             }
@@ -231,6 +244,18 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           if (hookOutputWithInject.inject && hookOutputWithInject.inject.length > 0) {
             yield* flushInjectedMessages({
               injected: hookOutputWithInject.inject,
+              sessionID: ctx.sessionID,
+              agent: input.agent.name,
+              providerID: input.model.providerID,
+              modelID: ModelID.make(input.model.api.id),
+            })
+          }
+          // Dynamic skill discovery: scan tool args for file paths and inject discovered skills
+          yield* DynamicSkillScanner.scanToolArgs(key, args, ctx.sessionID).pipe(Effect.ignore, Effect.forkChild)
+          const mcpInjectResult: InjectDiscoveredSkillsResult = yield* DynamicSkillScanner.injectDiscoveredSkills(ctx.sessionID)
+          if (mcpInjectResult.injected > 0 && mcpInjectResult.xml) {
+            yield* flushInjectedMessages({
+              injected: [{ role: "user", text: mcpInjectResult.xml }],
               sessionID: ctx.sessionID,
               agent: input.agent.name,
               providerID: input.model.providerID,

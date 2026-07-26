@@ -21,6 +21,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionEvent } from "@opencode-ai/core/session-event"
 import { LLMError } from "@opencode-ai/llm"
+import { Skill } from "@/skill"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -229,6 +230,7 @@ export const layer = Layer.effect(
     const provider = yield* Provider.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const skills = yield* Skill.Service
 
     const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
       tokens: MessageV2.Assistant["tokens"]
@@ -585,6 +587,31 @@ export const layer = Layer.effect(
           })
         }
         yield* bus.publish(Event.Compacted, { sessionID: input.sessionID })
+
+        // Post-compaction: promote dynamic skills into startup skills so they appear in system prompt
+        // Forked so it never blocks compaction; errors caught and logged as warnings
+        yield* skills
+          .promoteDynamicToStartup()
+          .pipe(
+            Effect.tap((result) =>
+              Effect.sync(() => {
+                log.info("post-compaction-restore", {
+                  promoted: result.promoted,
+                  tag: "dynamic-skills",
+                })
+              }),
+            ),
+            Effect.tapError((error) =>
+              Effect.sync(() => {
+                log.warn("post-compaction skill promotion failed", {
+                  error: error instanceof Error ? error.message : String(error),
+                  tag: "dynamic-skills",
+                })
+              }),
+            ),
+            Effect.ignore,
+            Effect.forkChild,
+          )
       }
       return result
     })
@@ -641,6 +668,7 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(Config.defaultLayer),
     Layer.provide(RuntimeFlags.defaultLayer),
     Layer.provide(EventV2Bridge.defaultLayer),
+    Layer.provide(Skill.defaultLayer),
   ),
 )
 
