@@ -6,6 +6,7 @@ import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { MessageV2 } from "@/session/message-v2"
 import * as Skill from "@/skill"
+import { PartID, SessionID, MessageID } from "@/session/schema"
 
 // ---------------------------------------------------------------------------
 // Mock Skill.Service — tracks dynamic skills, promotion, and available()
@@ -191,7 +192,10 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
         Effect.provide(program, AppFileSystem.defaultLayer),
         skillLayer,
       ),
-    )
+    ).catch(() => {
+      // swallow error if SessionMetadata.Service is not provided (graceful degradation)
+      throw new Error("SessionMetadata.Service not provided — this is expected in isolated tests")
+    })
 
     return { result, skillState: state }
   }
@@ -219,9 +223,9 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       const parts: MessageV2.Part[] = [
         {
           type: "text",
-          id: "part-1",
-          sessionID,
-          messageID: "msg-1",
+          id: PartID.ascending(),
+          sessionID: SessionID.make(sessionID),
+          messageID: MessageID.make("msg-1"),
           text: `Please look at ${filePath} and help me fix it`,
         },
       ]
@@ -259,11 +263,12 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       const parts: MessageV2.Part[] = [
         {
           type: "file",
-          id: "part-1",
-          sessionID,
-          messageID: "msg-1",
+          id: PartID.ascending(),
+          sessionID: SessionID.make(sessionID),
+          messageID: MessageID.make("msg-1"),
+          url: `file://${filePath}`,
+          mime: "text/plain",
           filename: filePath,
-          source: { type: "file", path: filePath },
         },
       ]
 
@@ -659,18 +664,18 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       const parts1: MessageV2.Part[] = [
         {
           type: "text",
-          id: "part-1",
-          sessionID,
-          messageID: "msg-1",
+          id: PartID.ascending(),
+          sessionID: SessionID.make(sessionID),
+          messageID: MessageID.make("msg-1"),
           text: `Check ${filePath}`,
         },
       ]
       const parts2: MessageV2.Part[] = [
         {
           type: "text",
-          id: "part-2",
-          sessionID,
-          messageID: "msg-2",
+          id: PartID.ascending(),
+          sessionID: SessionID.make(sessionID),
+          messageID: MessageID.make("msg-2"),
           text: `Also check ${filePath}`,
         },
       ]

@@ -1,8 +1,9 @@
 import { describe, test, expect } from "bun:test"
-import { Effect, Layer, Context, Scope } from "effect"
+import { Effect, Layer, Context, Stream } from "effect"
 import * as Compaction from "@/session/compaction"
 import * as Skill from "@/skill"
 import { Bus } from "@/bus"
+import { BusEvent } from "@/bus/bus-event"
 import { Session } from "@/session/session"
 import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
@@ -11,10 +12,16 @@ import { Provider } from "@/provider/provider"
 import { SessionProcessor } from "@/session/processor"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { InstanceRef, WorkspaceRef } from "@/effect/instance-ref"
-import { WorkspaceContext } from "@/control-plane/workspace-context"
+import { InstanceRef } from "@/effect/instance-ref"
+import { SessionMetadataService } from "@/skill/session-metadata"
 import { SessionID, MessageID, PartID } from "@/session/schema"
 import { MessageV2 } from "@/session/message-v2"
+import type { InstanceContext } from "@/project/instance-context"
+import type * as Project from "@/project/project"
+import { ProjectID } from "@/project/schema"
+import { ProviderID, ModelID } from "@/provider/schema"
+import { LLM } from "@/session/llm"
+import { EventV2 } from "@opencode-ai/core/event"
 
 // ---------------------------------------------------------------------------
 // Mock Skill.Service that tracks calls
@@ -34,9 +41,6 @@ function createMockSkillService(initialState?: Partial<SkillState>): Skill.Inter
     promoted: initialState?.promoted ?? false,
     promoteCallCount: initialState?.promoteCallCount ?? 0,
   }
-
-  // Expose state for test inspection
-  Object.defineProperty(state, '__testState', { value: state, writable: true })
 
   return {
     get: Effect.fn("MockSkill.get")(function* (name: string) {
@@ -83,26 +87,31 @@ function createMockSkillService(initialState?: Partial<SkillState>): Skill.Inter
       return { promoted: count }
     }),
   }
-
-  // Expose state for test inspection
-  Object.defineProperty(service, '__testState', { value: state, writable: true })
-  return service
 }
 
 // ---------------------------------------------------------------------------
 // Mock Bus that tracks published events
 // ---------------------------------------------------------------------------
 
-function createMockBus(): Bus.Interface {
+function createMockBus(): Bus.Interface & { published: Array<{ name: string; data: unknown }> } {
   const publishedEvents: Array<{ name: string; data: unknown }> = []
 
   return {
-    publish: Effect.fn("MockBus.publish")(function* (event: Bus.Event, data: unknown) {
-      publishedEvents.push({ name: event.type, data })
-      return {}
+    publish: Effect.fn("MockBus.publish")(function* <D extends BusEvent.Definition>(def: D, properties: unknown) {
+      publishedEvents.push({ name: def.type, data: properties })
+      return
     }),
-    subscribe: Effect.fn("MockBus.subscribe")(function* () {
-      return Effect.never
+    subscribe: Effect.fn("MockBus.subscribe")(function* <D extends BusEvent.Definition>(_def: D) {
+      return Stream.empty
+    }),
+    subscribeAll: Effect.fn("MockBus.subscribeAll")(function* () {
+      return Stream.empty
+    }),
+    subscribeCallback: Effect.fn("MockBus.subscribeCallback")(function* <D extends BusEvent.Definition>(_def: D, _cb: unknown) {
+      return () => {}
+    }),
+    subscribeAllCallback: Effect.fn("MockBus.subscribeAllCallback")(function* (_cb: unknown) {
+      return () => {}
     }),
     get published() {
       return publishedEvents
@@ -118,10 +127,36 @@ function createMockSession(): Session.Interface {
   const messagesData: MessageV2.WithParts[] = []
 
   return {
-    messages: Effect.fn("MockSession.messages")(function* ({ sessionID }: { sessionID: SessionID }) {
+    list: Effect.fn("MockSession.list")(function* () {
+      return []
+    }),
+    create: Effect.fn("MockSession.create")(function* () {
+      return {} as Session.Info
+    }),
+    fork: Effect.fn("MockSession.fork")(function* () {
+      return {} as Session.Info
+    }),
+    touch: Effect.fn("MockSession.touch")(function* () {}),
+    get: Effect.fn("MockSession.get")(function* () {
+      return {} as Session.Info
+    }),
+    setTitle: Effect.fn("MockSession.setTitle")(function* () {}),
+    setArchived: Effect.fn("MockSession.setArchived")(function* () {}),
+    setPermission: Effect.fn("MockSession.setPermission")(function* () {}),
+    setRevert: Effect.fn("MockSession.setRevert")(function* () {}),
+    clearRevert: Effect.fn("MockSession.clearRevert")(function* () {}),
+    setSummary: Effect.fn("MockSession.setSummary")(function* () {}),
+    diff: Effect.fn("MockSession.diff")(function* () {
+      return []
+    }),
+    messages: Effect.fn("MockSession.messages")(function* (_: { sessionID: SessionID }) {
       return messagesData
     }),
-    updateMessage: Effect.fn("MockSession.updateMessage")(function* (msg: MessageV2.Message) {
+    children: Effect.fn("MockSession.children")(function* () {
+      return []
+    }),
+    remove: Effect.fn("MockSession.remove")(function* () {}),
+    updateMessage: Effect.fn("MockSession.updateMessage")(function* <T extends MessageV2.Info>(msg: T) {
       const withParts: MessageV2.WithParts = { info: msg, parts: [] }
       const existingIdx = messagesData.findIndex((m) => m.info.id === msg.id)
       if (existingIdx >= 0) {
@@ -131,14 +166,21 @@ function createMockSession(): Session.Interface {
       }
       return msg
     }),
-    updatePart: Effect.fn("MockSession.updatePart")(function* (part: MessageV2.Part) {
+    removeMessage: Effect.fn("MockSession.removeMessage")(function* () {
+      return MessageID.make("msg-removed")
+    }),
+    removePart: Effect.fn("MockSession.removePart")(function* () {
+      return PartID.make("prt-removed")
+    }),
+    getPart: Effect.fn("MockSession.getPart")(function* () {
+      return undefined
+    }),
+    updatePart: Effect.fn("MockSession.updatePart")(function* <T extends MessageV2.Part>(part: T) {
       return part
     }),
-    deleteMessage: Effect.fn("MockSession.deleteMessage")(function* () {
-      return
-    }),
-    deleteParts: Effect.fn("MockSession.deleteParts")(function* () {
-      return
+    updatePartDelta: Effect.fn("MockSession.updatePartDelta")(function* () {}),
+    findMessage: Effect.fn("MockSession.findMessage")(function* (_sessionID: SessionID, _pred: (msg: MessageV2.WithParts) => boolean) {
+      return { _tag: "None" } as const
     }),
   }
 }
@@ -148,21 +190,28 @@ function createMockSession(): Session.Interface {
 // ---------------------------------------------------------------------------
 
 function createMockAgent(): Agent.Interface {
+  const mockInfo: Agent.Info = {
+    name: "compaction",
+    description: "Mock agent",
+    mode: "all",
+        permission: [{ permission: "all", pattern: "*", action: "allow" as const }],
+    options: {},
+  }
   return {
-    get: Effect.fn("MockAgent.get")(function* (name: string) {
-      return {
-        name,
-        role: "assistant",
-        description: "Mock agent",
-        permission: { level: "allow" as const },
-        model: undefined,
-      }
+    get: Effect.fn("MockAgent.get")(function* (_name: string) {
+      return mockInfo
     }),
     list: Effect.fn("MockAgent.list")(function* () {
-      return []
+      return [mockInfo]
     }),
-    update: Effect.fn("MockAgent.update")(function* () {
-      return {}
+    defaultInfo: Effect.fn("MockAgent.defaultInfo")(function* () {
+      return mockInfo
+    }),
+    defaultAgent: Effect.fn("MockAgent.defaultAgent")(function* () {
+      return "default"
+    }),
+    generate: Effect.fn("MockAgent.generate")(function* () {
+      return { identifier: "gen", whenToUse: "always", systemPrompt: "" }
     }),
   }
 }
@@ -173,12 +222,13 @@ function createMockAgent(): Agent.Interface {
 
 function createMockPlugin(): Plugin.Interface {
   return {
-    trigger: Effect.fn("MockPlugin.trigger")(function* (_event, _ctx, defaultResult) {
-      return defaultResult
+    trigger: Effect.fn("MockPlugin.trigger")(function* <Name, Input, Output>(_name: Name, _input: Input, output: Output) {
+      return output
     }),
-    load: Effect.fn("MockPlugin.load")(function* () {
+    list: Effect.fn("MockPlugin.list")(function* () {
       return []
     }),
+    init: Effect.fn("MockPlugin.init")(function* () {}),
   }
 }
 
@@ -187,20 +237,29 @@ function createMockPlugin(): Plugin.Interface {
 // ---------------------------------------------------------------------------
 
 function createMockConfig(): Config.Interface {
+  const mockInfo: Config.Info = {
+    compaction: { tail_turns: 2 },
+  }
+  const mockConsoleState = {}
   return {
     get: Effect.fn("MockConfig.get")(function* () {
-      return {
-        compaction: {
-          tail_turns: 2,
-        },
-      }
+      return mockInfo
     }),
+    getGlobal: Effect.fn("MockConfig.getGlobal")(function* () {
+      return mockInfo
+    }),
+    getConsoleState: Effect.fn("MockConfig.getConsoleState")(function* () {
+      return {} as Config.ConsoleState
+    }),
+    update: Effect.fn("MockConfig.update")(function* () {}),
+    updateGlobal: Effect.fn("MockConfig.updateGlobal")(function* () {
+      return { info: mockInfo, changed: false }
+    }),
+    invalidate: Effect.fn("MockConfig.invalidate")(function* () {}),
     directories: Effect.fn("MockConfig.directories")(function* () {
       return []
     }),
-    update: Effect.fn("MockConfig.update")(function* () {
-      return {}
-    }),
+    waitForDependencies: Effect.fn("MockConfig.waitForDependencies")(function* () {}),
   }
 }
 
@@ -209,36 +268,46 @@ function createMockConfig(): Config.Interface {
 // ---------------------------------------------------------------------------
 
 function createMockProvider(): Provider.Interface {
+  const mockModelID = ModelID.make("mock-model")
+  const mockProviderID = ProviderID.make("mock-provider")
+  const mockModel: Provider.Model = {
+    id: mockModelID,
+    providerID: mockProviderID,
+    api: { id: "mock-model", url: "http://mock", npm: "mock" },
+    context: 128000,
+    maxTokens: 8192,
+    pricing: { input: 0, output: 0 },
+    limit: { context: 128000, output: 8192 },
+  }
+  const mockProvider: Provider.Info = {
+    id: mockProviderID,
+    name: "Mock Provider",
+    source: "config",
+    env: [],
+    options: {},
+    models: {},
+  }
   return {
-    getModel: Effect.fn("MockProvider.getModel")(function* () {
-      return {
-        id: "mock-model",
-        providerID: "mock-provider",
-        api: {
-          id: "mock-model",
-          name: "Mock Model",
-        },
-        context: 128000,
-        maxTokens: 8192,
-        pricing: { input: 0, output: 0 },
-        limit: {
-          context: 128000,
-          maxTokens: 8192,
-        },
-      }
+    list: Effect.fn("MockProvider.list")(function* () {
+      return { [mockProviderID]: mockProvider }
     }),
-    getProvider: Effect.fn("MockProvider.getProvider")(function* () {
-      return {
-        id: "mock-provider",
-        source: "local",
-        options: {},
-      }
+    getProvider: Effect.fn("MockProvider.getProvider")(function* (_providerID: ProviderID) {
+      return mockProvider
     }),
-    listModels: Effect.fn("MockProvider.listModels")(function* () {
-      return []
+    getModel: Effect.fn("MockProvider.getModel")(function* (_providerID: ProviderID, _modelID: ModelID) {
+      return mockModel
     }),
-    listProviders: Effect.fn("MockProvider.listProviders")(function* () {
-      return []
+    getLanguage: Effect.fn("MockProvider.getLanguage")(function* () {
+      return {} as any
+    }),
+    closest: Effect.fn("MockProvider.closest")(function* () {
+      return undefined
+    }),
+    getSmallModel: Effect.fn("MockProvider.getSmallModel")(function* () {
+      return undefined
+    }),
+    defaultModel: Effect.fn("MockProvider.defaultModel")(function* () {
+      return { providerID: mockProviderID, modelID: mockModelID }
     }),
   }
 }
@@ -248,16 +317,32 @@ function createMockProvider(): Provider.Interface {
 // ---------------------------------------------------------------------------
 
 function createMockSessionProcessor(): SessionProcessor.Interface {
+  const mockHandle: SessionProcessor.Handle = {
+    message: {
+      id: MessageID.make("msg-assistant"),
+      role: "assistant",
+      sessionID: SessionID.make("sess-test"),
+      agent: "test",
+      modelID: ModelID.make("mock-model"),
+      providerID: ProviderID.make("mock-provider"),
+      time: { created: Date.now() },
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    updateToolCall: Effect.fn("MockHandle.updateToolCall")(function* () {
+      return undefined
+    }),
+    completeToolCall: Effect.fn("MockHandle.completeToolCall")(function* () {}),
+    process: Effect.fn("MockHandle.process")(function* (_input: LLM.StreamInput): SessionProcessor.Result {
+      return "continue"
+    }),
+  }
   return {
-    create: Effect.fn("MockSessionProcessor.create")(function* () {
-      return {
-        process: Effect.fn("MockProcessor.process")(function* () {
-          return "continue"
-        }),
-        message: {
-          error: undefined,
-        },
-      }
+    create: Effect.fn("MockSessionProcessor.create")(function* (_input: {
+      assistantMessage: MessageV2.Assistant
+      sessionID: SessionID
+      model: Provider.Model
+    }) {
+      return mockHandle
     }),
   }
 }
@@ -266,12 +351,35 @@ function createMockSessionProcessor(): SessionProcessor.Interface {
 // Mock RuntimeFlags.Service
 // ---------------------------------------------------------------------------
 
-function createMockRuntimeFlags(): RuntimeFlags.Interface {
+function createMockRuntimeFlags(): RuntimeFlags.Info {
   return {
+    autoShare: false,
+    pure: false,
+    disableDefaultPlugins: false,
+    disableChannelDb: false,
+    disableEmbeddedWebUi: false,
     disableExternalSkills: false,
+    disableLspDownload: false,
+    skipMigrations: false,
+    disableClaudeCodePrompt: false,
     disableClaudeCodeSkills: false,
+    enableExa: false,
+    enableParallel: false,
+    enableExperimentalModels: false,
+    enableQuestionTool: false,
+    experimentalScout: false,
+    experimentalBackgroundSubagents: false,
+    experimentalLspTy: false,
+    experimentalLspTool: false,
+    experimentalOxfmt: false,
+    experimentalPlanMode: false,
     experimentalEventSystem: false,
+    experimentalWorkspaces: false,
+    experimentalIconDiscovery: false,
     outputTokenMax: undefined,
+    bashDefaultTimeoutMs: undefined,
+    experimentalNativeLlm: false,
+    client: "cli",
   }
 }
 
@@ -279,10 +387,18 @@ function createMockRuntimeFlags(): RuntimeFlags.Interface {
 // Mock EventV2Bridge.Service
 // ---------------------------------------------------------------------------
 
-function createMockEventV2Bridge(): EventV2Bridge.Interface {
+function createMockEventV2Bridge(): EventV2.Interface {
   return {
-    publish: Effect.fn("MockEventV2Bridge.publish")(function* () {
-      return {}
+    publish: Effect.fn("MockEventV2Bridge.publish")(function* <D extends EventV2.Definition>(_def: D, _data: unknown, _opts: unknown) {
+      return {} as EventV2.Payload<D>
+    }),
+    publishEvent: Effect.fn("MockEventV2Bridge.publishEvent")(function* <D extends EventV2.Definition>(_event: EventV2.Payload<D>) {
+      return _event
+    }),
+    subscribe: <D extends EventV2.Definition>(_def: D) => Stream.empty as Stream.Stream<EventV2.Payload<D>>,
+    all: () => Stream.empty as Stream.Stream<EventV2.Payload>,
+    sync: Effect.fn("MockEventV2Bridge.sync")(function* (_handler: EventV2.Sync) {
+      return () => {}
     }),
   }
 }
@@ -299,7 +415,7 @@ function buildCompactionMessages(parentID: MessageID, sessionID: SessionID): Mes
         role: "user",
         sessionID,
         agent: "test",
-        model: { providerID: "mock-provider", modelID: "mock-model" },
+        model: { providerID: ProviderID.make("mock-provider"), modelID: ModelID.make("mock-model") },
         time: { created: Date.now() },
       },
       parts: [
@@ -317,7 +433,6 @@ function buildCompactionMessages(parentID: MessageID, sessionID: SessionID): Mes
           sessionID,
           type: "compaction",
           auto: true,
-          time: { start: Date.now(), end: Date.now() },
         },
       ],
     },
@@ -329,10 +444,16 @@ function buildCompactionMessages(parentID: MessageID, sessionID: SessionID): Mes
 // ---------------------------------------------------------------------------
 
 describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => {
-  const mockInstanceContext = {
+  const mockProject: Project.Info = {
+    id: ProjectID.make("proj-test"),
+    worktree: "/test-worktree",
+    time: { created: Date.now(), updated: Date.now() },
+    sandboxes: [],
+  }
+  const mockInstanceContext: InstanceContext = {
     directory: "/test-dir",
     worktree: "/test-worktree",
-    sessionID: SessionID.descending(),
+    project: mockProject,
     workspaceFolders: ["/test-dir"],
   }
 
@@ -347,7 +468,23 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
     const mockFlagsLayer = Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags())
     const mockEventsLayer = Layer.succeed(EventV2Bridge.Service, createMockEventV2Bridge())
     const mockSkillLayer = Layer.succeed(Skill.Service, skillService)
-    const mockWorkspaceContextLayer = Layer.succeed(WorkspaceContext, { workspaceID: "ws-test" })
+    const mockSessionMetadataLayer = Layer.succeed(
+      SessionMetadataService,
+      {
+        getMetadata: Effect.fn("MockSessionMetadata.getMetadata")(function* (_sessionID: string) {
+          return { scannedDirectories: [], registeredSkills: [] }
+        }),
+        addScannedDirectory: Effect.fn("MockSessionMetadata.addScannedDirectory")(function* () {}),
+        addRegisteredSkill: Effect.fn("MockSessionMetadata.addRegisteredSkill")(function* () {}),
+        wasDirectoryScanned: Effect.fn("MockSessionMetadata.wasDirectoryScanned")(function* () {
+          return false
+        }),
+        getRegisteredSkills: Effect.fn("MockSessionMetadata.getRegisteredSkills")(function* () {
+          return []
+        }),
+        clear: Effect.fn("MockSessionMetadata.clear")(function* () {}),
+      },
+    )
 
     return Compaction.layer.pipe(
       Layer.provide(mockBusLayer),
@@ -360,7 +497,7 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
       Layer.provide(mockFlagsLayer),
       Layer.provide(mockEventsLayer),
       Layer.provide(mockSkillLayer),
-      Layer.provide(mockWorkspaceContextLayer),
+      Layer.provide(mockSessionMetadataLayer),
     )
   }
 
@@ -450,7 +587,7 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
       }),
       // Simulate a failure in promoteDynamicToStartup
       promoteDynamicToStartup: Effect.fn("MockSkill.promoteDynamicToStartup")(function* () {
-        return yield* Effect.fail(new Error("Promotion failed"))
+        return yield* Effect.fail({ promoted: 0 } satisfies never) as never
       }),
     }
 

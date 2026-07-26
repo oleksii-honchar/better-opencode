@@ -67,12 +67,12 @@ function isSkillFrontmatter(data: unknown): data is { name: string; description?
   )
 }
 
-function* resolveRealpath(dir: string): Effect.Effect<string> {
+const resolveRealpath = Effect.fnUntraced(function* (dir: string) {
   return yield* Effect.try({
     try: () => path.resolve(dir),
     catch: () => dir,
   })
-}
+})
 
 // ---------------------------------------------------------------------------
 // findAgentsDirectories
@@ -83,7 +83,7 @@ function* resolveRealpath(dir: string): Effect.Effect<string> {
  * Returns all found .agents/ directories, closest first.
  * Max depth of 50 levels.
  */
-export const findAgentsDirectories = Effect.fnUntraced(function* (filePath: string): Effect.Effect<string[]> {
+export const findAgentsDirectories = Effect.fnUntraced(function* (filePath: string) {
   const startDir = path.dirname(filePath)
   const found: string[] = []
   let current = yield* resolveRealpath(startDir)
@@ -128,7 +128,7 @@ export const findAgentsDirectories = Effect.fnUntraced(function* (filePath: stri
  * Scan a directory (e.g. .agents/, .opencode/, .claude/) for SKILL.md files.
  * Uses Glob.scan and ConfigMarkdown.parse, validates with isSkillFrontmatter.
  */
-export const scanAgentsSkills = Effect.fnUntraced(function* (agentsDir: string): Effect.Effect<Skill.Info[]> {
+export const scanAgentsSkills = Effect.fnUntraced(function* (agentsDir: string) {
   const cacheKey = yield* resolveRealpath(agentsDir)
 
   // Check cache
@@ -217,88 +217,93 @@ export const scanAgentsSkills = Effect.fnUntraced(function* (agentsDir: string):
  * deduplicate, and return results.
  * Non-blocking: wrapped in catchAll so errors don't propagate.
  */
-export const scanForFile = Effect.fnUntraced(function* (
+const scanForFileInternal = Effect.fnUntraced(function* (
   filePath: string,
   sessionID: string,
-): Effect.Effect<ScanResult> {
-  return yield* Effect.gen(function* () {
-    // Resolve the file path first
-    const resolvedFile = yield* resolveRealpath(filePath)
+) {
+  // Resolve the file path first
+  const resolvedFile = yield* resolveRealpath(filePath)
 
-    // Check if file's parent directory exists
-    const parentExists = yield* AppFileSystem.Service.pipe(
-      Effect.flatMap((fsys) => fsys.isDir(path.dirname(resolvedFile))),
-      Effect.catch(() => Effect.succeed(false)),
+  // Check if file's parent directory exists
+  const parentExists = yield* AppFileSystem.Service.pipe(
+    Effect.flatMap((fsys) => fsys.isDir(path.dirname(resolvedFile))),
+    Effect.catch(() => Effect.succeed(false)),
+  )
+
+  if (!parentExists) {
+    log.debug("file-parent-not-found", { filePath: resolvedFile })
+    return { agentsDirs: [], skills: [] } as ScanResult
+  }
+
+  // Find all .agents/ directories
+  const agentsDirs = yield* findAgentsDirectories(resolvedFile).pipe(
+    Effect.catch((error) => {
+      log.warn("find-agents-dirs-error", { filePath: resolvedFile, error: String(error) })
+      return Effect.succeed([] as string[])
+    }),
+  )
+
+  if (agentsDirs.length === 0) {
+    log.debug("no-agents-dirs-found", { filePath: resolvedFile })
+    return { agentsDirs: [], skills: [] } as ScanResult
+  }
+
+  // Scan each .agents/ directory for skills
+  const allSkills: Skill.Info[] = []
+  const seenNames = new Set<string>()
+
+  for (const agentsDir of agentsDirs) {
+    // Check if this directory was already scanned for this session (deduplication)
+    const alreadyScanned = yield* SessionMetadata.wasDirectoryScanned(sessionID, agentsDir).pipe(
+      Effect.catch(() => Effect.succeed(false))
     )
 
-    if (!parentExists) {
-      log.debug("file-parent-not-found", { filePath: resolvedFile })
-      return { agentsDirs: [], skills: [] }
+    if (alreadyScanned) {
+      log.debug("directory-already-scanned", { dir: agentsDir, sessionID })
+      continue
     }
 
-    // Find all .agents/ directories
-    const agentsDirs = yield* findAgentsDirectories(resolvedFile).pipe(
-      Effect.catch((error) => {
-        log.warn("find-agents-dirs-error", { filePath: resolvedFile, error: String(error) })
-        return Effect.succeed([] as string[])
-      }),
-    )
-
-    if (agentsDirs.length === 0) {
-      log.debug("no-agents-dirs-found", { filePath: resolvedFile })
-      return { agentsDirs: [], skills: [] }
-    }
-
-    // Scan each .agents/ directory for skills
-    const allSkills: Skill.Info[] = []
-    const seenNames = new Set<string>()
-
-    for (const agentsDir of agentsDirs) {
-      // Check if this directory was already scanned for this session (deduplication)
-      const alreadyScanned = yield* SessionMetadata.wasDirectoryScanned(sessionID, agentsDir).pipe(
-        Effect.catch(() => Effect.succeed(false))
-      )
-
-      if (alreadyScanned) {
-        log.debug("directory-already-scanned", { dir: agentsDir, sessionID })
-        continue
-      }
-
-      const dirSkills = yield* scanAgentsSkills(agentsDir).pipe(
+    const dirSkills = yield* scanAgentsSkills(agentsDir).pipe(
       Effect.catch((error) => {
         log.warn("scan-agents-skills-error", { dir: agentsDir, error: String(error) })
         return Effect.succeed([] as Skill.Info[])
       }),
+    )
+
+    // Mark directory as scanned for this session
+    if (dirSkills.length > 0) {
+      yield* SessionMetadata.addScannedDirectory(sessionID, agentsDir).pipe(
+        Effect.catch(() => Effect.void)
       )
-
-      // Mark directory as scanned for this session
-      if (dirSkills.length > 0) {
-        yield* SessionMetadata.addScannedDirectory(sessionID, agentsDir).pipe(
-          Effect.catch(() => Effect.void)
-        )
-      }
-
-      for (const skill of dirSkills) {
-        if (!seenNames.has(skill.name)) {
-          seenNames.add(skill.name)
-          allSkills.push(skill)
-        }
-      }
     }
 
-    log.info("scan-for-file-complete", {
-      filePath: resolvedFile,
-      sessionID,
-      agentsDirsCount: agentsDirs.length,
-      skillsCount: allSkills.length,
-      skillNames: allSkills.map((s) => s.name),
-    })
+    for (const skill of dirSkills) {
+      if (!seenNames.has(skill.name)) {
+        seenNames.add(skill.name)
+        allSkills.push(skill)
+      }
+    }
+  }
 
-    return { agentsDirs, skills: allSkills }
-  }).pipe(
+  log.info("scan-for-file-complete", {
+    filePath: resolvedFile,
+    sessionID,
+    agentsDirsCount: agentsDirs.length,
+    skillsCount: allSkills.length,
+    skillNames: allSkills.map((s) => s.name),
+  })
+
+  return { agentsDirs, skills: allSkills }
+})
+
+export const scanForFile = Effect.fnUntraced(function* (
+  filePath: string,
+  sessionID: string,
+) {
+  return yield* scanForFileInternal(filePath, sessionID).pipe(
     Effect.catch((error) => {
       log.warn("scan-for-file-error", { filePath, sessionID, error: String(error) })
-      return Effect.succeed({ agentsDirs: [], skills: [] })
+      return Effect.succeed({ agentsDirs: [], skills: [] } as ScanResult)
     }),
   )
 })
@@ -321,7 +326,7 @@ export const scanForFile = Effect.fnUntraced(function* (
 export const scanParts = Effect.fnUntraced(function* (
   parts: Part[],
   sessionID: string,
-): Effect.Effect<ScanPartsResult> {
+) {
   // Regex for absolute paths: Unix (/...) or Windows (C:\...)
   const absPathRegex = /((?:^|[\s"'`({,])((?:\/[^"\s'`)}\],]+)|(?:[A-Za-z]:\\[^"\s'`)}\],]+)))/g
 

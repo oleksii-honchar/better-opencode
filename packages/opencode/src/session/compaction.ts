@@ -23,6 +23,7 @@ import { SessionEvent } from "@opencode-ai/core/session-event"
 import { LLMError } from "@opencode-ai/llm"
 import { Skill } from "@/skill"
 import * as SessionMetadata from "@/skill/session-metadata"
+import { SessionMetadataService } from "@/skill/session-metadata"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -193,19 +194,21 @@ function splitTurn(input: {
   })
 }
 
+export interface ProcessInput {
+  readonly parentID: MessageID
+  readonly messages: MessageV2.WithParts[]
+  readonly sessionID: SessionID
+  readonly auto: boolean
+  readonly overflow?: boolean
+}
+
 export interface Interface {
   readonly isOverflow: (input: {
     tokens: MessageV2.Assistant["tokens"]
     model: Provider.Model
   }) => Effect.Effect<boolean>
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
-  readonly process: (input: {
-    parentID: MessageID
-    messages: MessageV2.WithParts[]
-    sessionID: SessionID
-    auto: boolean
-    overflow?: boolean
-  }) => Effect.Effect<"continue" | "stop", LLMError>
+  readonly process: (input: ProcessInput) => Effect.Effect<"continue" | "stop", LLMError, SessionMetadataService>
   readonly create: (input: {
     sessionID: SessionID
     agent: string
@@ -352,13 +355,7 @@ export const layer = Layer.effect(
       }
     })
 
-    const processCompaction = Effect.fn("SessionCompaction.process")(function* (input: {
-      parentID: MessageID
-      messages: MessageV2.WithParts[]
-      sessionID: SessionID
-      auto: boolean
-      overflow?: boolean
-    }) {
+    const processCompaction = Effect.fn("SessionCompaction.process")(function* (input: ProcessInput) {
       const parent = input.messages.findLast((m) => m.info.id === input.parentID)
       if (!parent || parent.info.role !== "user") {
         throw new Error(`Compaction parent must be a user message: ${input.parentID}`)
@@ -602,7 +599,7 @@ export const layer = Layer.effect(
                 })
               }),
             ),
-            Effect.tapError((error) =>
+            Effect.tapError((error: unknown) =>
               Effect.sync(() => {
                 log.warn("post-compaction skill promotion failed", {
                   error: error instanceof Error ? error.message : String(error),
@@ -631,7 +628,7 @@ export const layer = Layer.effect(
                   })
                 }),
               ),
-              Effect.tapError((error) =>
+              Effect.tapError((error: unknown) =>
                 Effect.sync(() => {
                   log.warn("post-compaction skill re-registration failed", {
                     sessionID: input.sessionID,

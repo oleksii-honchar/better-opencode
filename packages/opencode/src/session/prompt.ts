@@ -11,6 +11,7 @@ import { ModelID, ProviderID } from "../provider/schema"
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
+import { SessionMetadataService } from "@/skill/session-metadata"
 import { Bus } from "../bus"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
@@ -101,10 +102,10 @@ function isOrphanedInterruptedTool(part: MessageV2.ToolPart) {
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts, Image.Error | LLMError>
-  readonly loop: (input: LoopInput) => Effect.Effect<MessageV2.WithParts, LLMError>
-  readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts, Session.BusyError | LLMError>
-  readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts, Image.Error | LLMError>
+  readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts, Image.Error | LLMError, SessionMetadataService>
+  readonly loop: (input: LoopInput) => Effect.Effect<MessageV2.WithParts, LLMError, SessionMetadataService>
+  readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts, Session.BusyError | LLMError, SessionMetadataService>
+  readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts, Image.Error | LLMError, SessionMetadataService>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
 }
 
@@ -1304,7 +1305,7 @@ export const layer = Layer.effect(
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts, Image.Error | LLMError> = Effect.fn(
+    const prompt: Interface["prompt"] = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: PromptInput) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
@@ -1333,7 +1334,7 @@ export const layer = Layer.effect(
       throw new Error("Impossible")
     })
 
-    const runLoop: (sessionID: SessionID) => Effect.Effect<MessageV2.WithParts, LLMError> = Effect.fn("SessionPrompt.run")(
+    const runLoop: (sessionID: SessionID) => Effect.Effect<MessageV2.WithParts, LLMError, SessionMetadataService> = Effect.fn("SessionPrompt.run")(
       function* (sessionID: SessionID) {
         const ctx = yield* InstanceState.context
         const slog = elog.with({ sessionID })

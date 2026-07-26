@@ -129,55 +129,58 @@ export interface Interface {
 // These use Effect.sandbox to convert Service-not-found into a catchable error,
 // allowing graceful degradation when SessionMetadata is not wired (e.g., in isolated tests).
 export const getMetadata = (sessionID: string) =>
-  Effect.flatMap(Service, (svc) => svc.getMetadata(sessionID))
+  Effect.flatMap(SessionMetadataService, (svc) => svc.getMetadata(sessionID))
     .pipe(
       Effect.sandbox,
       Effect.catch(() => Effect.succeed(emptyMetadata()).pipe(Effect.sandbox))
     )
 
 export const addScannedDirectory = (sessionID: string, dirRealpath: string) =>
-  Effect.flatMap(Service, (svc) => svc.addScannedDirectory(sessionID, dirRealpath))
+  Effect.flatMap(SessionMetadataService, (svc) => svc.addScannedDirectory(sessionID, dirRealpath))
     .pipe(
       Effect.sandbox,
       Effect.catch(() => Effect.void.pipe(Effect.sandbox))
     )
 
 export const addRegisteredSkill = (sessionID: string, skill: SkillInfo) =>
-  Effect.flatMap(Service, (svc) => svc.addRegisteredSkill(sessionID, skill))
+  Effect.flatMap(SessionMetadataService, (svc) => svc.addRegisteredSkill(sessionID, skill))
     .pipe(
       Effect.sandbox,
       Effect.catch(() => Effect.void.pipe(Effect.sandbox))
     )
 
 export const wasDirectoryScanned = (sessionID: string, dirRealpath: string) =>
-  Effect.flatMap(Service, (svc) => svc.wasDirectoryScanned(sessionID, dirRealpath))
+  Effect.flatMap(SessionMetadataService, (svc) => svc.wasDirectoryScanned(sessionID, dirRealpath))
     .pipe(
       Effect.sandbox,
       Effect.catch(() => Effect.succeed(false).pipe(Effect.sandbox))
     )
 
 export const getRegisteredSkills = (sessionID: string) =>
-  Effect.flatMap(Service, (svc) => svc.getRegisteredSkills(sessionID))
+  Effect.flatMap(SessionMetadataService, (svc) => svc.getRegisteredSkills(sessionID))
     .pipe(
       Effect.sandbox,
       Effect.catch(() => Effect.succeed([] as SkillInfo[]).pipe(Effect.sandbox))
     )
 
 export const clearMetadata = (sessionID: string) =>
-  Effect.flatMap(Service, (svc) => svc.clearMetadata(sessionID))
+  Effect.flatMap(SessionMetadataService, (svc) => svc.clearMetadata(sessionID))
     .pipe(
       Effect.sandbox,
       Effect.catch(() => Effect.void.pipe(Effect.sandbox))
     )
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/SessionMetadata") {}
+export class SessionMetadataService extends Context.Service<SessionMetadataService, Interface>()("@opencode/SessionMetadata") {}
+
+// Alias for backward compatibility — use SessionMetadataService to avoid collision with Skill.Service
+export { SessionMetadataService as Service }
 
 // ---------------------------------------------------------------------------
 // Layer
 // ---------------------------------------------------------------------------
 
 export const layer = Layer.effect(
-  Service,
+  SessionMetadataService,
   Effect.gen(function* () {
     const storage = yield* Storage.Service
 
@@ -198,18 +201,20 @@ export const layer = Layer.effect(
             if (!draft) {
               draft = encodeMetadata(emptyMetadata())
             }
-            if (!draft.dynamicSkillsScanned.includes(dirRealpath)) {
-              draft.dynamicSkillsScanned.push(dirRealpath)
+            const m = draft as { dynamicSkillsScanned: string[]; dynamicSkillsRegistered: Record<string, SkillInfo> }
+            if (!m.dynamicSkillsScanned.includes(dirRealpath)) {
+              m.dynamicSkillsScanned.push(dirRealpath)
             }
           },
-        ).pipe(Effect.catch(() => {
-          // First write: create with initial data
-          const initial: Schema.Schema.Type<typeof StorageSchema> = {
-            dynamicSkillsScanned: [dirRealpath],
-            dynamicSkillsRegistered: {},
-          }
-          return storage.write(storageKey(sessionID), initial)
-        }))
+        ).pipe(
+          Effect.sandbox,
+          Effect.catch(() =>
+            storage.write(storageKey(sessionID), {
+              dynamicSkillsScanned: [dirRealpath],
+              dynamicSkillsRegistered: {},
+            }).pipe(Effect.sandbox),
+          ),
+        )
       },
     )
 
@@ -221,18 +226,21 @@ export const layer = Layer.effect(
             if (!draft) {
               draft = encodeMetadata(emptyMetadata())
             }
-            if (!draft.dynamicSkillsRegistered[skill.name]) {
-              draft.dynamicSkillsRegistered[skill.name] = skill
+            const m = draft as { dynamicSkillsScanned: string[]; dynamicSkillsRegistered: Record<string, SkillInfo> }
+            if (!m.dynamicSkillsRegistered[skill.name]) {
+              m.dynamicSkillsRegistered[skill.name] = skill
             }
           },
-        ).pipe(Effect.catch(() => {
-          // First write: create with initial data
-          const initial: Schema.Schema.Type<typeof StorageSchema> = {
-            dynamicSkillsScanned: [],
-            dynamicSkillsRegistered: { [skill.name]: skill },
-          }
-          return storage.write(storageKey(sessionID), initial)
-        }))
+        ).pipe(
+          Effect.sandbox,
+          Effect.catch(() =>
+            storage.write(storageKey(sessionID), {
+              dynamicSkillsScanned: [],
+              dynamicSkillsRegistered: { [skill.name]: skill },
+            }).pipe(Effect.sandbox),
+          ),
+          Effect.flatMap(Effect.sandbox),
+        )
       },
     )
 
@@ -254,7 +262,7 @@ export const layer = Layer.effect(
       yield* storage.remove(storageKey(sessionID)).pipe(Effect.ignore)
     })
 
-    return Service.of({
+    return SessionMetadataService.of({
       getMetadata,
       addScannedDirectory,
       addRegisteredSkill,
