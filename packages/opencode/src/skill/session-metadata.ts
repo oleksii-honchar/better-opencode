@@ -95,34 +95,34 @@ export interface Interface {
    * Get the full dynamic skills metadata for a session.
    * Returns empty metadata if not yet stored.
    */
-  readonly getMetadata: (sessionID: string) => Effect.Effect<DynamicSkillsMetadata>
+  readonly getMetadata: (sessionID: string) => Effect.Effect<DynamicSkillsMetadata, never>
 
   /**
    * Add a scanned .agents/ directory realpath to dynamicSkillsScanned.
    * Idempotent: no-op if already present.
    */
-  readonly addScannedDirectory: (sessionID: string, dirRealpath: string) => Effect.Effect<void>
+  readonly addScannedDirectory: (sessionID: string, dirRealpath: string) => Effect.Effect<void, never>
 
   /**
    * Add a registered skill to dynamicSkillsRegistered.
    * Idempotent: no-op if skill name already exists.
    */
-  readonly addRegisteredSkill: (sessionID: string, skill: SkillInfo) => Effect.Effect<void>
+  readonly addRegisteredSkill: (sessionID: string, skill: SkillInfo) => Effect.Effect<void, never>
 
   /**
    * Check if a directory realpath has already been scanned.
    */
-  readonly wasDirectoryScanned: (sessionID: string, dirRealpath: string) => Effect.Effect<boolean>
+  readonly wasDirectoryScanned: (sessionID: string, dirRealpath: string) => Effect.Effect<boolean, never>
 
   /**
    * Get all registered skills for a session (for post-compaction restoration).
    */
-  readonly getRegisteredSkills: (sessionID: string) => Effect.Effect<SkillInfo[]>
+  readonly getRegisteredSkills: (sessionID: string) => Effect.Effect<SkillInfo[], never>
 
   /**
    * Clear all dynamic skills metadata for a session.
    */
-  readonly clearMetadata: (sessionID: string) => Effect.Effect<void>
+  readonly clearMetadata: (sessionID: string) => Effect.Effect<void, never>
 }
 
 // Export individual methods for direct use (tests and consumers)
@@ -207,13 +207,13 @@ export const layer = Layer.effect(
             }
           },
         ).pipe(
-          Effect.sandbox,
           Effect.catch(() =>
             storage.write(storageKey(sessionID), {
               dynamicSkillsScanned: [dirRealpath],
               dynamicSkillsRegistered: {},
-            }).pipe(Effect.sandbox),
+            }),
           ),
+          Effect.catch(() => Effect.void),
         )
       },
     )
@@ -232,14 +232,13 @@ export const layer = Layer.effect(
             }
           },
         ).pipe(
-          Effect.sandbox,
           Effect.catch(() =>
             storage.write(storageKey(sessionID), {
               dynamicSkillsScanned: [],
               dynamicSkillsRegistered: { [skill.name]: skill },
-            }).pipe(Effect.sandbox),
+            }),
           ),
-          Effect.flatMap(Effect.sandbox),
+          Effect.catch(() => Effect.void),
         )
       },
     )

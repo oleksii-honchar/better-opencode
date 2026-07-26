@@ -4,6 +4,7 @@ import { Effect, Fiber, Layer } from "effect"
 import * as fs from "fs"
 import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
+import * as SessionMetadata from "@/skill/session-metadata"
 
 // We test the public API of dynamic-scanner module
 // Import is deferred until after implementation exists
@@ -26,8 +27,13 @@ describe("DynamicSkillScanner", () => {
     }
   }
 
-  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service>) {
-    return Effect.runPromise(Effect.provide(program, AppFileSystem.defaultLayer))
+  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | SessionMetadata.SessionMetadataService>) {
+    return Effect.runPromise(
+      Effect.provide(
+        Effect.provide(program, AppFileSystem.defaultLayer),
+        SessionMetadata.defaultLayer,
+      ),
+    )
   }
 
   // Helper: create a valid SKILL.md file
@@ -252,7 +258,7 @@ describe("DynamicSkillScanner", () => {
       fs.mkdirSync(path.dirname(filePath), { recursive: true })
       fs.writeFileSync(filePath, "content")
 
-      const result = await run(DynamicSkillScanner.scanForFile(filePath, "test-session-id"))
+      const result = await run(DynamicSkillScanner.scanForFile(filePath, "ses-test-id"))
       expect(result).toEqual({ agentsDirs: [], skills: [] })
     })
 
@@ -265,7 +271,7 @@ describe("DynamicSkillScanner", () => {
       fs.mkdirSync(path.dirname(filePath), { recursive: true })
       fs.writeFileSync(filePath, "content")
 
-      const result = await run(DynamicSkillScanner.scanForFile(filePath, "test-session-id"))
+      const result = await run(DynamicSkillScanner.scanForFile(filePath, "ses-test-id"))
       expect(result.agentsDirs.length).toBeGreaterThan(0)
       expect(result.skills).toHaveLength(1)
       expect(result.skills[0].name).toBe("discovered-skill")
@@ -289,7 +295,7 @@ describe("DynamicSkillScanner", () => {
       fs.mkdirSync(path.dirname(filePath), { recursive: true })
       fs.writeFileSync(filePath, "content")
 
-      const result = await run(DynamicSkillScanner.scanForFile(filePath, "test-session-id"))
+      const result = await run(DynamicSkillScanner.scanForFile(filePath, "ses-test-id"))
       // Should only return one skill (deduplicated by name, first found wins)
       expect(result.skills).toHaveLength(1)
       expect(result.skills[0].name).toBe("shared-skill")
@@ -298,7 +304,7 @@ describe("DynamicSkillScanner", () => {
     test("handles errors gracefully without throwing", async () => {
       await loadModule()
       // Point to a non-existent file
-      const result = await run(DynamicSkillScanner.scanForFile("/nonexistent/path/file.ts", "test-session-id"))
+      const result = await run(DynamicSkillScanner.scanForFile("/nonexistent/path/file.ts", "ses-test-id"))
       // Should return empty, not throw
       expect(result).toEqual({ agentsDirs: [], skills: [] })
     })
@@ -311,7 +317,7 @@ describe("DynamicSkillScanner", () => {
 
       // Fork it and verify it completes without blocking
       const program = Effect.gen(function* () {
-        const fiber = yield* DynamicSkillScanner.scanForFile(filePath, "test-session-id").pipe(
+        const fiber = yield* DynamicSkillScanner.scanForFile(filePath, "ses-test-id").pipe(
           Effect.forkChild,
         )
         return yield* Fiber.join(fiber)
@@ -340,12 +346,12 @@ describe("DynamicSkillScanner", () => {
       fs.writeFileSync(filePath2, "content")
 
       // First scan
-      const result1 = await run(DynamicSkillScanner.scanForFile(filePath1, "test-session-id"))
+      const result1 = await run(DynamicSkillScanner.scanForFile(filePath1, "ses-test-id"))
       expect(result1.skills).toHaveLength(1)
 
-      // Second scan from same agents dir should use cache
-      const result2 = await run(DynamicSkillScanner.scanForFile(filePath2, "test-session-id"))
-      expect(result2.skills).toHaveLength(1)
+      // Second scan from same agents dir: SessionMetadata dedup prevents re-scanning
+      const result2 = await run(DynamicSkillScanner.scanForFile(filePath2, "ses-test-id"))
+      expect(result2.skills).toHaveLength(0)
     })
 
     test("cache key uses realpath for symlink resolution", async () => {
@@ -361,7 +367,7 @@ describe("DynamicSkillScanner", () => {
       const filePath = path.join(symlinkDir, "file.ts")
       fs.writeFileSync(filePath, "content")
 
-      const result = await run(DynamicSkillScanner.scanForFile(filePath, "test-session-id"))
+      const result = await run(DynamicSkillScanner.scanForFile(filePath, "ses-test-id"))
       expect(result.skills).toHaveLength(1)
     })
   })
@@ -382,7 +388,7 @@ describe("DynamicSkillScanner", () => {
       fs.writeFileSync(filePath, "content")
 
       // Just verify it runs without error — logging is internal
-      const result = await run(DynamicSkillScanner.scanForFile(filePath, "test-session-id"))
+      const result = await run(DynamicSkillScanner.scanForFile(filePath, "ses-test-id"))
       expect(result.skills).toHaveLength(1)
     })
   })

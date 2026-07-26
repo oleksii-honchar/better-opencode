@@ -6,6 +6,7 @@ import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { MessageV2 } from "@/session/message-v2"
 import * as Skill from "@/skill"
+import * as SessionMetadata from "@/skill/session-metadata"
 import { PartID, SessionID, MessageID } from "@/session/schema"
 
 // Minimal mock layer: provides Skill.Service with controlled state
@@ -94,11 +95,14 @@ describe("DynamicSkillScanner.scanParts", () => {
     }
   }
 
-  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service>) {
+  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService>) {
     return Effect.runPromise(
       Effect.provide(
-        Effect.provide(program, AppFileSystem.defaultLayer),
-        mockSkillLayer(),
+        Effect.provide(
+          Effect.provide(program, AppFileSystem.defaultLayer),
+          mockSkillLayer(),
+        ),
+        SessionMetadata.defaultLayer,
       ),
     )
   }
@@ -135,13 +139,13 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: `Check this file: ${filePath}`,
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.scannedPaths).toContainEqual(
         expect.stringContaining("unix-repo"),
@@ -157,13 +161,13 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: `Check this file: ${winStylePath}`,
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       // Windows paths are extracted even if not real on this platform
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
@@ -181,13 +185,13 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: `Check these files: ${file1} and ${file2}`,
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBeGreaterThanOrEqual(2)
     })
 
@@ -197,13 +201,13 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: `Check src/file.ts and ./other.js`,
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBe(0)
     })
 
@@ -218,14 +222,14 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: `Called the Read tool with the following input: {"filePath":"${filePath}"}`,
           synthetic: true,
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
 
@@ -240,14 +244,14 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: `Called the Read tool with the following input: {"filePath":"${filePath}"}`,
           synthetic: true,
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
   })
@@ -264,7 +268,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "file",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           url: `file://${filePath}`,
           mime: "text/plain",
@@ -277,7 +281,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
 
@@ -292,7 +296,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "file",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           url: `file://${filePath}`,
           mime: "text/plain",
@@ -308,7 +312,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
 
@@ -323,7 +327,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "file",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           url: `data:text/plain;base64,${Buffer.from("content").toString("base64")}`,
           mime: "text/plain",
@@ -331,7 +335,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
   })
@@ -349,13 +353,13 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: `Check ${filePath} again ${filePath} and once more ${filePath}`,
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       // Should only scan the unique path once
       expect(result.scannedPaths.length).toBe(1)
@@ -373,14 +377,14 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: `Check this file: ${filePath}`,
         },
         {
           type: "file",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           url: `file://${filePath}`,
           mime: "text/plain",
@@ -393,7 +397,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       // Should only scan the unique path once
       expect(result.scannedPaths.length).toBe(1)
@@ -412,13 +416,13 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: `Check this file: ${filePath}`,
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       // Skills should be discovered and registered
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
@@ -433,13 +437,13 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: `Check this file: /nonexistent/path/to/file.ts`,
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       // Should not throw, paths found but no skills
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBe(0)
@@ -449,7 +453,7 @@ describe("DynamicSkillScanner.scanParts", () => {
       await loadModule()
       const parts: MessageV2.Part[] = []
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBe(0)
       expect(result.scannedPaths).toEqual([])
     })
@@ -460,13 +464,13 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: "Hello world, no paths here!",
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBe(0)
       expect(result.scannedPaths).toEqual([])
     })
@@ -477,14 +481,14 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "reasoning",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: "/some/path/here",
           time: { start: 0, end: 100 },
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBe(0)
     })
   })
@@ -501,14 +505,14 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: `Check this file: ${filePath}`,
         },
       ]
 
       // Just verify it runs without error — logging is internal
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
   })
@@ -520,14 +524,14 @@ describe("DynamicSkillScanner.scanParts", () => {
         {
           type: "text",
           id: PartID.ascending(),
-          sessionID: SessionID.make("test-session"),
+          sessionID: SessionID.make("ses-test"),
           messageID: MessageID.make("msg-1"),
           text: "Hello world",
         },
       ]
 
       const program = Effect.gen(function* () {
-        const fiber = yield* DynamicSkillScanner.scanParts(parts, SessionID.make("test-session")).pipe(
+        const fiber = yield* DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")).pipe(
           Effect.forkChild,
         )
         return yield* Fiber.join(fiber)

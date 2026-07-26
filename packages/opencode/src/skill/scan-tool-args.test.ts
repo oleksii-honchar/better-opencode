@@ -5,6 +5,7 @@ import * as fs from "fs"
 import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import * as Skill from "@/skill"
+import * as SessionMetadata from "@/skill/session-metadata"
 
 // ---------------------------------------------------------------------------
 // Mock Skill.Service layer (same pattern as scan-parts.test.ts)
@@ -93,11 +94,14 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     }
   }
 
-  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service>) {
+  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService>) {
     return Effect.runPromise(
       Effect.provide(
-        Effect.provide(program, AppFileSystem.defaultLayer),
-        mockSkillLayer(),
+        Effect.provide(
+          Effect.provide(program, AppFileSystem.defaultLayer),
+          mockSkillLayer(),
+        ),
+        SessionMetadata.defaultLayer,
       ),
     )
   }
@@ -131,7 +135,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       fs.writeFileSync(filePath, "content")
 
       const args = { filePath }
-      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "ses-test"))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
     })
@@ -144,7 +148,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       fs.writeFileSync(filePath, "content")
 
       const args = { filePath, content: "new content" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("write", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("write", args, "ses-test"))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
     })
@@ -157,7 +161,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       fs.writeFileSync(filePath, "content")
 
       const args = { filePath, oldString: "old", newString: "new" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("edit", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("edit", args, "ses-test"))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
     })
@@ -168,7 +172,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       const pattern = path.join(repoDir, "src", "**/*.ts")
 
       const args = { pattern }
-      const result = await run(DynamicSkillScanner.scanToolArgs("glob", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("glob", args, "ses-test"))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
     })
@@ -182,7 +186,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       fs.mkdirSync(subDir, { recursive: true })
 
       const args = { path: subDir, pattern: "some-pattern" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("grep", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("grep", args, "ses-test"))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
     })
@@ -202,7 +206,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
 `
       // Patch uses relative paths; we resolve them relative to repoDir
       const args = { patch }
-      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, "ses-test"))
       // Should extract path from +++ b/ line
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
@@ -224,7 +228,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
 +new2
 `
       const args = { patch }
-      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, "ses-test"))
       expect(result.pathsFound).toBeGreaterThanOrEqual(2)
     })
   })
@@ -233,7 +237,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     test("handles unknown tool gracefully as no-op", async () => {
       await loadModule()
       const args = { someArg: "value" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("unknown-tool", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("unknown-tool", args, "ses-test"))
       expect(result.pathsFound).toBe(0)
       expect(result.skillsRegistered).toBe(0)
     })
@@ -241,14 +245,14 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     test("handles MCP tool with no known path fields gracefully", async () => {
       await loadModule()
       const args = { server: "some-mcp", command: "do-something" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("some-mcp-server__someTool", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("some-mcp-server__someTool", args, "ses-test"))
       expect(result.pathsFound).toBe(0)
       expect(result.skillsRegistered).toBe(0)
     })
 
     test("handles empty args gracefully", async () => {
       await loadModule()
-      const result = await run(DynamicSkillScanner.scanToolArgs("read", {}, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("read", {}, "ses-test"))
       expect(result.pathsFound).toBe(0)
       expect(result.skillsRegistered).toBe(0)
     })
@@ -263,7 +267,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       fs.writeFileSync(filePath, "content")
 
       const args = { filePath }
-      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "ses-test"))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
       expect(result.skillNames).toContain("tool-registered-skill")
@@ -274,7 +278,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     test("handles non-existent filePath gracefully", async () => {
       await loadModule()
       const args = { filePath: "/nonexistent/path/to/file.ts" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "ses-test"))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBe(0)
     })
@@ -282,7 +286,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     test("handles invalid patch format gracefully", async () => {
       await loadModule()
       const args = { patch: "not a valid patch at all" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, "ses-test"))
       expect(result.pathsFound).toBe(0)
       expect(result.skillsRegistered).toBe(0)
     })
@@ -290,7 +294,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     test("handles malformed args gracefully", async () => {
       await loadModule()
       const args = { filePath: 12345 } // wrong type
-      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "test-session"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "ses-test"))
       expect(result.pathsFound).toBe(0)
       expect(result.skillsRegistered).toBe(0)
     })
@@ -302,7 +306,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       const args = { filePath: "/some/path.ts" }
 
       const program = Effect.gen(function* () {
-        const fiber = yield* DynamicSkillScanner.scanToolArgs("read", args, "test-session").pipe(
+        const fiber = yield* DynamicSkillScanner.scanToolArgs("read", args, "ses-test").pipe(
           Effect.forkChild,
         )
         return yield* Fiber.join(fiber)
@@ -331,8 +335,13 @@ describe("DynamicSkillScanner.injectDiscoveredSkills", () => {
     }
   }
 
-  function run<T>(program: Effect.Effect<T, unknown, Skill.Service>) {
-    return Effect.runPromise(Effect.provide(program, mockSkillLayer()))
+  function run<T>(program: Effect.Effect<T, unknown, Skill.Service | SessionMetadata.SessionMetadataService>) {
+    return Effect.runPromise(
+      Effect.provide(
+        Effect.provide(program, mockSkillLayer()),
+        SessionMetadata.defaultLayer,
+      ),
+    )
   }
 
   describe("synthetic message formatting", () => {
@@ -364,7 +373,7 @@ describe("DynamicSkillScanner.injectDiscoveredSkills", () => {
 
       const result = await Effect.runPromise(
         Effect.provide(
-          DynamicSkillScanner.injectDiscoveredSkills("test-session"),
+          DynamicSkillScanner.injectDiscoveredSkills("ses-test"),
           mockLayer,
         ),
       )
@@ -375,7 +384,7 @@ describe("DynamicSkillScanner.injectDiscoveredSkills", () => {
 
     test("returns no injection when no dynamic skills exist", async () => {
       await loadModule()
-      const result = await run(DynamicSkillScanner.injectDiscoveredSkills("test-session"))
+      const result = await run(DynamicSkillScanner.injectDiscoveredSkills("ses-test"))
       expect(result.injected).toBe(0)
       expect(result.skillCount).toBe(0)
     })
@@ -409,7 +418,7 @@ describe("DynamicSkillScanner.injectDiscoveredSkills", () => {
 
       const result = await Effect.runPromise(
         Effect.provide(
-          DynamicSkillScanner.injectDiscoveredSkills("test-session"),
+          DynamicSkillScanner.injectDiscoveredSkills("ses-test"),
           mockLayer,
         ),
       )
@@ -434,7 +443,7 @@ describe("DynamicSkillScanner.injectDiscoveredSkills", () => {
       await loadModule()
 
       const program = Effect.gen(function* () {
-        const fiber = yield* DynamicSkillScanner.injectDiscoveredSkills("test-session").pipe(
+        const fiber = yield* DynamicSkillScanner.injectDiscoveredSkills("ses-test").pipe(
           Effect.forkChild,
         )
         return yield* Fiber.join(fiber)
@@ -494,10 +503,13 @@ describe("DynamicSkillScanner integration: scanToolArgs + injectDiscoveredSkills
     const scanResult = await Effect.runPromise(
       Effect.provide(
         Effect.provide(
-          DynamicSkillScanner.scanToolArgs("read", args, sessionID),
-          AppFileSystem.defaultLayer,
+          Effect.provide(
+            DynamicSkillScanner.scanToolArgs("read", args, sessionID),
+            AppFileSystem.defaultLayer,
+          ),
+          mockSkillLayer(),
         ),
-        mockSkillLayer(),
+        SessionMetadata.defaultLayer,
       ),
     )
 

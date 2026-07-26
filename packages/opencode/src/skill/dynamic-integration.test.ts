@@ -6,6 +6,7 @@ import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { MessageV2 } from "@/session/message-v2"
 import * as Skill from "@/skill"
+import * as SessionMetadata from "@/skill/session-metadata"
 import { PartID, SessionID, MessageID } from "@/session/schema"
 
 // ---------------------------------------------------------------------------
@@ -157,7 +158,7 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dynamic-integration-test-"))
-    sessionID = `test-session-${Date.now()}`
+    sessionID = `ses-test-${Date.now()}`
   })
 
   afterEach(() => {
@@ -178,9 +179,9 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
     return path.join(dir, "SKILL.md")
   }
 
-  // Run with mock Skill.Service and AppFileSystem — matches scan-parts.test.ts pattern
+  // Run with mock Skill.Service, AppFileSystem, and SessionMetadata — matches scan-parts.test.ts pattern
   function runWithMockSkill<T>(
-    program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service>,
+    program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService>,
     initialSkills?: Record<string, Skill.Info>,
   ): { result: Promise<T>; skillState: SkillState } {
     const { service, state } = createMockServiceWithTracking(initialSkills)
@@ -189,8 +190,11 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
 
     const result = Effect.runPromise(
       Effect.provide(
-        Effect.provide(program, AppFileSystem.defaultLayer),
-        skillLayer,
+        Effect.provide(
+          Effect.provide(program, AppFileSystem.defaultLayer),
+          skillLayer,
+        ),
+        SessionMetadata.defaultLayer,
       ),
     ).catch(() => {
       // swallow error if SessionMetadata.Service is not provided (graceful degradation)
@@ -641,10 +645,9 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       // First scan finds the skill
       expect(first.skills.length).toBe(1)
 
-      // Second scan: cache returns same skills (SessionMetadata dedup not wired in this test)
-      // In production, SessionMetadata.wasDirectoryScanned would prevent re-scanning
-      expect(second.skills.length).toBe(1)
-      expect(second.skills[0].name).toBe(first.skills[0].name)
+      // Second scan: SessionMetadata.dedup prevents re-scanning same directory
+      // (cache is now wired via SessionMetadata.defaultLayer in runWithMockSkill)
+      expect(second.skills.length).toBe(0)
     })
 
     test("registerDynamic dedup prevents same skill from being registered twice via scanParts", async () => {

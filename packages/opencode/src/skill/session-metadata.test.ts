@@ -13,17 +13,28 @@ import {
   clearMetadata,
   layer as SessionMetadataLayer,
 } from "@/skill/session-metadata"
+import type { DynamicSkillsMetadata } from "@/skill/session-metadata"
 import * as Storage from "@/storage/storage"
 import * as Skill from "@/skill"
 
-const encodeSync = <A, I, R>(schema: Schema.Schema<A, I, R>, input: A): I =>
-  Schema.encodeSync(schema)(input)
-
-const decodeSync = <A, I, R>(schema: Schema.Schema<A, I, R>, input: I): A =>
-  Schema.decodeSync(schema)(input)
+// Helpers not used in tests — kept for potential future use
+// const encodeSync = <A>(schema: Schema.Schema<A>, input: A) => Schema.encodeSync(schema)(input)
+// const decodeSync = <A>(schema: Schema.Schema<A>, input: unknown) => Schema.decodeSync(schema)(input)
 
 // Convenience namespace for test readability
-const SessionMetadata = {
+type SessionMetadataType = {
+  DynamicSkillsMetadataClass: typeof DynamicSkillsMetadataClass
+  encodeMetadata: typeof encodeMetadata
+  decodeMetadata: typeof decodeMetadata
+  getMetadata: typeof getMetadata
+  addScannedDirectory: typeof addScannedDirectory
+  addRegisteredSkill: typeof addRegisteredSkill
+  wasDirectoryScanned: typeof wasDirectoryScanned
+  getRegisteredSkills: typeof getRegisteredSkills
+  clearMetadata: typeof clearMetadata
+}
+
+const SessionMetadata: SessionMetadataType = {
   DynamicSkillsMetadataClass,
   encodeMetadata,
   decodeMetadata,
@@ -53,13 +64,13 @@ function createMockStorage(initial: unknown[] = []): Storage.Interface {
   const keyToPath = (key: string[]) => key.join("/")
 
   return {
-    read: Effect.fn("MockStorage.read")(function* <T>(key: string[]) {
+    read: Effect.fn("MockStorage.read")(function* (key: string[]) {
       const path = keyToPath(key)
       const value = state.get(path)
       if (value === undefined) {
         return yield* new Storage.NotFoundError({ message: `Not found: ${path}` })
       }
-      return value as T
+      return value as never
     }),
     write: Effect.fn("MockStorage.write")(function* (key: string[], content: unknown) {
       const path = keyToPath(key)
@@ -110,7 +121,7 @@ describe("SessionMetadata — Dynamic Skills Tracking", () => {
 
   describe("encodeMetadata/decodeMetadata", () => {
     test("encodes Set to Array and decodes back", () => {
-      const input: SessionMetadata.DynamicSkillsMetadata = {
+      const input: DynamicSkillsMetadata = {
         dynamicSkillsScanned: new Set(["/repo1/.agents", "/repo2/.agents"]),
         dynamicSkillsRegistered: {
           "skill-a": {
@@ -133,7 +144,7 @@ describe("SessionMetadata — Dynamic Skills Tracking", () => {
     })
 
     test("handles empty metadata", () => {
-      const empty: SessionMetadata.DynamicSkillsMetadata = {
+      const empty: DynamicSkillsMetadata = {
         dynamicSkillsScanned: new Set(),
         dynamicSkillsRegistered: {},
       }
@@ -157,7 +168,7 @@ describe("SessionMetadata — Dynamic Skills Tracking", () => {
     })
 
     test("returns stored metadata when it exists", async () => {
-      const initial: SessionMetadata.DynamicSkillsMetadata = {
+      const initial: DynamicSkillsMetadata = {
         dynamicSkillsScanned: new Set(["/repo1/.agents"]),
         dynamicSkillsRegistered: {
           "skill-x": {
