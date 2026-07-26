@@ -22,6 +22,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionEvent } from "@opencode-ai/core/session-event"
 import { LLMError } from "@opencode-ai/llm"
 import { Skill } from "@/skill"
+import * as SessionMetadata from "@/skill/session-metadata"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -590,9 +591,9 @@ export const layer = Layer.effect(
 
         // Post-compaction: promote dynamic skills into startup skills so they appear in system prompt
         // Forked so it never blocks compaction; errors caught and logged as warnings
-        yield* skills
-          .promoteDynamicToStartup()
-          .pipe(
+        yield* Effect.gen(function* () {
+          // Step 1: Promote dynamic skills to startup skills
+          const promotionResult = yield* skills.promoteDynamicToStartup().pipe(
             Effect.tap((result) =>
               Effect.sync(() => {
                 log.info("post-compaction-restore", {
@@ -610,8 +611,43 @@ export const layer = Layer.effect(
               }),
             ),
             Effect.ignore,
-            Effect.forkChild,
           )
+
+          // Step 2: Re-register skills from session metadata (survives compaction)
+          // This ensures skills referenced in compacted context are re-registered in the new process
+          const registeredSkills = yield* SessionMetadata.getRegisteredSkills(input.sessionID).pipe(
+            Effect.catch(() => Effect.succeed([] as Skill.Info[]))
+          )
+
+          if (registeredSkills.length > 0) {
+            yield* skills.registerDynamic(registeredSkills).pipe(
+              Effect.tap((result) =>
+                Effect.sync(() => {
+                  log.info("post-compaction skill re-registration", {
+                    sessionID: input.sessionID,
+                    reRegistered: result.added,
+                    skipped: result.skipped,
+                    tag: "dynamic-skills",
+                  })
+                }),
+              ),
+              Effect.tapError((error) =>
+                Effect.sync(() => {
+                  log.warn("post-compaction skill re-registration failed", {
+                    sessionID: input.sessionID,
+                    error: error instanceof Error ? error.message : String(error),
+                    tag: "dynamic-skills",
+                  })
+                }),
+              ),
+              Effect.ignore,
+            )
+          }
+
+          return promotionResult
+        }).pipe(
+          Effect.forkChild
+        )
       }
       return result
     })

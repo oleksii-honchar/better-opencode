@@ -62,6 +62,11 @@ export function webSearchEnabled(providerID: ProviderID, flags = { exa: false, p
   return providerID === ProviderID.opencode || flags.exa || flags.parallel
 }
 
+/** Detect Qwen-family models by model ID (case-insensitive). */
+export function isQwenModel(modelID: string): boolean {
+  return /qwen/i.test(modelID)
+}
+
 type TaskDef = Tool.InferDef<typeof TaskTool>
 type ReadDef = Tool.InferDef<typeof ReadTool>
 
@@ -331,9 +336,21 @@ export const layer: Layer.Layer<
     })
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
+      const qwenModel = isQwenModel(input.modelID)
+      const cfg = yield* config.get()
+
       const filtered = (yield* all()).filter((tool) => {
         if (tool.id === WebSearchTool.id) {
           return webSearchEnabled(input.providerID, { exa: flags.enableExa, parallel: flags.enableParallel })
+        }
+
+        // Qwen models: hide apply_patch by default; show only if config explicitly enables it
+        if (tool.id === ApplyPatchTool.id) {
+          if (qwenModel) {
+            return cfg.toolFilter?.applyPatch?.enabled === true
+          }
+          // Non-Qwen: use existing config-based filter (visible by default)
+          return cfg.toolFilter?.applyPatch?.enabled !== false
         }
 
         return true

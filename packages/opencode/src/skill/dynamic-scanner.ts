@@ -4,6 +4,7 @@ import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Glob } from "@opencode-ai/core/util/glob"
 import { ConfigMarkdown } from "@/config/markdown"
 import { Skill } from "@/skill"
+import * as SessionMetadata from "@/skill/session-metadata"
 import * as Log from "@opencode-ai/core/util/log"
 import { isRecord } from "@/util/record"
 import type { Part } from "@/session/message-v2"
@@ -253,12 +254,29 @@ export const scanForFile = Effect.fnUntraced(function* (
     const seenNames = new Set<string>()
 
     for (const agentsDir of agentsDirs) {
+      // Check if this directory was already scanned for this session (deduplication)
+      const alreadyScanned = yield* SessionMetadata.wasDirectoryScanned(sessionID, agentsDir).pipe(
+        Effect.catch(() => Effect.succeed(false))
+      )
+
+      if (alreadyScanned) {
+        log.debug("directory-already-scanned", { dir: agentsDir, sessionID })
+        continue
+      }
+
       const dirSkills = yield* scanAgentsSkills(agentsDir).pipe(
       Effect.catch((error) => {
         log.warn("scan-agents-skills-error", { dir: agentsDir, error: String(error) })
         return Effect.succeed([] as Skill.Info[])
       }),
       )
+
+      // Mark directory as scanned for this session
+      if (dirSkills.length > 0) {
+        yield* SessionMetadata.addScannedDirectory(sessionID, agentsDir).pipe(
+          Effect.catch(() => Effect.void)
+        )
+      }
 
       for (const skill of dirSkills) {
         if (!seenNames.has(skill.name)) {
@@ -405,11 +423,15 @@ export const scanParts = Effect.fnUntraced(function* (
     skillsRegistered = registration.added
     skillNames = allNewSkills.map((s) => s.name)
 
-    // Track newly registered skills for injection
+    // Track newly registered skills for injection and session metadata
     for (const skill of allNewSkills) {
       if (!injectionQueue.has(skill.name)) {
         injectionQueue.set(skill.name, skill)
       }
+      // Record skill registration in session metadata (for post-compaction restoration)
+      yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
+        Effect.catch(() => Effect.void)
+      )
     }
 
     if (skillsRegistered > 0) {
@@ -548,11 +570,15 @@ export const scanToolArgs = Effect.fnUntraced(function* (
       skillsRegistered = registration.added
       skillNames = allNewSkills.map((s) => s.name)
 
-      // Track newly registered skills for injection
+      // Track newly registered skills for injection and session metadata
       for (const skill of allNewSkills) {
         if (!injectionQueue.has(skill.name)) {
           injectionQueue.set(skill.name, skill)
         }
+        // Record skill registration in session metadata (for post-compaction restoration)
+        yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
+          Effect.catch(() => Effect.void)
+        )
       }
 
       if (skillsRegistered > 0) {
