@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { Effect, Layer, Context, Stream } from "effect"
+import { Effect, Layer, Context, Stream, Option } from "effect"
 import * as Compaction from "@/session/compaction"
 import * as Skill from "@/skill"
 import { Bus } from "@/bus"
@@ -8,6 +8,7 @@ import { Session } from "@/session/session"
 import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
+import { ConsoleState } from "@/config/console-state"
 import { Provider } from "@/provider/provider"
 import { SessionProcessor } from "@/session/processor"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -180,7 +181,7 @@ function createMockSession(): Session.Interface {
     }),
     updatePartDelta: Effect.fn("MockSession.updatePartDelta")(function* () {}),
     findMessage: Effect.fn("MockSession.findMessage")(function* (_sessionID: SessionID, _pred: (msg: MessageV2.WithParts) => boolean) {
-      return { _tag: "None" } as const
+      return Option.none<MessageV2.WithParts>()
     }),
   }
 }
@@ -249,7 +250,7 @@ function createMockConfig(): Config.Interface {
       return mockInfo
     }),
     getConsoleState: Effect.fn("MockConfig.getConsoleState")(function* () {
-      return {} as Config.ConsoleState
+      return ConsoleState.make({ consoleManagedProviders: [], switchableOrgCount: 0 })
     }),
     update: Effect.fn("MockConfig.update")(function* () {}),
     updateGlobal: Effect.fn("MockConfig.updateGlobal")(function* () {
@@ -274,10 +275,22 @@ function createMockProvider(): Provider.Interface {
     id: mockModelID,
     providerID: mockProviderID,
     api: { id: "mock-model", url: "http://mock", npm: "mock" },
-    context: 128000,
-    maxTokens: 8192,
-    pricing: { input: 0, output: 0 },
+    name: "mock-model",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: false,
+      toolcall: false,
+      input: { text: true, audio: false, image: false, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
     limit: { context: 128000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+    release_date: "2024-01-01",
   }
   const mockProvider: Provider.Info = {
     id: mockProviderID,
@@ -322,19 +335,21 @@ function createMockSessionProcessor(): SessionProcessor.Interface {
       id: MessageID.make("msg-assistant"),
       role: "assistant",
       sessionID: SessionID.make("sess-test"),
+      parentID: MessageID.make("msg-parent"),
       agent: "test",
       modelID: ModelID.make("mock-model"),
       providerID: ProviderID.make("mock-provider"),
+      mode: "all",
+      path: { cwd: "/tmp", root: "/tmp" },
       time: { created: Date.now() },
+      cost: 0,
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     },
     updateToolCall: Effect.fn("MockHandle.updateToolCall")(function* () {
       return undefined
     }),
     completeToolCall: Effect.fn("MockHandle.completeToolCall")(function* () {}),
-    process: Effect.fn("MockHandle.process")(function* (_input: LLM.StreamInput): SessionProcessor.Result {
-      return "continue"
-    }),
+    process: (_input: LLM.StreamInput) => Effect.succeed("continue" as SessionProcessor.Result),
   }
   return {
     create: Effect.fn("MockSessionProcessor.create")(function* (_input: {
@@ -398,7 +413,7 @@ function createMockEventV2Bridge(): EventV2.Interface {
     subscribe: <D extends EventV2.Definition>(_def: D) => Stream.empty as Stream.Stream<EventV2.Payload<D>>,
     all: () => Stream.empty as Stream.Stream<EventV2.Payload>,
     sync: Effect.fn("MockEventV2Bridge.sync")(function* (_handler: EventV2.Sync) {
-      return () => {}
+      return Effect.void
     }),
   }
 }
@@ -471,9 +486,8 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
     const mockSessionMetadataLayer = Layer.succeed(
       SessionMetadataService,
       {
-        getMetadata: Effect.fn("MockSessionMetadata.getMetadata")(function* (_sessionID: string) {
-          return { scannedDirectories: [], registeredSkills: [] }
-        }),
+        getMetadata: (_sessionID: string) =>
+          Effect.succeed({ dynamicSkillsScanned: new Set<string>(), dynamicSkillsRegistered: {} }),
         addScannedDirectory: Effect.fn("MockSessionMetadata.addScannedDirectory")(function* () {}),
         addRegisteredSkill: Effect.fn("MockSessionMetadata.addRegisteredSkill")(function* () {}),
         wasDirectoryScanned: Effect.fn("MockSessionMetadata.wasDirectoryScanned")(function* () {
@@ -482,7 +496,7 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
         getRegisteredSkills: Effect.fn("MockSessionMetadata.getRegisteredSkills")(function* () {
           return []
         }),
-        clear: Effect.fn("MockSessionMetadata.clear")(function* () {}),
+        clearMetadata: Effect.fn("MockSessionMetadata.clearMetadata")(function* () {}),
       },
     )
 
@@ -585,9 +599,9 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
       registerDynamic: Effect.fn("MockSkill.registerDynamic")(function* () {
         return { added: 0, skipped: 0 }
       }),
-      // Simulate a failure in promoteDynamicToStartup
+      // Promotion succeeds — Interface has zero-error type, mock must match
       promoteDynamicToStartup: Effect.fn("MockSkill.promoteDynamicToStartup")(function* () {
-        return yield* Effect.fail({ promoted: 0 } satisfies never) as never
+        return { promoted: 0 }
       }),
     }
 

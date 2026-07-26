@@ -176,6 +176,7 @@ function makePrompt(input?: { processor?: "blocking" }) {
     Plugin.defaultLayer,
     Config.defaultLayer,
     ProviderSvc.defaultLayer,
+    Skill.defaultLayer,
     lsp,
     mcp,
     AppFileSystem.defaultLayer,

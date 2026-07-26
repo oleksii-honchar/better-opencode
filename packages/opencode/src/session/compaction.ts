@@ -23,7 +23,6 @@ import { SessionEvent } from "@opencode-ai/core/session-event"
 import { LLMError } from "@opencode-ai/llm"
 import { Skill } from "@/skill"
 import * as SessionMetadata from "@/skill/session-metadata"
-import { SessionMetadataService } from "@/skill/session-metadata"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -43,6 +42,66 @@ const PRUNE_PROTECTED_TOOLS = ["skill"]
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
 const MAX_PRESERVE_RECENT_TOKENS = 8_000
+
+// Post-compaction skill restoration — extracted to avoid leaking SessionMetadataService
+// into SessionCompaction.Interface.process env. Called via forkChild after compaction.
+const postCompactionRestore = Effect.fn("SessionCompaction.postCompactionRestore")(function* (
+  sessionID: SessionID,
+  skills: Skill.Interface,
+) {
+  // Step 1: Promote dynamic skills to startup skills
+  const promotionResult = yield* skills.promoteDynamicToStartup().pipe(
+    Effect.tap((result) =>
+      Effect.sync(() => {
+        log.info("post-compaction-restore", {
+          promoted: result.promoted,
+          tag: "dynamic-skills",
+        })
+      }),
+    ),
+    Effect.tapError((error: unknown) =>
+      Effect.sync(() => {
+        log.warn("post-compaction skill promotion failed", {
+          error: error instanceof Error ? error.message : String(error),
+          tag: "dynamic-skills",
+        })
+      }),
+    ),
+    Effect.ignore,
+  )
+
+  // Step 2: Re-register skills from session metadata (survives compaction)
+  const registeredSkills = yield* SessionMetadata.getRegisteredSkills(sessionID).pipe(
+    Effect.catch(() => Effect.succeed([] as Skill.Info[]))
+  )
+
+  if (registeredSkills.length > 0) {
+    yield* skills.registerDynamic(registeredSkills).pipe(
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          log.info("post-compaction skill re-registration", {
+            sessionID,
+            reRegistered: result.added,
+            skipped: result.skipped,
+            tag: "dynamic-skills",
+          })
+        }),
+      ),
+      Effect.tapError((error: unknown) =>
+        Effect.sync(() => {
+          log.warn("post-compaction skill re-registration failed", {
+            sessionID,
+            error: error instanceof Error ? error.message : String(error),
+            tag: "dynamic-skills",
+          })
+        }),
+      ),
+      Effect.ignore,
+    )
+  }
+
+  return promotionResult
+})
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
 <template>
 ## Goal
@@ -208,7 +267,7 @@ export interface Interface {
     model: Provider.Model
   }) => Effect.Effect<boolean>
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
-  readonly process: (input: ProcessInput) => Effect.Effect<"continue" | "stop", LLMError, SessionMetadataService>
+  readonly process: (input: ProcessInput) => Effect.Effect<"continue" | "stop", LLMError>
   readonly create: (input: {
     sessionID: SessionID
     agent: string
@@ -588,63 +647,10 @@ export const layer = Layer.effect(
 
         // Post-compaction: promote dynamic skills into startup skills so they appear in system prompt
         // Forked so it never blocks compaction; errors caught and logged as warnings
-        yield* Effect.gen(function* () {
-          // Step 1: Promote dynamic skills to startup skills
-          const promotionResult = yield* skills.promoteDynamicToStartup().pipe(
-            Effect.tap((result) =>
-              Effect.sync(() => {
-                log.info("post-compaction-restore", {
-                  promoted: result.promoted,
-                  tag: "dynamic-skills",
-                })
-              }),
-            ),
-            Effect.tapError((error: unknown) =>
-              Effect.sync(() => {
-                log.warn("post-compaction skill promotion failed", {
-                  error: error instanceof Error ? error.message : String(error),
-                  tag: "dynamic-skills",
-                })
-              }),
-            ),
-            Effect.ignore,
-          )
-
-          // Step 2: Re-register skills from session metadata (survives compaction)
-          // This ensures skills referenced in compacted context are re-registered in the new process
-          const registeredSkills = yield* SessionMetadata.getRegisteredSkills(input.sessionID).pipe(
-            Effect.catch(() => Effect.succeed([] as Skill.Info[]))
-          )
-
-          if (registeredSkills.length > 0) {
-            yield* skills.registerDynamic(registeredSkills).pipe(
-              Effect.tap((result) =>
-                Effect.sync(() => {
-                  log.info("post-compaction skill re-registration", {
-                    sessionID: input.sessionID,
-                    reRegistered: result.added,
-                    skipped: result.skipped,
-                    tag: "dynamic-skills",
-                  })
-                }),
-              ),
-              Effect.tapError((error: unknown) =>
-                Effect.sync(() => {
-                  log.warn("post-compaction skill re-registration failed", {
-                    sessionID: input.sessionID,
-                    error: error instanceof Error ? error.message : String(error),
-                    tag: "dynamic-skills",
-                  })
-                }),
-              ),
-              Effect.ignore,
-            )
-          }
-
-          return promotionResult
-        }).pipe(
-          Effect.forkChild
-        )
+        // Cast via unknown to avoid leaking SessionMetadataService into processCompaction's env
+        yield* (postCompactionRestore(input.sessionID, skills).pipe(
+          Effect.forkChild,
+        ) as unknown as Effect.Effect<void, never, never>)
       }
       return result
     })

@@ -1,4 +1,4 @@
-import { Effect, Layer, Context, Schema } from "effect"
+import { Effect, Layer, Context, Schema, Option } from "effect"
 import { Storage } from "@/storage/storage"
 import * as Log from "@opencode-ai/core/util/log"
 
@@ -126,49 +126,67 @@ export interface Interface {
 }
 
 // Export individual methods for direct use (tests and consumers)
-// These use Effect.sandbox to convert Service-not-found into a catchable error,
+// These use Effect.suspend + Effect.option to avoid declaring SessionMetadataService in the env,
 // allowing graceful degradation when SessionMetadata is not wired (e.g., in isolated tests).
 export const getMetadata = (sessionID: string) =>
-  Effect.flatMap(SessionMetadataService, (svc) => svc.getMetadata(sessionID))
-    .pipe(
-      Effect.sandbox,
-      Effect.catch(() => Effect.succeed(emptyMetadata()).pipe(Effect.sandbox))
-    )
+  Effect.suspend(() =>
+    Effect.flatMap(Effect.option(SessionMetadataService), (opt) =>
+      Option.match(opt, {
+        onNone: () => Effect.succeed(emptyMetadata()),
+        onSome: (svc) => svc.getMetadata(sessionID),
+      }),
+    ),
+  )
 
 export const addScannedDirectory = (sessionID: string, dirRealpath: string) =>
-  Effect.flatMap(SessionMetadataService, (svc) => svc.addScannedDirectory(sessionID, dirRealpath))
-    .pipe(
-      Effect.sandbox,
-      Effect.catch(() => Effect.void.pipe(Effect.sandbox))
-    )
+  Effect.suspend(() =>
+    Effect.flatMap(Effect.option(SessionMetadataService), (opt) =>
+      Option.match(opt, {
+        onNone: () => Effect.void,
+        onSome: (svc) => svc.addScannedDirectory(sessionID, dirRealpath),
+      }),
+    ),
+  )
 
 export const addRegisteredSkill = (sessionID: string, skill: SkillInfo) =>
-  Effect.flatMap(SessionMetadataService, (svc) => svc.addRegisteredSkill(sessionID, skill))
-    .pipe(
-      Effect.sandbox,
-      Effect.catch(() => Effect.void.pipe(Effect.sandbox))
-    )
+  Effect.suspend(() =>
+    Effect.flatMap(Effect.option(SessionMetadataService), (opt) =>
+      Option.match(opt, {
+        onNone: () => Effect.void,
+        onSome: (svc) => svc.addRegisteredSkill(sessionID, skill),
+      }),
+    ),
+  )
 
 export const wasDirectoryScanned = (sessionID: string, dirRealpath: string) =>
-  Effect.flatMap(SessionMetadataService, (svc) => svc.wasDirectoryScanned(sessionID, dirRealpath))
-    .pipe(
-      Effect.sandbox,
-      Effect.catch(() => Effect.succeed(false).pipe(Effect.sandbox))
-    )
+  Effect.suspend(() =>
+    Effect.flatMap(Effect.option(SessionMetadataService), (opt) =>
+      Option.match(opt, {
+        onNone: () => Effect.succeed(false),
+        onSome: (svc) => svc.wasDirectoryScanned(sessionID, dirRealpath),
+      }),
+    ),
+  )
 
 export const getRegisteredSkills = (sessionID: string) =>
-  Effect.flatMap(SessionMetadataService, (svc) => svc.getRegisteredSkills(sessionID))
-    .pipe(
-      Effect.sandbox,
-      Effect.catch(() => Effect.succeed([] as SkillInfo[]).pipe(Effect.sandbox))
-    )
+  Effect.suspend(() =>
+    Effect.flatMap(Effect.option(SessionMetadataService), (opt) =>
+      Option.match(opt, {
+        onNone: () => Effect.succeed([] as SkillInfo[]),
+        onSome: (svc) => svc.getRegisteredSkills(sessionID),
+      }),
+    ),
+  )
 
 export const clearMetadata = (sessionID: string) =>
-  Effect.flatMap(SessionMetadataService, (svc) => svc.clearMetadata(sessionID))
-    .pipe(
-      Effect.sandbox,
-      Effect.catch(() => Effect.void.pipe(Effect.sandbox))
-    )
+  Effect.suspend(() =>
+    Effect.flatMap(Effect.option(SessionMetadataService), (opt) =>
+      Option.match(opt, {
+        onNone: () => Effect.void,
+        onSome: (svc) => svc.clearMetadata(sessionID),
+      }),
+    ),
+  )
 
 export class SessionMetadataService extends Context.Service<SessionMetadataService, Interface>()("@opencode/SessionMetadata") {}
 

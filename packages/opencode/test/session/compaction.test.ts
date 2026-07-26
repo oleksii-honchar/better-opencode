@@ -20,8 +20,10 @@ import { SessionStatus } from "../../src/session/status"
 import { SessionSummary } from "../../src/session/summary"
 import { SessionV2 } from "../../src/v2/session"
 import { ModelID, ProviderID } from "../../src/provider/schema"
-import type { Provider } from "@/provider/provider"
+import { Provider } from "@/provider/provider"
+import { Skill } from "@/skill"
 import * as SessionProcessorModule from "../../src/session/processor"
+import { SessionProcessor } from "../../src/session/processor"
 import { Snapshot } from "../../src/snapshot"
 import { ProviderTest } from "../fake/provider"
 import { testEffect } from "../lib/effect"
@@ -225,8 +227,9 @@ function cfg(compaction?: Config.Info["compaction"]) {
 }
 
 const deps = Layer.mergeAll(
-  wide().layer,
-  layer("continue"),
+  LLM.defaultLayer,
+  Provider.defaultLayer,
+  SessionProcessor.defaultLayer,
   Agent.defaultLayer,
   Plugin.defaultLayer,
   Bus.layer,
@@ -234,6 +237,7 @@ const deps = Layer.mergeAll(
   SyncEvent.defaultLayer,
   RuntimeFlags.layer({ experimentalEventSystem: true }),
   EventV2Bridge.defaultLayer,
+  Skill.defaultLayer,
 )
 
 const env = Layer.mergeAll(
@@ -244,7 +248,7 @@ const env = Layer.mergeAll(
 
 const it = testEffect(env)
 
-const compactionEnv = Layer.mergeAll(SessionNs.defaultLayer, CrossSpawnSpawner.defaultLayer)
+const compactionEnv = Layer.mergeAll(SessionNs.defaultLayer, CrossSpawnSpawner.defaultLayer, Skill.defaultLayer)
 const itCompaction = testEffect(compactionEnv)
 
 type CompactionProcessOptions = {
