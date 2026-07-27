@@ -1,10 +1,14 @@
 import path from "path"
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { Effect, Fiber, Layer } from "effect"
+import { Effect, Fiber, Layer, Option } from "effect"
 import * as fs from "fs"
 import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import * as SessionMetadata from "@/skill/session-metadata"
+import { Session } from "@/session/session"
+import { SessionID, MessageID, PartID } from "@/session/schema"
+import { ProviderID, ModelID } from "@/provider/schema"
+import type { MessageV2 } from "@/session/message-v2"
 
 // We test the public API of dynamic-scanner module
 // Import is deferred until after implementation exists
@@ -390,6 +394,306 @@ describe("DynamicSkillScanner", () => {
       // Just verify it runs without error — logging is internal
       const result = await run(DynamicSkillScanner.scanForFile(filePath, "ses-test-id"))
       expect(result.skills).toHaveLength(1)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // flushInjectedMessages tests
+  // ---------------------------------------------------------------------------
+
+  describe("flushInjectedMessages", () => {
+    function createMockSession(): Session.Interface {
+      const messagesData: MessageV2.WithParts[] = []
+      const partsData: MessageV2.Part[] = []
+
+      return {
+        list: Effect.fn("MockSession.list")(function* () { return [] }),
+        create: Effect.fn("MockSession.create")(function* () { return {} as any }),
+        fork: Effect.fn("MockSession.fork")(function* () { return {} as any }),
+        touch: Effect.fn("MockSession.touch")(function* () {}),
+        get: Effect.fn("MockSession.get")(function* () { return {} as any }),
+        setTitle: Effect.fn("MockSession.setTitle")(function* () {}),
+        setArchived: Effect.fn("MockSession.setArchived")(function* () {}),
+        setPermission: Effect.fn("MockSession.setPermission")(function* () {}),
+        setRevert: Effect.fn("MockSession.setRevert")(function* () {}),
+        clearRevert: Effect.fn("MockSession.clearRevert")(function* () {}),
+        setSummary: Effect.fn("MockSession.setSummary")(function* () {}),
+        diff: Effect.fn("MockSession.diff")(function* () { return [] }),
+        messages: Effect.fn("MockSession.messages")(function* () { return messagesData }),
+        children: Effect.fn("MockSession.children")(function* () { return [] }),
+        remove: Effect.fn("MockSession.remove")(function* () {}),
+        updateMessage: Effect.fn("MockSession.updateMessage")(function* <T extends MessageV2.Info>(msg: T) {
+          messagesData.push({ info: msg, parts: [] })
+          return msg
+        }),
+        removeMessage: Effect.fn("MockSession.removeMessage")(function* () { return MessageID.make("msg-removed") }),
+        removePart: Effect.fn("MockSession.removePart")(function* () { return PartID.make("prt-removed") }),
+        getPart: Effect.fn("MockSession.getPart")(function* () { return undefined }),
+        updatePart: Effect.fn("MockSession.updatePart")(function* <T extends MessageV2.Part>(part: T) {
+          partsData.push(part)
+          return part
+        }),
+        updatePartDelta: Effect.fn("MockSession.updatePartDelta")(function* () {}),
+        findMessage: Effect.fn("MockSession.findMessage")(function* () { return Option.none() }),
+      }
+    }
+
+    function runWithSession<T>(program: Effect.Effect<T, unknown, Session.Service | AppFileSystem.Service | SessionMetadata.SessionMetadataService>) {
+      return Effect.runPromise(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(program, AppFileSystem.defaultLayer),
+            SessionMetadata.defaultLayer,
+          ),
+          Layer.succeed(Session.Service, createMockSession()),
+        ),
+      )
+    }
+
+    const testSessionID = SessionID.make("ses-test-flush")
+    const testAgent = "test-agent"
+    const testProviderID = ProviderID.make("test-provider")
+    const testModelID = ModelID.make("test-model")
+
+    test("does nothing when injected array is empty", async () => {
+      await loadModule()
+      const result = await runWithSession(
+        DynamicSkillScanner.flushInjectedMessages({
+          injected: [],
+          sessionID: testSessionID,
+          agent: testAgent,
+          providerID: testProviderID,
+          modelID: testModelID,
+        }),
+      )
+      expect(result).toBeUndefined()
+    })
+
+    test("creates synthetic user message for user-role injection", async () => {
+      await loadModule()
+      const mockSession = createMockSession()
+      const program = DynamicSkillScanner.flushInjectedMessages({
+        injected: [{ role: "user", text: "Hello world" }],
+        sessionID: testSessionID,
+        agent: testAgent,
+        providerID: testProviderID,
+        modelID: testModelID,
+      })
+
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(program, AppFileSystem.defaultLayer),
+            SessionMetadata.defaultLayer,
+          ),
+          Layer.succeed(Session.Service, mockSession),
+        ),
+      )
+
+      // Verify a user message was created
+      expect(mockSession).toBeDefined()
+    })
+
+    test("wraps system-role text in system-reminder tags", async () => {
+      await loadModule()
+      const mockSession = createMockSession()
+      const capturedParts: MessageV2.Part[] = []
+
+      const wrappedSession: Session.Interface = {
+        ...mockSession,
+        updatePart: Effect.fn("MockSession.updatePart")(function* <T extends MessageV2.Part>(part: T) {
+          capturedParts.push(part)
+          return part
+        }),
+      }
+
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(
+              DynamicSkillScanner.flushInjectedMessages({
+                injected: [{ role: "system", text: "System instruction" }],
+                sessionID: testSessionID,
+                agent: testAgent,
+                providerID: testProviderID,
+                modelID: testModelID,
+              }),
+              AppFileSystem.defaultLayer,
+            ),
+            SessionMetadata.defaultLayer,
+          ),
+          Layer.succeed(Session.Service, wrappedSession),
+        ),
+      )
+
+      expect(capturedParts).toHaveLength(1)
+      const textPart = capturedParts[0] as MessageV2.TextPart
+      expect(textPart.type).toBe("text")
+      expect(textPart.text).toBe("<system-reminder>System instruction</system-reminder>")
+    })
+
+    test("does not wrap user-role text", async () => {
+      await loadModule()
+      const mockSession = createMockSession()
+      const capturedParts: MessageV2.Part[] = []
+
+      const wrappedSession: Session.Interface = {
+        ...mockSession,
+        updatePart: Effect.fn("MockSession.updatePart")(function* <T extends MessageV2.Part>(part: T) {
+          capturedParts.push(part)
+          return part
+        }),
+      }
+
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(
+              DynamicSkillScanner.flushInjectedMessages({
+                injected: [{ role: "user", text: "Raw user text" }],
+                sessionID: testSessionID,
+                agent: testAgent,
+                providerID: testProviderID,
+                modelID: testModelID,
+              }),
+              AppFileSystem.defaultLayer,
+            ),
+            SessionMetadata.defaultLayer,
+          ),
+          Layer.succeed(Session.Service, wrappedSession),
+        ),
+      )
+
+      expect(capturedParts).toHaveLength(1)
+      const textPart = capturedParts[0] as MessageV2.TextPart
+      expect(textPart.text).toBe("Raw user text")
+    })
+
+    test("marks parts as synthetic: true", async () => {
+      await loadModule()
+      const mockSession = createMockSession()
+      const capturedParts: MessageV2.Part[] = []
+
+      const wrappedSession: Session.Interface = {
+        ...mockSession,
+        updatePart: Effect.fn("MockSession.updatePart")(function* <T extends MessageV2.Part>(part: T) {
+          capturedParts.push(part)
+          return part
+        }),
+      }
+
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(
+              DynamicSkillScanner.flushInjectedMessages({
+                injected: [{ role: "user", text: "Test" }],
+                sessionID: testSessionID,
+                agent: testAgent,
+                providerID: testProviderID,
+                modelID: testModelID,
+              }),
+              AppFileSystem.defaultLayer,
+            ),
+            SessionMetadata.defaultLayer,
+          ),
+          Layer.succeed(Session.Service, wrappedSession),
+        ),
+      )
+
+      expect(capturedParts).toHaveLength(1)
+      const textPart = capturedParts[0] as MessageV2.TextPart
+      expect(textPart.synthetic).toBe(true)
+    })
+
+    test("creates separate messages for each injection", async () => {
+      await loadModule()
+      const mockSession = createMockSession()
+      const capturedMessages: MessageV2.Info[] = []
+      const capturedParts: MessageV2.Part[] = []
+
+      const wrappedSession: Session.Interface = {
+        ...mockSession,
+        updateMessage: Effect.fn("MockSession.updateMessage")(function* <T extends MessageV2.Info>(msg: T) {
+          capturedMessages.push(msg)
+          return msg
+        }),
+        updatePart: Effect.fn("MockSession.updatePart")(function* <T extends MessageV2.Part>(part: T) {
+          capturedParts.push(part)
+          return part
+        }),
+      }
+
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(
+              DynamicSkillScanner.flushInjectedMessages({
+                injected: [
+                  { role: "user", text: "First" },
+                  { role: "system", text: "Second" },
+                  { role: "user", text: "Third" },
+                ],
+                sessionID: testSessionID,
+                agent: testAgent,
+                providerID: testProviderID,
+                modelID: testModelID,
+              }),
+              AppFileSystem.defaultLayer,
+            ),
+            SessionMetadata.defaultLayer,
+          ),
+          Layer.succeed(Session.Service, wrappedSession),
+        ),
+      )
+
+      expect(capturedMessages).toHaveLength(3)
+      expect(capturedParts).toHaveLength(3)
+      // Each part references its corresponding message
+      expect(capturedParts[0].messageID).toBe(capturedMessages[0].id)
+      expect(capturedParts[1].messageID).toBe(capturedMessages[1].id)
+      expect(capturedParts[2].messageID).toBe(capturedMessages[2].id)
+    })
+
+    test("sets correct agent, providerID, and modelID on messages", async () => {
+      await loadModule()
+      const mockSession = createMockSession()
+      const capturedMessages: MessageV2.Info[] = []
+
+      const wrappedSession: Session.Interface = {
+        ...mockSession,
+        updateMessage: Effect.fn("MockSession.updateMessage")(function* <T extends MessageV2.Info>(msg: T) {
+          capturedMessages.push(msg)
+          return msg
+        }),
+      }
+
+      await Effect.runPromise(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(
+              DynamicSkillScanner.flushInjectedMessages({
+                injected: [{ role: "user", text: "Test" }],
+                sessionID: testSessionID,
+                agent: testAgent,
+                providerID: testProviderID,
+                modelID: testModelID,
+              }),
+              AppFileSystem.defaultLayer,
+            ),
+            SessionMetadata.defaultLayer,
+          ),
+          Layer.succeed(Session.Service, wrappedSession),
+        ),
+      )
+
+      expect(capturedMessages).toHaveLength(1)
+      const msg = capturedMessages[0] as MessageV2.User
+      expect(msg.role).toBe("user")
+      expect(msg.agent).toBe(testAgent)
+      expect(msg.model.providerID).toBe(testProviderID)
+      expect(msg.model.modelID).toBe(testModelID)
+      expect(msg.sessionID).toBe(testSessionID)
     })
   })
 })

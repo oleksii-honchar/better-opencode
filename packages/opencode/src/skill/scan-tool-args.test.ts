@@ -6,6 +6,10 @@ import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import * as Skill from "@/skill"
 import * as SessionMetadata from "@/skill/session-metadata"
+import { PartID, SessionID, MessageID } from "@/session/schema"
+import { ProviderID, ModelID } from "@/provider/schema"
+import { Session } from "@/session/session"
+import type { Session as SessionModule } from "@/session/session"
 
 // ---------------------------------------------------------------------------
 // Mock Skill.Service layer (same pattern as scan-parts.test.ts)
@@ -74,6 +78,38 @@ function mockSkillLayer(): Layer.Layer<Skill.Service> {
   return Layer.succeed(Skill.Service, createMockService())
 }
 
+// Minimal mock Session.Service for flushInjectedMessages
+function createMockSessionService(): SessionModule.Interface {
+  return {
+    list: () => Effect.succeed([]),
+    create: () => Effect.succeed({} as any),
+    fork: () => Effect.succeed({} as any),
+    touch: () => Effect.void,
+    get: () => Effect.succeed({} as any),
+    setTitle: () => Effect.void,
+    setArchived: () => Effect.void,
+    setPermission: () => Effect.void,
+    setRevert: () => Effect.void,
+    clearRevert: () => Effect.void,
+    setSummary: () => Effect.void,
+    diff: () => Effect.succeed([]),
+    messages: () => Effect.succeed([]),
+    children: () => Effect.succeed([]),
+    remove: () => Effect.void,
+    updateMessage: (msg) => Effect.succeed(msg),
+    removeMessage: () => Effect.succeed(MessageID.make("mock")),
+    removePart: () => Effect.succeed(PartID.make("mock")),
+    getPart: () => Effect.succeed(undefined),
+    updatePart: (part) => Effect.succeed(part),
+    updatePartDelta: () => Effect.void,
+    findMessage: () => Effect.succeed(undefined as any),
+  }
+}
+
+function mockSessionLayer(): Layer.Layer<Session.Service> {
+  return Layer.succeed(Session.Service, createMockSessionService())
+}
+
 // Deferred import — loaded after implementation exists
 let DynamicSkillScanner: typeof import("@/skill/dynamic-scanner")
 
@@ -94,14 +130,17 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     }
   }
 
-  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService>) {
+  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service>) {
     return Effect.runPromise(
       Effect.provide(
         Effect.provide(
-          Effect.provide(program, AppFileSystem.defaultLayer),
-          mockSkillLayer(),
+          Effect.provide(
+            Effect.provide(program, AppFileSystem.defaultLayer),
+            mockSkillLayer(),
+          ),
+          SessionMetadata.defaultLayer,
         ),
-        SessionMetadata.defaultLayer,
+        mockSessionLayer(),
       ),
     )
   }
@@ -126,6 +165,11 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     return { repoDir, agentsDir }
   }
 
+  const dummyAgent = "test-agent"
+  const dummyProviderID = ProviderID.make("test-provider")
+  const dummyModelID = ModelID.make("test-model")
+  const dummySessionID = SessionID.make("ses-test")
+
   describe("path extraction from tool args", () => {
     test("extracts filePath from read tool args", async () => {
       await loadModule()
@@ -135,7 +179,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       fs.writeFileSync(filePath, "content")
 
       const args = { filePath }
-      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
     })
@@ -148,7 +192,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       fs.writeFileSync(filePath, "content")
 
       const args = { filePath, content: "new content" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("write", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("write", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
     })
@@ -161,7 +205,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       fs.writeFileSync(filePath, "content")
 
       const args = { filePath, oldString: "old", newString: "new" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("edit", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("edit", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
     })
@@ -172,7 +216,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       const pattern = path.join(repoDir, "src", "**/*.ts")
 
       const args = { pattern }
-      const result = await run(DynamicSkillScanner.scanToolArgs("glob", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("glob", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
     })
@@ -186,7 +230,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       fs.mkdirSync(subDir, { recursive: true })
 
       const args = { path: subDir, pattern: "some-pattern" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("grep", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("grep", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
     })
@@ -206,7 +250,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
 `
       // Patch uses relative paths; we resolve them relative to repoDir
       const args = { patch }
-      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       // Should extract path from +++ b/ line
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
@@ -228,7 +272,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
 +new2
 `
       const args = { patch }
-      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(2)
     })
   })
@@ -237,7 +281,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     test("handles unknown tool gracefully as no-op", async () => {
       await loadModule()
       const args = { someArg: "value" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("unknown-tool", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("unknown-tool", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBe(0)
       expect(result.skillsRegistered).toBe(0)
     })
@@ -245,14 +289,14 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     test("handles MCP tool with no known path fields gracefully", async () => {
       await loadModule()
       const args = { server: "some-mcp", command: "do-something" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("some-mcp-server__someTool", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("some-mcp-server__someTool", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBe(0)
       expect(result.skillsRegistered).toBe(0)
     })
 
     test("handles empty args gracefully", async () => {
       await loadModule()
-      const result = await run(DynamicSkillScanner.scanToolArgs("read", {}, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("read", {}, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBe(0)
       expect(result.skillsRegistered).toBe(0)
     })
@@ -267,7 +311,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       fs.writeFileSync(filePath, "content")
 
       const args = { filePath }
-      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
       expect(result.skillNames).toContain("tool-registered-skill")
@@ -278,7 +322,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     test("handles non-existent filePath gracefully", async () => {
       await loadModule()
       const args = { filePath: "/nonexistent/path/to/file.ts" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBe(0)
     })
@@ -286,7 +330,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     test("handles invalid patch format gracefully", async () => {
       await loadModule()
       const args = { patch: "not a valid patch at all" }
-      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("apply_patch", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBe(0)
       expect(result.skillsRegistered).toBe(0)
     })
@@ -294,7 +338,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     test("handles malformed args gracefully", async () => {
       await loadModule()
       const args = { filePath: 12345 } // wrong type
-      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, "ses-test"))
+      const result = await run(DynamicSkillScanner.scanToolArgs("read", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBe(0)
       expect(result.skillsRegistered).toBe(0)
     })
@@ -306,7 +350,7 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
       const args = { filePath: "/some/path.ts" }
 
       const program = Effect.gen(function* () {
-        const fiber = yield* DynamicSkillScanner.scanToolArgs("read", args, "ses-test").pipe(
+        const fiber = yield* DynamicSkillScanner.scanToolArgs("read", args, dummySessionID, dummyAgent, dummyProviderID, dummyModelID).pipe(
           Effect.forkChild,
         )
         return yield* Fiber.join(fiber)
@@ -370,6 +414,11 @@ describe("DynamicSkillScanner.injectDiscoveredSkills", () => {
       await Effect.runPromise(
         Effect.provide(mockSvc.registerDynamic(skills), mockLayer),
       )
+
+      // Skills must be in injection queue — registerDynamic alone doesn't add them
+      for (const skill of skills) {
+        await Effect.runPromise(DynamicSkillScanner.trackSkillForInjection(skill))
+      }
 
       const result = await Effect.runPromise(
         Effect.provide(
@@ -455,6 +504,136 @@ describe("DynamicSkillScanner.injectDiscoveredSkills", () => {
   })
 })
 
+describe("DynamicSkillScanner.scanToolArgs self-injection", () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "self-inject-test-"))
+  })
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  async function loadModule() {
+    if (!DynamicSkillScanner) {
+      DynamicSkillScanner = await import("@/skill/dynamic-scanner")
+    }
+  }
+
+  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service>) {
+    return Effect.runPromise(
+      Effect.provide(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(program, AppFileSystem.defaultLayer),
+            mockSkillLayer(),
+          ),
+          SessionMetadata.defaultLayer,
+        ),
+        mockSessionLayer(),
+      ),
+    )
+  }
+
+  function createSkill(skillDir: string, name: string, description?: string) {
+    const dir = path.join(skillDir, name)
+    fs.mkdirSync(dir, { recursive: true })
+    const frontmatter = `---\nname: ${name}\n${description ? `description: ${description}\n` : ""}---\n\n# ${name}\n\nSkill content`
+    fs.writeFileSync(path.join(dir, "SKILL.md"), frontmatter)
+  }
+
+  function createTestRepo(repoName: string, skillName?: string) {
+    const repoDir = path.join(tmpDir, repoName)
+    const agentsDir = path.join(repoDir, ".agents")
+    fs.mkdirSync(path.join(agentsDir, "skills"), { recursive: true })
+    if (skillName) {
+      createSkill(path.join(agentsDir, "skills"), skillName, `Skill for ${repoName}`)
+    }
+    return { repoDir, agentsDir }
+  }
+
+  describe("accepts injection parameters", () => {
+    test("scanToolArgs accepts agent, providerID, modelID parameters", async () => {
+      await loadModule()
+      const { repoDir } = createTestRepo("inject-params-repo", "inject-params-skill")
+      const filePath = path.join(repoDir, "src", "file.ts")
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, "content")
+
+      const args = { filePath }
+      const sessionID = SessionID.make("ses-inject-params")
+      const agent = "test-agent"
+      const providerID = ProviderID.make("test-provider")
+      const modelID = ModelID.make("test-model")
+
+      // This test verifies the new signature compiles and runs
+      const result = await run(
+        DynamicSkillScanner.scanToolArgs("read", args, sessionID, agent, providerID, modelID),
+      )
+
+      expect(result.pathsFound).toBeGreaterThanOrEqual(1)
+      expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
+    })
+  })
+
+  describe("calls injectDiscoveredSkills after registration", () => {
+    test("scanToolArgs calls injectDiscoveredSkills internally after registering skills", async () => {
+      await loadModule()
+      const { repoDir } = createTestRepo("inject-call-repo", "inject-call-skill")
+      const filePath = path.join(repoDir, "src", "file.ts")
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, "content")
+
+      const args = { filePath }
+      const sessionID = SessionID.make("ses-inject-call")
+      const agent = "test-agent"
+      const providerID = ProviderID.make("test-provider")
+      const modelID = ModelID.make("test-model")
+
+      const result = await run(
+        DynamicSkillScanner.scanToolArgs("read", args, sessionID, agent, providerID, modelID),
+      )
+
+      // Skills should be registered
+      expect(result.pathsFound).toBeGreaterThanOrEqual(1)
+      expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
+
+      // After self-injection, the injection queue should be cleared
+      // (injectDiscoveredSkills clears it after formatting)
+      // We verify this by calling injectDiscoveredSkills again — should return 0
+      const afterInject = await run(DynamicSkillScanner.injectDiscoveredSkills(sessionID))
+      expect(afterInject.injected).toBe(0)
+      expect(afterInject.skillCount).toBe(0)
+    })
+  })
+
+  describe("returns same ScanToolArgsResult type", () => {
+    test("scanToolArgs returns ScanToolArgsResult with all required fields", async () => {
+      await loadModule()
+      const { repoDir } = createTestRepo("return-type-repo", "return-type-skill")
+      const filePath = path.join(repoDir, "src", "file.ts")
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, "content")
+
+      const args = { filePath }
+      const sessionID = SessionID.make("ses-return-type")
+      const agent = "test-agent"
+      const providerID = ProviderID.make("test-provider")
+      const modelID = ModelID.make("test-model")
+
+      const result = await run(
+        DynamicSkillScanner.scanToolArgs("read", args, sessionID, agent, providerID, modelID),
+      )
+
+      expect(result.pathsFound).toBeDefined()
+      expect(result.scannedPaths).toBeDefined()
+      expect(result.skillsRegistered).toBeDefined()
+      expect(result.skillNames).toBeDefined()
+    })
+  })
+})
+
 describe("DynamicSkillScanner integration: scanToolArgs + injectDiscoveredSkills", () => {
   let tmpDir: string
 
@@ -496,28 +675,41 @@ describe("DynamicSkillScanner integration: scanToolArgs + injectDiscoveredSkills
     fs.mkdirSync(path.dirname(filePath), { recursive: true })
     fs.writeFileSync(filePath, "content")
 
-    const sessionID = "integration-test-session"
+    const sessionID = SessionID.make("ses-integration-test-session")
     const args = { filePath }
 
-    // Step 1: scanToolArgs
+    // Step 1: scanToolArgs (now self-injects)
     const scanResult = await Effect.runPromise(
       Effect.provide(
         Effect.provide(
           Effect.provide(
-            DynamicSkillScanner.scanToolArgs("read", args, sessionID),
-            AppFileSystem.defaultLayer,
+            Effect.provide(
+              DynamicSkillScanner.scanToolArgs("read", args, sessionID, "test-agent", ProviderID.make("test-provider"), ModelID.make("test-model")),
+              AppFileSystem.defaultLayer,
+            ),
+            mockSkillLayer(),
           ),
-          mockSkillLayer(),
+          SessionMetadata.defaultLayer,
         ),
-        SessionMetadata.defaultLayer,
+        mockSessionLayer(),
       ),
     )
 
     expect(scanResult.pathsFound).toBeGreaterThanOrEqual(1)
     expect(scanResult.skillsRegistered).toBeGreaterThanOrEqual(1)
 
-    // Step 2: injectDiscoveredSkills would be called after scan
-    // In the real tools.ts integration, scanToolArgs registers skills,
-    // then injectDiscoveredSkills formats them as synthetic message
+    // Step 2: self-injection already happened inside scanToolArgs
+    // Verify queue is cleared by calling injectDiscoveredSkills again
+    const afterInject = await Effect.runPromise(
+      Effect.provide(
+        Effect.provide(
+          DynamicSkillScanner.injectDiscoveredSkills(sessionID),
+          mockSkillLayer(),
+        ),
+        SessionMetadata.defaultLayer,
+      ),
+    )
+    expect(afterInject.injected).toBe(0)
+    expect(afterInject.skillCount).toBe(0)
   })
 })

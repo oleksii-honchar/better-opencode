@@ -8,6 +8,10 @@ import * as SessionMetadata from "@/skill/session-metadata"
 import * as Log from "@opencode-ai/core/util/log"
 import { isRecord } from "@/util/record"
 import type { Part } from "@/session/message-v2"
+import { SessionID, MessageID, PartID } from "@/session/schema"
+import { ProviderID, ModelID } from "@/provider/schema"
+import { Session } from "@/session/session"
+import type { MessageV2 } from "@/session/message-v2"
 
 const log = Log.create({ service: "dynamic-scanner", tag: "dynamic-skills" })
 
@@ -325,7 +329,10 @@ export const scanForFile = Effect.fnUntraced(function* (
  */
 export const scanParts = Effect.fnUntraced(function* (
   parts: Part[],
-  sessionID: string,
+  sessionID: SessionID,
+  agent: string,
+  providerID: ProviderID,
+  modelID: ModelID,
 ) {
   // Regex for absolute paths: Unix (/...) or Windows (C:\...)
   const absPathRegex = /((?:^|[\s"'`({,])((?:\/[^"\s'`)}\],]+)|(?:[A-Za-z]:\\[^"\s'`)}\],]+)))/g
@@ -448,6 +455,18 @@ export const scanParts = Effect.fnUntraced(function* (
     }
   }
 
+  // Self-inject discovered skills (two-phase: format → flush)
+  const injectResult = yield* injectDiscoveredSkills(sessionID)
+  if (injectResult.injected > 0 && injectResult.xml) {
+    yield* flushInjectedMessages({
+      injected: [{ role: "user", text: injectResult.xml }],
+      sessionID,
+      agent,
+      providerID,
+      modelID,
+    })
+  }
+
   return {
     pathsFound: rawPaths.size,
     scannedPaths,
@@ -474,7 +493,10 @@ export const scanParts = Effect.fnUntraced(function* (
 export const scanToolArgs = Effect.fnUntraced(function* (
   toolId: string,
   args: Record<string, unknown>,
-  sessionID: string,
+  sessionID: SessionID,
+  agent: string,
+  providerID: ProviderID,
+  modelID: ModelID,
 ) {
   try {
     const paths = new Set<string>()
@@ -596,6 +618,22 @@ export const scanToolArgs = Effect.fnUntraced(function* (
       }
     }
 
+    // Self-inject discovered skills (two-phase: format → flush)
+    const injectResult = yield* injectDiscoveredSkills(sessionID).pipe(
+      Effect.catch(() => Effect.succeed({ injected: 0, skillCount: 0 } as InjectDiscoveredSkillsResult)),
+    )
+    if (injectResult.injected > 0 && injectResult.xml != null) {
+      yield* flushInjectedMessages({
+        injected: [{ role: "user", text: injectResult.xml }],
+        sessionID,
+        agent,
+        providerID,
+        modelID,
+      }).pipe(
+        Effect.catch(() => Effect.void),
+      )
+    }
+
     return {
       pathsFound: paths.size,
       scannedPaths,
@@ -699,6 +737,53 @@ function getDynamicSkillsForInjection(): Skill.Info[] {
 function clearDynamicSkillsInjectionQueue() {
   injectionQueue.clear()
 }
+
+// ---------------------------------------------------------------------------
+// flushInjectedMessages
+// ---------------------------------------------------------------------------
+
+/**
+ * Flush synthetic user messages injected by dynamic skill discovery.
+ * Persists messages via Session.Service so they survive compaction.
+ * System-role injections are wrapped in <system-reminder> tags.
+ */
+export const flushInjectedMessages = Effect.fn("DynamicSkillScanner.flushInjectedMessages")(function* (input: {
+  injected: Array<{ role: "user" | "system"; text: string }>
+  sessionID: SessionID
+  agent: string
+  providerID: ProviderID
+  modelID: ModelID
+}) {
+  if (input.injected.length === 0) return
+
+  const sessions = yield* Session.Service
+
+  for (const injection of input.injected) {
+    const isSystem = injection.role === "system"
+    const wrapped = isSystem
+      ? `<system-reminder>${injection.text}</system-reminder>`
+      : injection.text
+
+    const userMsg: MessageV2.User = {
+      id: MessageID.ascending(),
+      sessionID: input.sessionID,
+      role: "user",
+      time: { created: Date.now() },
+      agent: input.agent,
+      model: { providerID: input.providerID, modelID: input.modelID },
+    }
+    yield* sessions.updateMessage(userMsg)
+
+    yield* sessions.updatePart({
+      id: PartID.ascending(),
+      messageID: userMsg.id,
+      sessionID: input.sessionID,
+      type: "text",
+      text: wrapped,
+      synthetic: true,
+    } satisfies MessageV2.TextPart)
+  }
+})
 
 // ---------------------------------------------------------------------------
 // Export namespace

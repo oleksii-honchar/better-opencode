@@ -1170,7 +1170,13 @@ export const layer = Layer.effect(
 
       // Dynamic skill discovery: scan parts for file paths and discover skills.
       // Non-blocking: forked so it never delays message processing.
-      yield* DynamicSkillScanner.scanParts(resolvedParts as MessageV2.Part[], input.sessionID).pipe(
+      yield* DynamicSkillScanner.scanParts(
+        resolvedParts as MessageV2.Part[],
+        input.sessionID,
+        info.agent ?? "default",
+        info.model?.providerID ?? ProviderID.make("default"),
+        info.model?.modelID ?? ModelID.make("default"),
+      ).pipe(
         Effect.forkChild,
         Effect.ignore,
       )

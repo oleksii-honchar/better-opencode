@@ -18,7 +18,7 @@ import { SessionProcessor } from "./processor"
 import { PartID, MessageID, SessionID } from "./schema"
 import * as Log from "@opencode-ai/core/util/log"
 import { EffectBridge } from "@/effect/bridge"
-import { DynamicSkillScanner, type InjectDiscoveredSkillsResult } from "@/skill/dynamic-scanner"
+import { DynamicSkillScanner } from "@/skill/dynamic-scanner"
 
 const log = Log.create({ service: "session.tools" })
 
@@ -168,17 +168,14 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               })
             }
             // Dynamic skill discovery: scan tool args for file paths and inject discovered skills
-            yield* DynamicSkillScanner.scanToolArgs(item.id, args, ctx.sessionID).pipe(Effect.ignore, Effect.forkChild)
-            const injectResult: InjectDiscoveredSkillsResult = yield* DynamicSkillScanner.injectDiscoveredSkills(ctx.sessionID)
-            if (injectResult.injected > 0 && injectResult.xml) {
-              yield* flushInjectedMessages({
-                injected: [{ role: "user", text: injectResult.xml }],
-                sessionID: ctx.sessionID,
-                agent: input.agent.name,
-                providerID: input.model.providerID,
-                modelID: ModelID.make(input.model.api.id),
-              })
-            }
+            yield* DynamicSkillScanner.scanToolArgs(
+              item.id,
+              args,
+              ctx.sessionID,
+              input.agent.name,
+              input.model.providerID,
+              ModelID.make(input.model.api.id),
+            ).pipe(Effect.ignore, Effect.forkChild)
             if (options.abortSignal?.aborted) {
               yield* input.processor.completeToolCall(options.toolCallId, output)
             }
@@ -251,17 +248,14 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             })
           }
           // Dynamic skill discovery: scan tool args for file paths and inject discovered skills
-          yield* DynamicSkillScanner.scanToolArgs(key, args, ctx.sessionID).pipe(Effect.ignore, Effect.forkChild)
-          const mcpInjectResult: InjectDiscoveredSkillsResult = yield* DynamicSkillScanner.injectDiscoveredSkills(ctx.sessionID)
-          if (mcpInjectResult.injected > 0 && mcpInjectResult.xml) {
-            yield* flushInjectedMessages({
-              injected: [{ role: "user", text: mcpInjectResult.xml }],
-              sessionID: ctx.sessionID,
-              agent: input.agent.name,
-              providerID: input.model.providerID,
-              modelID: ModelID.make(input.model.api.id),
-            })
-          }
+          yield* DynamicSkillScanner.scanToolArgs(
+            key,
+            args,
+            ctx.sessionID,
+            input.agent.name,
+            input.model.providerID,
+            ModelID.make(input.model.api.id),
+          ).pipe(Effect.ignore, Effect.forkChild)
 
           const textParts: string[] = []
           const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []

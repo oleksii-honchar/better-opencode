@@ -1,6 +1,6 @@
 import path from "path"
 import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test"
-import { Effect, Layer, Context, Fiber } from "effect"
+import { Effect, Layer, Context, Fiber, Option } from "effect"
 import * as fs from "fs"
 import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -8,6 +8,9 @@ import { MessageV2 } from "@/session/message-v2"
 import * as Skill from "@/skill"
 import * as SessionMetadata from "@/skill/session-metadata"
 import { PartID, SessionID, MessageID } from "@/session/schema"
+import { ProviderID, ModelID } from "@/provider/schema"
+import { Session } from "@/session/session"
+import type { Session as SessionModule } from "@/session/session"
 
 // Minimal mock layer: provides Skill.Service with controlled state
 // Bypasses InstanceState complexity by directly providing the interface
@@ -74,6 +77,38 @@ function mockSkillLayer(): Layer.Layer<Skill.Service> {
   return Layer.succeed(Skill.Service, createMockService())
 }
 
+// Minimal mock Session.Service for flushInjectedMessages
+function createMockSessionService(): SessionModule.Interface {
+  return {
+    list: () => Effect.succeed([]),
+    create: () => Effect.succeed({} as any),
+    fork: () => Effect.succeed({} as any),
+    touch: () => Effect.void,
+    get: () => Effect.succeed({} as any),
+    setTitle: () => Effect.void,
+    setArchived: () => Effect.void,
+    setPermission: () => Effect.void,
+    setRevert: () => Effect.void,
+    clearRevert: () => Effect.void,
+    setSummary: () => Effect.void,
+    diff: () => Effect.succeed([]),
+    messages: () => Effect.succeed([]),
+    children: () => Effect.succeed([]),
+    remove: () => Effect.void,
+    updateMessage: (msg) => Effect.succeed(msg),
+    removeMessage: () => Effect.succeed(MessageID.make("mock")),
+    removePart: () => Effect.succeed(PartID.make("mock")),
+    getPart: () => Effect.succeed(undefined),
+    updatePart: (part) => Effect.succeed(part),
+    updatePartDelta: () => Effect.void,
+    findMessage: () => Effect.succeed(Option.none()),
+  }
+}
+
+function mockSessionLayer(): Layer.Layer<Session.Service> {
+  return Layer.succeed(Session.Service, createMockSessionService())
+}
+
 // We test the scanParts function that will be added to dynamic-scanner
 // Import is deferred until after implementation exists
 let DynamicSkillScanner: typeof import("@/skill/dynamic-scanner")
@@ -95,17 +130,24 @@ describe("DynamicSkillScanner.scanParts", () => {
     }
   }
 
-  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService>) {
+  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service>) {
     return Effect.runPromise(
       Effect.provide(
         Effect.provide(
-          Effect.provide(program, AppFileSystem.defaultLayer),
-          mockSkillLayer(),
+          Effect.provide(
+            Effect.provide(program, AppFileSystem.defaultLayer),
+            mockSkillLayer(),
+          ),
+          SessionMetadata.defaultLayer,
         ),
-        SessionMetadata.defaultLayer,
+        mockSessionLayer(),
       ),
     )
   }
+
+  const dummyAgent = "test-agent"
+  const dummyProviderID = ProviderID.make("test-provider")
+  const dummyModelID = ModelID.make("test-model")
 
   // Helper: create a valid SKILL.md file
   function createSkill(skillDir: string, name: string, description?: string) {
@@ -145,7 +187,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.scannedPaths).toContainEqual(
         expect.stringContaining("unix-repo"),
@@ -167,7 +209,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       // Windows paths are extracted even if not real on this platform
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
@@ -191,7 +233,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(2)
     })
 
@@ -207,7 +249,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBe(0)
     })
 
@@ -229,7 +271,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
 
@@ -251,7 +293,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
   })
@@ -281,7 +323,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
 
@@ -312,7 +354,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
 
@@ -335,7 +377,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
   })
@@ -359,7 +401,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       // Should only scan the unique path once
       expect(result.scannedPaths.length).toBe(1)
@@ -397,7 +439,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       // Should only scan the unique path once
       expect(result.scannedPaths.length).toBe(1)
@@ -422,7 +464,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       // Skills should be discovered and registered
       expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
@@ -443,7 +485,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       // Should not throw, paths found but no skills
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
       expect(result.skillsRegistered).toBe(0)
@@ -453,7 +495,7 @@ describe("DynamicSkillScanner.scanParts", () => {
       await loadModule()
       const parts: MessageV2.Part[] = []
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBe(0)
       expect(result.scannedPaths).toEqual([])
     })
@@ -470,7 +512,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBe(0)
       expect(result.scannedPaths).toEqual([])
     })
@@ -488,7 +530,7 @@ describe("DynamicSkillScanner.scanParts", () => {
         },
       ]
 
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBe(0)
     })
   })
@@ -512,7 +554,7 @@ describe("DynamicSkillScanner.scanParts", () => {
       ]
 
       // Just verify it runs without error — logging is internal
-      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")))
+      const result = await run(DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID))
       expect(result.pathsFound).toBeGreaterThanOrEqual(1)
     })
   })
@@ -531,7 +573,7 @@ describe("DynamicSkillScanner.scanParts", () => {
       ]
 
       const program = Effect.gen(function* () {
-        const fiber = yield* DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test")).pipe(
+        const fiber = yield* DynamicSkillScanner.scanParts(parts, SessionID.make("ses-test"), dummyAgent, dummyProviderID, dummyModelID).pipe(
           Effect.forkChild,
         )
         return yield* Fiber.join(fiber)
@@ -540,6 +582,95 @@ describe("DynamicSkillScanner.scanParts", () => {
       const result = await run(program)
       expect(result).toBeDefined()
       expect(result.pathsFound).toBe(0)
+    })
+  })
+
+  describe("self-injection", () => {
+    test("scanParts calls injectDiscoveredSkills and flushInjectedMessages after registration", async () => {
+      await loadModule()
+      const { repoDir } = createTestRepo("inject-repo", "inject-skill")
+      const filePath = path.join(repoDir, "src", "file.ts")
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, "content")
+
+      const parts: MessageV2.Part[] = [
+        {
+          type: "text",
+          id: PartID.ascending(),
+          sessionID: SessionID.make("ses-inject-test"),
+          messageID: MessageID.make("msg-1"),
+          text: `Check this file: ${filePath}`,
+        },
+      ]
+
+      const sessionID = SessionID.make("ses-inject-test")
+      const agent = "test-agent"
+      const providerID = ProviderID.make("test-provider")
+      const modelID = ModelID.make("test-model")
+
+      // Spy on injectDiscoveredSkills and flushInjectedMessages
+      const injectSpy = spyOn(DynamicSkillScanner, "injectDiscoveredSkills")
+      const flushSpy = spyOn(DynamicSkillScanner, "flushInjectedMessages")
+      let flushInput: unknown
+
+      // Override flush spy to capture input and return Effect<void>
+      flushSpy.mockImplementation((input: unknown) => {
+        flushInput = input
+        return Effect.void
+      })
+
+      const program = Effect.gen(function* () {
+        return yield* DynamicSkillScanner.scanParts(parts, sessionID, agent, providerID, modelID)
+      })
+
+      const result = await run(program)
+
+      expect(result.pathsFound).toBeGreaterThanOrEqual(1)
+      expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
+      expect(injectSpy).toHaveBeenCalled()
+      expect(flushSpy).toHaveBeenCalled()
+      expect(flushInput).toMatchObject({
+        sessionID,
+        agent,
+        providerID,
+        modelID,
+      })
+
+      injectSpy.mockRestore()
+      flushSpy.mockRestore()
+    })
+
+    test("scanParts does not call flushInjectedMessages when no skills injected", async () => {
+      await loadModule()
+      const parts: MessageV2.Part[] = [
+        {
+          type: "text",
+          id: PartID.ascending(),
+          sessionID: SessionID.make("ses-no-inject"),
+          messageID: MessageID.make("msg-1"),
+          text: "No paths here",
+        },
+      ]
+
+      const sessionID = SessionID.make("ses-no-inject")
+      const agent = "test-agent"
+      const providerID = ProviderID.make("test-provider")
+      const modelID = ModelID.make("test-model")
+
+      const flushSpy = spyOn(DynamicSkillScanner, "flushInjectedMessages")
+      flushSpy.mockImplementation(() => Effect.void)
+
+      const program = Effect.gen(function* () {
+        return yield* DynamicSkillScanner.scanParts(parts, sessionID, agent, providerID, modelID)
+      })
+
+      const result = await run(program)
+
+      expect(result.pathsFound).toBe(0)
+      expect(result.skillsRegistered).toBe(0)
+      expect(flushSpy).not.toHaveBeenCalled()
+
+      flushSpy.mockRestore()
     })
   })
 })

@@ -8,6 +8,9 @@ import { MessageV2 } from "@/session/message-v2"
 import * as Skill from "@/skill"
 import * as SessionMetadata from "@/skill/session-metadata"
 import { PartID, SessionID, MessageID } from "@/session/schema"
+import { ProviderID, ModelID } from "@/provider/schema"
+import { Session } from "@/session/session"
+import { Option } from "effect"
 
 // ---------------------------------------------------------------------------
 // Mock Skill.Service — tracks dynamic skills, promotion, and available()
@@ -148,6 +151,42 @@ function createSkillInfo(name: string, location: string, description?: string): 
   }
 }
 
+// Minimal mock Session.Service for flushInjectedMessages
+function createMockSessionService(): import("@/session/session").Interface {
+  return {
+    list: () => Effect.succeed([]),
+    create: () => Effect.succeed({} as any),
+    fork: () => Effect.succeed({} as any),
+    touch: () => Effect.void,
+    get: () => Effect.succeed({} as any),
+    setTitle: () => Effect.void,
+    setArchived: () => Effect.void,
+    setPermission: () => Effect.void,
+    setRevert: () => Effect.void,
+    clearRevert: () => Effect.void,
+    setSummary: () => Effect.void,
+    diff: () => Effect.succeed([]),
+    messages: () => Effect.succeed([]),
+    children: () => Effect.succeed([]),
+    remove: () => Effect.void,
+    updateMessage: (msg) => Effect.succeed(msg),
+    removeMessage: () => Effect.succeed(MessageID.make("mock")),
+    removePart: () => Effect.succeed(PartID.make("mock")),
+    getPart: () => Effect.succeed(undefined),
+    updatePart: (part) => Effect.succeed(part),
+    updatePartDelta: () => Effect.void,
+    findMessage: () => Effect.succeed(Option.none()),
+  }
+}
+
+function mockSessionLayer(): Layer.Layer<Session.Service> {
+  return Layer.succeed(Session.Service, createMockSessionService())
+}
+
+const dummyAgent = "test-agent"
+const dummyProviderID = ProviderID.make("test-provider")
+const dummyModelID = ModelID.make("test-model")
+
 // ---------------------------------------------------------------------------
 // Integration tests
 // ---------------------------------------------------------------------------
@@ -181,7 +220,7 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
 
   // Run with mock Skill.Service, AppFileSystem, and SessionMetadata — matches scan-parts.test.ts pattern
   function runWithMockSkill<T>(
-    program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService>,
+    program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service>,
     initialSkills?: Record<string, Skill.Info>,
   ): { result: Promise<T>; skillState: SkillState } {
     const { service, state } = createMockServiceWithTracking(initialSkills)
@@ -191,10 +230,13 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
     const result = Effect.runPromise(
       Effect.provide(
         Effect.provide(
-          Effect.provide(program, AppFileSystem.defaultLayer),
-          skillLayer,
+          Effect.provide(
+            Effect.provide(program, AppFileSystem.defaultLayer),
+            skillLayer,
+          ),
+          SessionMetadata.defaultLayer,
         ),
-        SessionMetadata.defaultLayer,
+        mockSessionLayer(),
       ),
     ).catch(() => {
       // swallow error if SessionMetadata.Service is not provided (graceful degradation)
@@ -235,7 +277,7 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       ]
 
       const { result, skillState } = runWithMockSkill(
-        DynamicSkillScanner.scanParts(parts, sessionID),
+        DynamicSkillScanner.scanParts(parts, SessionID.make(sessionID), dummyAgent, dummyProviderID, dummyModelID),
       )
 
       const scanResult = await result
@@ -277,7 +319,7 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       ]
 
       const { result, skillState } = runWithMockSkill(
-        DynamicSkillScanner.scanParts(parts, sessionID),
+        DynamicSkillScanner.scanParts(parts, SessionID.make(sessionID), dummyAgent, dummyProviderID, dummyModelID),
       )
 
       const scanResult = await result
@@ -307,9 +349,12 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       fs.writeFileSync(filePath, "export const x = 1")
 
       const args = { filePath }
+      const agent = "test-agent"
+      const providerID = ProviderID.make("test-provider")
+      const modelID = ModelID.make("test-model")
 
       const { result, skillState } = runWithMockSkill(
-        DynamicSkillScanner.scanToolArgs("read", args, sessionID),
+        DynamicSkillScanner.scanToolArgs("read", args, SessionID.make(sessionID), agent, providerID, modelID),
       )
 
       const scanResult = await result
@@ -334,9 +379,12 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       fs.writeFileSync(filePath, "const app = {}")
 
       const args = { filePath, oldString: "const app = {}", newString: "const app = { foo: 1 }" }
+      const agent = "test-agent"
+      const providerID = ProviderID.make("test-provider")
+      const modelID = ModelID.make("test-model")
 
       const { result, skillState } = runWithMockSkill(
-        DynamicSkillScanner.scanToolArgs("edit", args, sessionID),
+        DynamicSkillScanner.scanToolArgs("edit", args, SessionID.make(sessionID), agent, providerID, modelID),
       )
 
       const scanResult = await result
@@ -359,9 +407,12 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       fs.mkdirSync(searchPath, { recursive: true })
 
       const args = { pattern: "TODO", path: searchPath }
+      const agent = "test-agent"
+      const providerID = ProviderID.make("test-provider")
+      const modelID = ModelID.make("test-model")
 
       const { result, skillState } = runWithMockSkill(
-        DynamicSkillScanner.scanToolArgs("grep", args, sessionID),
+        DynamicSkillScanner.scanToolArgs("grep", args, SessionID.make(sessionID), agent, providerID, modelID),
       )
 
       const scanResult = await result
@@ -375,9 +426,12 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       await loadModule()
 
       const args = { someArg: "value" }
+      const agent = "test-agent"
+      const providerID = ProviderID.make("test-provider")
+      const modelID = ModelID.make("test-model")
 
       const { result, skillState } = runWithMockSkill(
-        DynamicSkillScanner.scanToolArgs("unknown-tool", args, sessionID),
+        DynamicSkillScanner.scanToolArgs("unknown-tool", args, SessionID.make(sessionID), agent, providerID, modelID),
       )
 
       const scanResult = await result
@@ -685,8 +739,8 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
 
       const { result, skillState } = runWithMockSkill(
         Effect.gen(function* () {
-          const first = yield* DynamicSkillScanner.scanParts(parts1, sessionID)
-          const second = yield* DynamicSkillScanner.scanParts(parts2, sessionID)
+          const first = yield* DynamicSkillScanner.scanParts(parts1, SessionID.make(sessionID), dummyAgent, dummyProviderID, dummyModelID)
+          const second = yield* DynamicSkillScanner.scanParts(parts2, SessionID.make(sessionID), dummyAgent, dummyProviderID, dummyModelID)
           return { first, second }
         }),
       )
