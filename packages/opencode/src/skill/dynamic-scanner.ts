@@ -445,14 +445,24 @@ export const scanParts = Effect.fnUntraced(function* (
       skillNames = allNewSkills.map((s) => s.name)
 
       // Track newly registered skills for injection and session metadata
-      for (const skill of allNewSkills) {
-        if (!injectionQueue.has(skill.name)) {
-          injectionQueue.set(skill.name, skill)
+      // Only inject skills that were actually newly registered (registration.added > 0)
+      if (skillsRegistered > 0) {
+        for (const skill of allNewSkills) {
+          if (!injectionQueue.has(skill.name)) {
+            injectionQueue.set(skill.name, skill)
+          }
+          // Record skill registration in session metadata (for post-compaction restoration)
+          yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
+            Effect.catch(() => Effect.void)
+          )
         }
-        // Record skill registration in session metadata (for post-compaction restoration)
-        yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
-          Effect.catch(() => Effect.void)
-        )
+      } else {
+        // Skills were already registered — still record in session metadata
+        for (const skill of allNewSkills) {
+          yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
+            Effect.catch(() => Effect.void)
+          )
+        }
       }
 
       if (skillsRegistered > 0) {
@@ -618,14 +628,24 @@ export const scanToolArgs = Effect.fnUntraced(function* (
       skillNames = allNewSkills.map((s) => s.name)
 
       // Track newly registered skills for injection and session metadata
-      for (const skill of allNewSkills) {
-        if (!injectionQueue.has(skill.name)) {
-          injectionQueue.set(skill.name, skill)
+      // Only inject skills that were actually newly registered (registration.added > 0)
+      if (skillsRegistered > 0) {
+        for (const skill of allNewSkills) {
+          if (!injectionQueue.has(skill.name)) {
+            injectionQueue.set(skill.name, skill)
+          }
+          // Record skill registration in session metadata (for post-compaction restoration)
+          yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
+            Effect.catch(() => Effect.void)
+          )
         }
-        // Record skill registration in session metadata (for post-compaction restoration)
-        yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
-          Effect.catch(() => Effect.void)
-        )
+      } else {
+        // Skills were already registered — still record in session metadata
+        for (const skill of allNewSkills) {
+          yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
+            Effect.catch(() => Effect.void)
+          )
+        }
       }
 
       if (skillsRegistered > 0) {
