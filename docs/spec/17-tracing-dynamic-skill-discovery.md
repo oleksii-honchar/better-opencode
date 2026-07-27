@@ -21,6 +21,8 @@ tail -100 ~/.opencode/log/opencode.log | grep --color '"tag":"dynamic-skills"'
 
 # JSON structured logs — filter by tag
 jq -c 'select(.tag == "dynamic-skills")' ~/.opencode/log/opencode.log
+
+./scripts/start-dev.sh --server-logs | rg "dynamic-skills"
 ```
 
 ## Event Reference
