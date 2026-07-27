@@ -2,7 +2,7 @@
 type: index
 title: "Domain Concepts"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-07-25T13:50:00Z"
+updatedAt: "2026-07-27T18:00:00Z"
 tags: []
 ---
 
@@ -21,3 +21,4 @@ Mental models, domain vocabulary, and architectural patterns used in better-open
 - [[0007-unstuck-loop-detection.concept.md]] — Unstuck Loop Detection System: fingerprint-based detection, evidence accumulation, nudge-and-prune, cross-stream history, user message reset, 6 detection types (xml_repetition with partial/prefix tag detection, model-specific thresholds)
 - [[0008-agent-model-selection.concept.md]] — Agent Model Selection from Frontmatter: three fields (models, model, modelPreset), resolution chain, provider-model format
 - [[0009-agent-model-variant-parsing.concept.md]] — Agent Model Variant Parsing (`:variant` Syntax): inline variant extraction, precedence rules, single/multi-model propagation
+- [[0010-dynamic-context-injection.concept.md]] — Dynamic Context Injection with KV Cache Preservation: two-phase pattern (synthetic messages before compaction, system prompt after)

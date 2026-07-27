@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-07-17T12:00:00Z"
+updatedAt: "2026-07-27T18:00:00Z"
 tags: []
 ---
 
@@ -66,3 +66,8 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0052-enhanced-xml-detection.adr.md]] — Enhanced XML Repetition Detection — Partial/Malformed Tag Support (ADR-0052, status: accepted)
 - [[0053-lenient-json-schema-validator.adr.md]] — Lenient JSON Schema Validator for MCP Tool Output Validation (ADR-0053, status: accepted)
 - [[0054-inclusion-based-mcp-path-encoding.adr.md]] — Inclusion-Based Opt-In for MCP File Path Base64 Encoding (ADR-0054, status: accepted)
+- [[0055-dynamic-skill-registration.adr.md]] — Register Dynamic Skills in Skill.Service via Separate Storage (ADR-0055, status: accepted)
+- [[0056-core-pipeline-injection.adr.md]] — Core Pipeline Injection for Runtime Feature Triggers (ADR-0056, status: accepted)
+- [[0057-two-phase-context-injection.adr.md]] — Two-Phase Context Injection: Synthetic Messages Before Compaction, System Prompt After (ADR-0057, status: accepted)
+- [[0058-self-inject-pattern.adr.md]] — Self-Inject Pattern for Dynamic Skill Discovery (ADR-0058, status: accepted)
+- [[0059-synchronous-scan-decision.adr.md]] — Synchronous Scan for Dynamic Skill Discovery (Removed Fork) (ADR-0059, status: accepted)
