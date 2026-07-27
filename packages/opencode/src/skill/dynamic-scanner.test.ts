@@ -1,14 +1,109 @@
 import path from "path"
-import { describe, test, expect, beforeEach, afterEach } from "bun:test"
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test"
 import { Effect, Fiber, Layer, Option } from "effect"
 import * as fs from "fs"
 import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
+import * as Skill from "@/skill"
 import * as SessionMetadata from "@/skill/session-metadata"
 import { Session } from "@/session/session"
 import { SessionID, MessageID, PartID } from "@/session/schema"
 import { ProviderID, ModelID } from "@/provider/schema"
 import type { MessageV2 } from "@/session/message-v2"
+
+// Minimal mock Skill.Service for scanParts tests
+function createMockSkillService(): Skill.Interface {
+  const state: {
+    skills: Record<string, Skill.Info>
+    dynamicSkills: Record<string, Skill.Info>
+    dirs: Set<string>
+    promoted: boolean
+  } = {
+    skills: {},
+    dynamicSkills: {},
+    dirs: new Set(),
+    promoted: false,
+  }
+
+  const get = Effect.fn("MockSkill.get")(function* (name: string) {
+    return state.skills[name]
+  })
+  const require = Effect.fn("MockSkill.require")(function* (name: string) {
+    const info = state.skills[name]
+    if (info) return info
+    return yield* new Skill.NotFoundError({ name, available: Object.keys(state.skills).toSorted() })
+  })
+  const all = Effect.fn("MockSkill.all")(function* () {
+    return Object.values(state.skills)
+  })
+  const dirs = Effect.fn("MockSkill.dirs")(function* () {
+    return Array.from(state.dirs)
+  })
+  const available = Effect.fn("MockSkill.available")(function* () {
+    return Object.values(state.skills).toSorted((a, b) => a.name.localeCompare(b.name))
+  })
+  const registerDynamic = Effect.fn("MockSkill.registerDynamic")(function* (newSkills: Skill.Info[]) {
+    let added = 0
+    let skipped = 0
+    for (const skill of newSkills) {
+      if (state.skills[skill.name] || state.dynamicSkills[skill.name]) {
+        skipped++
+      } else {
+        state.dynamicSkills[skill.name] = skill
+        added++
+      }
+    }
+    return { added, skipped }
+  })
+  const promoteDynamicToStartup = Effect.fn("MockSkill.promoteDynamicToStartup")(function* () {
+    if (state.promoted) return { promoted: 0 }
+    const count = Object.keys(state.dynamicSkills).length
+    for (const [name, info] of Object.entries(state.dynamicSkills)) {
+      state.skills[name] = info
+    }
+    state.dynamicSkills = {}
+    state.promoted = true
+    return { promoted: count }
+  })
+
+  return { get, require, all, dirs, available, registerDynamic, promoteDynamicToStartup }
+}
+
+function mockSkillLayer(): Layer.Layer<Skill.Service> {
+  return Layer.succeed(Skill.Service, createMockSkillService())
+}
+
+// Minimal mock Session.Service for scanParts tests
+function createMockSessionService(): Session.Interface {
+  return {
+    list: () => Effect.succeed([]),
+    create: () => Effect.succeed({} as any),
+    fork: () => Effect.succeed({} as any),
+    touch: () => Effect.void,
+    get: () => Effect.succeed({} as any),
+    setTitle: () => Effect.void,
+    setArchived: () => Effect.void,
+    setPermission: () => Effect.void,
+    setRevert: () => Effect.void,
+    clearRevert: () => Effect.void,
+    setSummary: () => Effect.void,
+    diff: () => Effect.succeed([]),
+    messages: () => Effect.succeed([]),
+    children: () => Effect.succeed([]),
+    remove: () => Effect.void,
+    updateMessage: (msg) => Effect.succeed(msg),
+    removeMessage: () => Effect.succeed(MessageID.make("mock")),
+    removePart: () => Effect.succeed(PartID.make("mock")),
+    getPart: () => Effect.succeed(undefined),
+    updatePart: (part) => Effect.succeed(part),
+    updatePartDelta: () => Effect.void,
+    findMessage: () => Effect.succeed(Option.none()),
+  }
+}
+
+function mockSessionLayer(): Layer.Layer<Session.Service> {
+  return Layer.succeed(Session.Service, createMockSessionService())
+}
 
 // We test the public API of dynamic-scanner module
 // Import is deferred until after implementation exists
@@ -328,6 +423,149 @@ describe("DynamicSkillScanner", () => {
       })
       const result = await run(program)
       expect(result).toBeDefined()
+    })
+
+    test("times out on slow AppFileSystem isDir and returns empty result", async () => {
+      await loadModule()
+      // Create a real file path so resolveRealpath succeeds
+      const filePath = path.join(tmpDir, "file.ts")
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, "content")
+
+      // Get real filesystem to spread, then override isDir to delay
+      const realFs = await Effect.runPromise(AppFileSystem.Service.pipe(
+        Effect.provide(AppFileSystem.defaultLayer),
+      ))
+
+      const slowFileSystem = AppFileSystem.Service.of({
+        ...realFs,
+        isDir: () => Effect.succeed(true).pipe(Effect.delay(2000)),
+      })
+
+      const program = DynamicSkillScanner.scanForFile(filePath, "ses-timeout-test").pipe(
+        Effect.provideService(AppFileSystem.Service, slowFileSystem),
+      )
+
+      const startTime = Date.now()
+      const result = await Effect.runPromise(
+        Effect.provide(program, SessionMetadata.defaultLayer),
+      )
+      const elapsed = Date.now() - startTime
+
+      // Should timeout around 1000ms (not wait for full 2000ms delay)
+      expect(elapsed).toBeLessThan(1500)
+      // Timeout caught → parentExists false → early return with empty result
+      expect(result).toEqual({ agentsDirs: [], skills: [] })
+    })
+
+    test("times out on slow findAgentsDirectories walk-up and returns empty result", async () => {
+      await loadModule()
+      // Create a real file path so resolveRealpath and parentExists succeed
+      const filePath = path.join(tmpDir, "file.ts")
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, "content")
+
+      // Get real filesystem to spread, then override isDir to delay only during walk-up
+      // (parent check succeeds fast, walk-up isDir calls delay)
+      let callCount = 0
+      const realFs = await Effect.runPromise(AppFileSystem.Service.pipe(
+        Effect.provide(AppFileSystem.defaultLayer),
+      ))
+
+      const slowWalkFileSystem = AppFileSystem.Service.of({
+        ...realFs,
+        isDir: (dir: string) => {
+          // First call (parent check) returns fast
+          if (callCount === 0) {
+            callCount++
+            return Effect.succeed(true)
+          }
+          // Walk-up calls delay beyond 2000ms timeout
+          return Effect.succeed(true).pipe(Effect.delay(3000))
+        },
+      })
+
+      const program = DynamicSkillScanner.scanForFile(filePath, "ses-walk-timeout-test").pipe(
+        Effect.provideService(AppFileSystem.Service, slowWalkFileSystem),
+      )
+
+      const startTime = Date.now()
+      const result = await Effect.runPromise(
+        Effect.provide(program, SessionMetadata.defaultLayer),
+      )
+      const elapsed = Date.now() - startTime
+
+      // Should timeout around 2000ms (findAgentsDirectories timeout), not wait for full 3000ms delay
+      expect(elapsed).toBeLessThan(3000)
+      // Timeout caught → agentsDirs empty → early return with empty result
+      expect(result).toEqual({ agentsDirs: [], skills: [] })
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // scanParts tests — timeout on slow scanForFile
+  // ---------------------------------------------------------------------------
+
+  describe("scanParts — scanForFile timeout", () => {
+    test("times out on slow scanForFile and returns empty result for that path", async () => {
+      await loadModule()
+
+      // Create a real file path with a .agents dir containing a skill
+      const agentsDir = path.join(tmpDir, ".agents")
+      fs.mkdirSync(path.join(agentsDir, "skills", "slow-skill"), { recursive: true })
+      fs.writeFileSync(path.join(agentsDir, "skills", "slow-skill", "SKILL.md"), "---\nname: slow-skill\n---\n# Slow")
+      const filePath = path.join(tmpDir, "file.ts")
+      fs.writeFileSync(filePath, "content")
+
+      // Spy on ConfigMarkdown.parse to make it slow (beyond 2000ms timeout)
+      const ConfigMarkdown = await import("@/config/markdown")
+      const realParse = ConfigMarkdown.parse
+      const slowParse = async (p: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 5000))
+        return realParse(p)
+      }
+      const spy = spyOn(ConfigMarkdown, "parse").mockImplementation(slowParse)
+
+      try {
+        const sessionID = SessionID.make("ses-scan-parts-timeout-test")
+        const agent = "test-agent"
+        const providerID = ProviderID.make("test-provider")
+        const modelID = ModelID.make("test-model")
+
+        // Create a text part referencing the file (scanParts only reads part.type and part.text)
+        const parts: Array<{ type: "text"; text: string }> = [
+          { type: "text", text: `Check this file: ${filePath}` },
+        ]
+
+        const program = DynamicSkillScanner.scanParts(parts as import("@/session/message-v2").Part[], sessionID, agent, providerID, modelID)
+
+        const startTime = Date.now()
+        const result = await Effect.runPromise(
+          Effect.provide(
+            Effect.provide(
+              Effect.provide(
+                Effect.provide(program, AppFileSystem.defaultLayer),
+                mockSkillLayer(),
+              ),
+              SessionMetadata.defaultLayer,
+            ),
+            mockSessionLayer(),
+          ),
+        )
+        const elapsed = Date.now() - startTime
+
+        // After Task 3: scanParts applies 2000ms timeout to scanForFile call
+        // So even if scanForFile would take 5000ms+, it times out at ~2000ms
+        // Before Task 3: no scanForFile-level timeout, so it would wait for full 5000ms+
+        expect(elapsed).toBeLessThan(3000)
+        // Timeout caught by catch block → empty result for this path
+        expect(result.pathsFound).toBe(1)
+        expect(result.scannedPaths).toEqual([])
+        expect(result.skillsRegistered).toBe(0)
+        expect(result.skillNames).toEqual([])
+      } finally {
+        spy.mockRestore()
+      }
     })
   })
 

@@ -231,6 +231,7 @@ const scanForFileInternal = Effect.fnUntraced(function* (
   // Check if file's parent directory exists
   const parentExists = yield* AppFileSystem.Service.pipe(
     Effect.flatMap((fsys) => fsys.isDir(path.dirname(resolvedFile))),
+    Effect.timeout(1000),
     Effect.catch(() => Effect.succeed(false)),
   )
 
@@ -242,6 +243,7 @@ const scanForFileInternal = Effect.fnUntraced(function* (
   // Find all .agents/ directories
   log.info("find-agents-dirs-start", { filePath: resolvedFile })
   const agentsDirs = yield* findAgentsDirectories(resolvedFile).pipe(
+    Effect.timeout(2000),
     Effect.catch((error) => {
       log.warn("find-agents-dirs-error", { filePath: resolvedFile, error: String(error) })
       return Effect.succeed([] as string[])
@@ -411,6 +413,7 @@ export const scanParts = Effect.fnUntraced(function* (
   for (const [resolvedPath, rawPath] of uniquePaths) {
     log.info("scan-parts-path-resolved", { sessionID, path: resolvedPath })
     const result = yield* scanForFile(resolvedPath, sessionID).pipe(
+      Effect.timeout(2000),
       Effect.catch((error) => {
         log.warn("scan-parts-scan-error", { path: resolvedPath, sessionID, error: String(error) })
         return Effect.succeed({ agentsDirs: [], skills: [] })

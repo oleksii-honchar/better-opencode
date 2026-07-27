@@ -1177,6 +1177,7 @@ export const layer = Layer.effect(
         info.model?.providerID ?? ProviderID.make("default"),
         info.model?.modelID ?? ModelID.make("default"),
       ).pipe(
+        Effect.timeout(3000),
         Effect.forkChild,
         Effect.ignore,
       )
