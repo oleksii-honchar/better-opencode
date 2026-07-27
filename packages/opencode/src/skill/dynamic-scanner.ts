@@ -328,7 +328,7 @@ export const scanForFile = Effect.fnUntraced(function* (
  * - File parts: filename when it is an absolute path
  *
  * Deduplicates paths by resolved realpath before scanning.
- * Non-blocking: wrapped in Effect.forkChild so it never blocks message processing.
+ * Synchronous with 5-second overall timeout: scan completes before agent response to avoid fork kill race.
  */
 export const scanParts = Effect.fnUntraced(function* (
   parts: Part[],
@@ -395,93 +395,102 @@ export const scanParts = Effect.fnUntraced(function* (
     pathCount: rawPaths.size,
   })
 
-  // Deduplicate by resolved realpath
-  const uniquePaths = new Map<string, string>()
-  for (const rawPath of rawPaths) {
-    const resolved = yield* resolveRealpath(rawPath)
-    if (!uniquePaths.has(resolved)) {
-      uniquePaths.set(resolved, rawPath)
-    }
-  }
-
-  log.info("scan-parts-start", { sessionID, pathCount: rawPaths.size, uniqueCount: uniquePaths.size })
-
-  // Scan each unique path and collect skills
-  const scannedPaths: string[] = []
-  const allNewSkills: Skill.Info[] = []
-
-  for (const [resolvedPath, rawPath] of uniquePaths) {
-    log.info("scan-parts-path-resolved", { sessionID, path: resolvedPath })
-    const result = yield* scanForFile(resolvedPath, sessionID).pipe(
-      Effect.timeout(2000),
-      Effect.catch((error) => {
-        log.warn("scan-parts-scan-error", { path: resolvedPath, sessionID, error: String(error) })
-        return Effect.succeed({ agentsDirs: [], skills: [] })
-      }),
-    )
-
-    if (result.skills.length > 0) {
-      scannedPaths.push(rawPath)
-      allNewSkills.push(...result.skills)
-    }
-  }
-
-  // Register discovered skills via Skill.Service and track for injection
-  let skillsRegistered = 0
-  let skillNames: string[] = []
-
-  if (allNewSkills.length > 0) {
-    const registration = yield* Skill.Service.pipe(
-      Effect.flatMap((svc) => svc.registerDynamic(allNewSkills)),
-      Effect.catch((error) => {
-        log.warn("scan-parts-register-error", { sessionID, error: String(error) })
-        return Effect.succeed({ added: 0, skipped: allNewSkills.length })
-      }),
-    )
-
-    skillsRegistered = registration.added
-    skillNames = allNewSkills.map((s) => s.name)
-
-    // Track newly registered skills for injection and session metadata
-    for (const skill of allNewSkills) {
-      if (!injectionQueue.has(skill.name)) {
-        injectionQueue.set(skill.name, skill)
+  // Wrap async scan logic in 5-second timeout (safety net since scan is now synchronous)
+  return yield* Effect.gen(function* () {
+    // Deduplicate by resolved realpath
+    const uniquePaths = new Map<string, string>()
+    for (const rawPath of rawPaths) {
+      const resolved = yield* resolveRealpath(rawPath)
+      if (!uniquePaths.has(resolved)) {
+        uniquePaths.set(resolved, rawPath)
       }
-      // Record skill registration in session metadata (for post-compaction restoration)
-      yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
-        Effect.catch(() => Effect.void)
-      )
     }
 
-    if (skillsRegistered > 0) {
-      log.info("scan-parts-skills-registered", {
+    log.info("scan-parts-start", { sessionID, pathCount: rawPaths.size, uniqueCount: uniquePaths.size })
+
+    // Scan each unique path and collect skills
+    const scannedPaths: string[] = []
+    const allNewSkills: Skill.Info[] = []
+
+    for (const [resolvedPath, rawPath] of uniquePaths) {
+      log.info("scan-parts-path-resolved", { sessionID, path: resolvedPath })
+      const result = yield* scanForFile(resolvedPath, sessionID).pipe(
+        Effect.timeout(2000),
+        Effect.catch((error) => {
+          log.warn("scan-parts-scan-error", { path: resolvedPath, sessionID, error: String(error) })
+          return Effect.succeed({ agentsDirs: [], skills: [] })
+        }),
+      )
+
+      if (result.skills.length > 0) {
+        scannedPaths.push(rawPath)
+        allNewSkills.push(...result.skills)
+      }
+    }
+
+    // Register discovered skills via Skill.Service and track for injection
+    let skillsRegistered = 0
+    let skillNames: string[] = []
+
+    if (allNewSkills.length > 0) {
+      const registration = yield* Skill.Service.pipe(
+        Effect.flatMap((svc) => svc.registerDynamic(allNewSkills)),
+        Effect.catch((error) => {
+          log.warn("scan-parts-register-error", { sessionID, error: String(error) })
+          return Effect.succeed({ added: 0, skipped: allNewSkills.length })
+        }),
+      )
+
+      skillsRegistered = registration.added
+      skillNames = allNewSkills.map((s) => s.name)
+
+      // Track newly registered skills for injection and session metadata
+      for (const skill of allNewSkills) {
+        if (!injectionQueue.has(skill.name)) {
+          injectionQueue.set(skill.name, skill)
+        }
+        // Record skill registration in session metadata (for post-compaction restoration)
+        yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
+          Effect.catch(() => Effect.void)
+        )
+      }
+
+      if (skillsRegistered > 0) {
+        log.info("scan-parts-skills-registered", {
+          sessionID,
+          count: skillsRegistered,
+          names: skillNames,
+        })
+      }
+    }
+
+    // Self-inject discovered skills (two-phase: format → flush)
+    const injectResult = yield* injectDiscoveredSkills(sessionID)
+    if (injectResult.injected > 0 && injectResult.xml) {
+      yield* flushInjectedMessages({
+        injected: [{ role: "user", text: injectResult.xml }],
         sessionID,
-        count: skillsRegistered,
-        names: skillNames,
+        agent,
+        providerID,
+        modelID,
       })
     }
-  }
 
-  // Self-inject discovered skills (two-phase: format → flush)
-  const injectResult = yield* injectDiscoveredSkills(sessionID)
-  if (injectResult.injected > 0 && injectResult.xml) {
-    yield* flushInjectedMessages({
-      injected: [{ role: "user", text: injectResult.xml }],
-      sessionID,
-      agent,
-      providerID,
-      modelID,
-    })
-  }
+    log.info("scan-parts-end", { sessionID })
 
-  log.info("scan-parts-end", { sessionID })
-
-  return {
-    pathsFound: rawPaths.size,
-    scannedPaths,
-    skillsRegistered,
-    skillNames,
-  }
+    return {
+      pathsFound: rawPaths.size,
+      scannedPaths,
+      skillsRegistered,
+      skillNames,
+    }
+  }).pipe(
+    Effect.timeout(5000),
+    Effect.catchTag("TimeoutError", () => {
+      log.warn("scan-parts-timeout", { sessionID, message: "scan exceeded 5-second timeout" })
+      return Effect.succeed({ pathsFound: rawPaths.size, scannedPaths: [], skillsRegistered: 0, skillNames: [] })
+    }),
+  )
 })
 
 // ---------------------------------------------------------------------------
@@ -497,7 +506,7 @@ export const scanParts = Effect.fnUntraced(function* (
  * - apply_patch: extract paths from +++ b/ lines in patch text
  *
  * Unknown tools are handled gracefully as no-op with debug log.
- * Non-blocking: wrapped in catchAll so errors don't propagate.
+ * Synchronous with 5-second overall timeout: completes before tool returns to ensure skills are registered.
  */
 export const scanToolArgs = Effect.fnUntraced(function* (
   toolId: string,
@@ -507,62 +516,63 @@ export const scanToolArgs = Effect.fnUntraced(function* (
   providerID: ProviderID,
   modelID: ModelID,
 ) {
-  try {
-    const paths = new Set<string>()
+  const paths = new Set<string>()
 
-    // Extract paths based on tool type
-    if (toolId === "read" || toolId === "write" || toolId === "edit") {
-      const filePath = args.filePath
-      if (typeof filePath === "string" && filePath.length > 0) {
-        paths.add(filePath)
+  // Extract paths based on tool type
+  if (toolId === "read" || toolId === "write" || toolId === "edit") {
+    const filePath = args.filePath
+    if (typeof filePath === "string" && filePath.length > 0) {
+      paths.add(filePath)
+    }
+  } else if (toolId === "glob") {
+    const pattern = args.pattern
+    if (typeof pattern === "string" && pattern.length > 0) {
+      // Extract directory component from glob pattern
+      // Remove glob wildcards from the end to get the base directory
+      const dir = pattern.replace(/\/\*\*\/[^/]*$/, "").replace(/\/\*[^/]*$/, "")
+      if (dir && (path.isAbsolute(dir) || /^[A-Za-z]:\\/.test(dir))) {
+        paths.add(dir)
       }
-    } else if (toolId === "glob") {
-      const pattern = args.pattern
-      if (typeof pattern === "string" && pattern.length > 0) {
-        // Extract directory component from glob pattern
-        // Remove glob wildcards from the end to get the base directory
-        const dir = pattern.replace(/\/\*\*\/[^/]*$/, "").replace(/\/\*[^/]*$/, "")
-        if (dir && (path.isAbsolute(dir) || /^[A-Za-z]:\\/.test(dir))) {
-          paths.add(dir)
-        }
-      }
-    } else if (toolId === "grep") {
-      const grepPath = args.path
-      if (typeof grepPath === "string" && grepPath.length > 0) {
-        paths.add(grepPath)
-      }
-    } else if (toolId === "apply_patch") {
-      const patch = args.patch
-      if (typeof patch === "string" && patch.length > 0) {
-        // Extract paths from +++ b/<path> lines in unified diff format
-        const patchLines = patch.split("\n")
-        for (const line of patchLines) {
-          if (line.startsWith("+++ b/")) {
-            const extractedPath = line.slice(6) // remove "+++ b/"
-            if (extractedPath && extractedPath.length > 0) {
-              paths.add(extractedPath)
-            }
+    }
+  } else if (toolId === "grep") {
+    const grepPath = args.path
+    if (typeof grepPath === "string" && grepPath.length > 0) {
+      paths.add(grepPath)
+    }
+  } else if (toolId === "apply_patch") {
+    const patch = args.patch
+    if (typeof patch === "string" && patch.length > 0) {
+      // Extract paths from +++ b/<path> lines in unified diff format
+      const patchLines = patch.split("\n")
+      for (const line of patchLines) {
+        if (line.startsWith("+++ b/")) {
+          const extractedPath = line.slice(6) // remove "+++ b/"
+          if (extractedPath && extractedPath.length > 0) {
+            paths.add(extractedPath)
           }
         }
       }
-    } else {
-      // Unknown tool — no-op, log for visibility
-      log.debug("unknown-tool", { toolId, sessionID })
-      return { pathsFound: 0, scannedPaths: [], skillsRegistered: 0, skillNames: [] }
     }
+  } else {
+    // Unknown tool — no-op, log for visibility
+    log.debug("unknown-tool", { toolId, sessionID })
+    return { pathsFound: 0, scannedPaths: [], skillsRegistered: 0, skillNames: [] }
+  }
 
-    if (paths.size === 0) {
-      log.debug("trigger-tool", { toolId, sessionID, filePath: "none", pathCount: 0 })
-      return { pathsFound: 0, scannedPaths: [], skillsRegistered: 0, skillNames: [] }
-    }
+  if (paths.size === 0) {
+    log.debug("trigger-tool", { toolId, sessionID, filePath: "none", pathCount: 0 })
+    return { pathsFound: 0, scannedPaths: [], skillsRegistered: 0, skillNames: [] }
+  }
 
-    log.info("trigger-tool", {
-      toolId,
-      sessionID,
-      filePath: Array.from(paths),
-      pathCount: paths.size,
-    })
+  log.info("trigger-tool", {
+    toolId,
+    sessionID,
+    filePath: Array.from(paths),
+    pathCount: paths.size,
+  })
 
+  // Wrap async scan logic in 5-second timeout (safety net since scan is now synchronous)
+  return yield* Effect.gen(function* () {
     // Deduplicate by resolved realpath
     const uniquePaths = new Map<string, string>()
     for (const rawPath of paths) {
@@ -578,6 +588,7 @@ export const scanToolArgs = Effect.fnUntraced(function* (
 
     for (const [resolvedPath, rawPath] of uniquePaths) {
       const result = yield* scanForFile(resolvedPath, sessionID).pipe(
+        Effect.timeout(2000),
         Effect.catch((error) => {
           log.warn("scan-tool-args-scan-error", { path: resolvedPath, toolId, sessionID, error: String(error) })
           return Effect.succeed({ agentsDirs: [], skills: [] })
@@ -649,10 +660,13 @@ export const scanToolArgs = Effect.fnUntraced(function* (
       skillsRegistered,
       skillNames,
     }
-  } catch (error) {
-    log.warn("scan-tool-args-error", { error: String(error) })
-    return { pathsFound: 0, scannedPaths: [], skillsRegistered: 0, skillNames: [] }
-  }
+  }).pipe(
+    Effect.timeout(5000),
+    Effect.catchTag("TimeoutError", () => {
+      log.warn("scan-tool-args-timeout", { toolId, sessionID, message: "scan exceeded 5-second timeout" })
+      return Effect.succeed({ pathsFound: paths.size, scannedPaths: [], skillsRegistered: 0, skillNames: [] })
+    }),
+  )
 })
 
 // ---------------------------------------------------------------------------

@@ -168,6 +168,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               })
             }
             // Dynamic skill discovery: scan tool args for file paths and inject discovered skills
+            // Synchronous: completes before tool returns to ensure skills are registered.
             yield* DynamicSkillScanner.scanToolArgs(
               item.id,
               args,
@@ -175,7 +176,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               input.agent.name,
               input.model.providerID,
               ModelID.make(input.model.api.id),
-            ).pipe(Effect.ignore, Effect.forkChild)
+            ).pipe(Effect.ignore)
             if (options.abortSignal?.aborted) {
               yield* input.processor.completeToolCall(options.toolCallId, output)
             }
