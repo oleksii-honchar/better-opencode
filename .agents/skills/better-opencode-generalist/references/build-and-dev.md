@@ -189,3 +189,18 @@ jq -c 'select(.error)' ~/.local/share/opencode/log/tools.log
 # Last 20 meta-use calls
 grep meta_use ~/.local/share/opencode/log/tools.log | tail -20 | jq -c '{type, name, duration_ms, error}'
 ```
+
+### Feature-Specific Logs
+
+Use `rg` to search for feature-specific log entries. Features include `tag` fields in their log output for filtering.
+
+| Feature | Log File | Search Pattern |
+|---------|----------|----------------|
+| Dynamic Skills | `dev.log` | `rg "dynamic-scanner" ~/.local/share/opencode/log/dev.log` |
+| Dynamic Skills (by tag) | `dev.log` | `rg '"tag":"dynamic-skills"' ~/.local/share/opencode/log/dev.log` |
+| Skill Session Metadata | `dev.log` | `rg "session-metadata" ~/.local/share/opencode/log/dev.log` |
+
+```bash
+# Example: search dynamic skills activity
+rg "dynamic-scanner" ~/.local/share/opencode/log/dev.log | tail -30
+```
