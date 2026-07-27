@@ -288,14 +288,16 @@ export const layer = Layer.effect(
 
     const get = Effect.fn("Skill.get")(function* (name: string) {
       const s = yield* InstanceState.get(state)
-      return s.skills[name]
+      return s.skills[name] ?? s.dynamicSkills[name]
     })
 
     const require = Effect.fn("Skill.require")(function* (name: string) {
       const s = yield* InstanceState.get(state)
-      const info = s.skills[name]
+      const info = s.skills[name] ?? s.dynamicSkills[name]
       if (info) return info
-      return yield* new NotFoundError({ name, available: Object.keys(s.skills).toSorted() })
+      // List all available skills including dynamic for error message
+      const allNames = [...Object.keys(s.skills), ...Object.keys(s.dynamicSkills)].toSorted()
+      return yield* new NotFoundError({ name, available: allNames })
     })
 
     const all = Effect.fn("Skill.all")(function* () {

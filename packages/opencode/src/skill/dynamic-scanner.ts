@@ -433,6 +433,23 @@ export const scanParts = Effect.fnUntraced(function* (
     let skillNames: string[] = []
 
     if (allNewSkills.length > 0) {
+      // First: determine which skills are NEW (not yet registered) — need to inject these as synthetic
+      // Must check BEFORE registerDynamic, because after registration they'll be found via get()
+      const newSkillsToInject: Skill.Info[] = []
+      for (const skill of allNewSkills) {
+        const isAlreadyRegistered = yield* Skill.Service.pipe(
+          Effect.flatMap((svc) => svc.get(skill.name)),
+          Effect.map((info) => !!info),
+          Effect.catch(() => Effect.succeed(false)),
+        )
+
+        if (!isAlreadyRegistered && !injectionQueue.has(skill.name)) {
+          newSkillsToInject.push(skill)
+          injectionQueue.set(skill.name, skill)
+        }
+      }
+
+      // Now register all skills (some may already be registered)
       const registration = yield* Skill.Service.pipe(
         Effect.flatMap((svc) => svc.registerDynamic(allNewSkills)),
         Effect.catch((error) => {
@@ -444,23 +461,8 @@ export const scanParts = Effect.fnUntraced(function* (
       skillsRegistered = registration.added
       skillNames = allNewSkills.map((s) => s.name)
 
-      // Track newly registered skills for injection and session metadata
-      // Only inject skills that are NOT already in global Skill.Service (those come via system prompt)
-      let injectedCount = 0
+      // Record skill registration in session metadata (for post-compaction restoration)
       for (const skill of allNewSkills) {
-        // Check if skill is already globally registered (will come via system prompt)
-        const isGlobal = yield* Skill.Service.pipe(
-          Effect.flatMap((svc) => svc.get(skill.name)),
-          Effect.map((info) => !!info),
-          Effect.catch(() => Effect.succeed(false)),
-        )
-
-        if (!isGlobal && !injectionQueue.has(skill.name)) {
-          injectionQueue.set(skill.name, skill)
-          injectedCount++
-        }
-
-        // Record skill registration in session metadata (for post-compaction restoration)
         yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
           Effect.catch(() => Effect.void)
         )
@@ -474,11 +476,12 @@ export const scanParts = Effect.fnUntraced(function* (
         })
       }
 
-      if (injectedCount > 0) {
+      if (newSkillsToInject.length > 0) {
         log.info("scan-parts-injected-for-synthetic", {
           sessionID,
-          count: injectedCount,
+          count: newSkillsToInject.length,
           totalScanned: allNewSkills.length,
+          names: newSkillsToInject.map((s) => s.name),
         })
       }
     }
@@ -625,6 +628,23 @@ export const scanToolArgs = Effect.fnUntraced(function* (
     let skillNames: string[] = []
 
     if (allNewSkills.length > 0) {
+      // First: determine which skills are NEW (not yet registered) — need to inject these as synthetic
+      // Must check BEFORE registerDynamic, because after registration they'll be found via get()
+      const newSkillsToInject: Skill.Info[] = []
+      for (const skill of allNewSkills) {
+        const isAlreadyRegistered = yield* Skill.Service.pipe(
+          Effect.flatMap((svc) => svc.get(skill.name)),
+          Effect.map((info) => !!info),
+          Effect.catch(() => Effect.succeed(false)),
+        )
+
+        if (!isAlreadyRegistered && !injectionQueue.has(skill.name)) {
+          newSkillsToInject.push(skill)
+          injectionQueue.set(skill.name, skill)
+        }
+      }
+
+      // Now register all skills (some may already be registered)
       const registration = yield* Skill.Service.pipe(
         Effect.flatMap((svc) => svc.registerDynamic(allNewSkills)),
         Effect.catch((error) => {
@@ -636,23 +656,8 @@ export const scanToolArgs = Effect.fnUntraced(function* (
       skillsRegistered = registration.added
       skillNames = allNewSkills.map((s) => s.name)
 
-      // Track newly registered skills for injection and session metadata
-      // Only inject skills that are NOT already in global Skill.Service (those come via system prompt)
-      let injectedCount = 0
+      // Record skill registration in session metadata (for post-compaction restoration)
       for (const skill of allNewSkills) {
-        // Check if skill is already globally registered (will come via system prompt)
-        const isGlobal = yield* Skill.Service.pipe(
-          Effect.flatMap((svc) => svc.get(skill.name)),
-          Effect.map((info) => !!info),
-          Effect.catch(() => Effect.succeed(false)),
-        )
-
-        if (!isGlobal && !injectionQueue.has(skill.name)) {
-          injectionQueue.set(skill.name, skill)
-          injectedCount++
-        }
-
-        // Record skill registration in session metadata (for post-compaction restoration)
         yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
           Effect.catch(() => Effect.void)
         )
@@ -667,12 +672,13 @@ export const scanToolArgs = Effect.fnUntraced(function* (
         })
       }
 
-      if (injectedCount > 0) {
+      if (newSkillsToInject.length > 0) {
         log.info("scan-tool-args-injected-for-synthetic", {
           toolId,
           sessionID,
-          count: injectedCount,
+          count: newSkillsToInject.length,
           totalScanned: allNewSkills.length,
+          names: newSkillsToInject.map((s) => s.name),
         })
       }
     }
@@ -734,9 +740,14 @@ export const injectDiscoveredSkills = Effect.fnUntraced(function* (
       return { injected: 0, skillCount: 0 }
     }
 
-    // Format skills as <available_skills> XML (same format as Skill.fmt with verbose: true)
+    // Format skills as <available_skills> XML with a system-reminder nudge
     const described = dynamicSkills.filter((skill) => skill.description !== undefined)
+    const nudgeNames = described.map((s) => s.name).join(", ")
     const xml = [
+      "<system-reminder>",
+      "The following workspace-local skills were discovered from files you're working on. Consider loading them via the skill tool:",
+      `Available: ${nudgeNames}`,
+      "</system-reminder>",
       "<available_skills>",
       ...described
         .toSorted((a, b) => a.name.localeCompare(b.name))
