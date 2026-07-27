@@ -19,6 +19,7 @@ import { PartID, MessageID, SessionID } from "./schema"
 import * as Log from "@opencode-ai/core/util/log"
 import { EffectBridge } from "@/effect/bridge"
 import { DynamicSkillScanner } from "@/skill/dynamic-scanner"
+import * as SessionMetadata from "@/skill/session-metadata"
 
 const log = Log.create({ service: "session.tools" })
 
@@ -176,7 +177,10 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               input.agent.name,
               input.model.providerID,
               ModelID.make(input.model.api.id),
-            ).pipe(Effect.ignore)
+            ).pipe(
+              Effect.provide(SessionMetadata.defaultLayer),
+              Effect.ignore,
+            )
             if (options.abortSignal?.aborted) {
               yield* input.processor.completeToolCall(options.toolCallId, output)
             }
@@ -256,7 +260,11 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             input.agent.name,
             input.model.providerID,
             ModelID.make(input.model.api.id),
-          ).pipe(Effect.ignore, Effect.forkChild)
+          ).pipe(
+            Effect.provide(SessionMetadata.defaultLayer),
+            Effect.ignore,
+            Effect.forkChild,
+          )
 
           const textParts: string[] = []
           const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []

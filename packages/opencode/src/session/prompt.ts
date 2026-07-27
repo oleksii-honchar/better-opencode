@@ -11,8 +11,10 @@ import { ModelID, ProviderID } from "../provider/schema"
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
-import { SessionMetadataService } from "@/skill/session-metadata"
+import * as SessionMetadata from "@/skill/session-metadata"
 import { Bus } from "../bus"
+import { Git } from "@/git"
+import { AppProcess } from "@opencode-ai/core/process"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
@@ -1177,6 +1179,7 @@ export const layer = Layer.effect(
         info.model?.providerID ?? ProviderID.make("default"),
         info.model?.modelID ?? ModelID.make("default"),
       ).pipe(
+        Effect.provide(SessionMetadata.defaultLayer),
         Effect.ignore,
       )
 
@@ -1845,6 +1848,9 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(Image.defaultLayer),
     Layer.provide(
       Layer.mergeAll(
+        AppProcess.defaultLayer,
+        Git.defaultLayer,
+        SessionMetadata.defaultLayer,
         EventV2Bridge.defaultLayer,
         Agent.defaultLayer,
         SystemPrompt.defaultLayer,
