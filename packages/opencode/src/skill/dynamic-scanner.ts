@@ -224,7 +224,7 @@ export const scanAgentsSkills = Effect.fnUntraced(function* (agentsDir: string) 
 const scanForFileInternal = Effect.fnUntraced(function* (
   filePath: string,
   sessionID: string,
-) {
+ ) {
   // Resolve the file path first
   const resolvedFile = yield* resolveRealpath(filePath)
 
@@ -240,6 +240,7 @@ const scanForFileInternal = Effect.fnUntraced(function* (
   }
 
   // Find all .agents/ directories
+  log.info("find-agents-dirs-start", { filePath: resolvedFile })
   const agentsDirs = yield* findAgentsDirectories(resolvedFile).pipe(
     Effect.catch((error) => {
       log.warn("find-agents-dirs-error", { filePath: resolvedFile, error: String(error) })
@@ -401,11 +402,14 @@ export const scanParts = Effect.fnUntraced(function* (
     }
   }
 
+  log.info("scan-parts-start", { sessionID, pathCount: rawPaths.size, uniqueCount: uniquePaths.size })
+
   // Scan each unique path and collect skills
   const scannedPaths: string[] = []
   const allNewSkills: Skill.Info[] = []
 
   for (const [resolvedPath, rawPath] of uniquePaths) {
+    log.info("scan-parts-path-resolved", { sessionID, path: resolvedPath })
     const result = yield* scanForFile(resolvedPath, sessionID).pipe(
       Effect.catch((error) => {
         log.warn("scan-parts-scan-error", { path: resolvedPath, sessionID, error: String(error) })
@@ -466,6 +470,8 @@ export const scanParts = Effect.fnUntraced(function* (
       modelID,
     })
   }
+
+  log.info("scan-parts-end", { sessionID })
 
   return {
     pathsFound: rawPaths.size,
