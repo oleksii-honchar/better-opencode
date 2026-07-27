@@ -445,24 +445,25 @@ export const scanParts = Effect.fnUntraced(function* (
       skillNames = allNewSkills.map((s) => s.name)
 
       // Track newly registered skills for injection and session metadata
-      // Only inject skills that were actually newly registered (registration.added > 0)
-      if (skillsRegistered > 0) {
-        for (const skill of allNewSkills) {
-          if (!injectionQueue.has(skill.name)) {
-            injectionQueue.set(skill.name, skill)
-          }
-          // Record skill registration in session metadata (for post-compaction restoration)
-          yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
-            Effect.catch(() => Effect.void)
-          )
+      // Only inject skills that are NOT already in global Skill.Service (those come via system prompt)
+      let injectedCount = 0
+      for (const skill of allNewSkills) {
+        // Check if skill is already globally registered (will come via system prompt)
+        const isGlobal = yield* Skill.Service.pipe(
+          Effect.flatMap((svc) => svc.get(skill.name)),
+          Effect.map((info) => !!info),
+          Effect.catch(() => Effect.succeed(false)),
+        )
+
+        if (!isGlobal && !injectionQueue.has(skill.name)) {
+          injectionQueue.set(skill.name, skill)
+          injectedCount++
         }
-      } else {
-        // Skills were already registered — still record in session metadata
-        for (const skill of allNewSkills) {
-          yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
-            Effect.catch(() => Effect.void)
-          )
-        }
+
+        // Record skill registration in session metadata (for post-compaction restoration)
+        yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
+          Effect.catch(() => Effect.void)
+        )
       }
 
       if (skillsRegistered > 0) {
@@ -470,6 +471,14 @@ export const scanParts = Effect.fnUntraced(function* (
           sessionID,
           count: skillsRegistered,
           names: skillNames,
+        })
+      }
+
+      if (injectedCount > 0) {
+        log.info("scan-parts-injected-for-synthetic", {
+          sessionID,
+          count: injectedCount,
+          totalScanned: allNewSkills.length,
         })
       }
     }
@@ -628,24 +637,25 @@ export const scanToolArgs = Effect.fnUntraced(function* (
       skillNames = allNewSkills.map((s) => s.name)
 
       // Track newly registered skills for injection and session metadata
-      // Only inject skills that were actually newly registered (registration.added > 0)
-      if (skillsRegistered > 0) {
-        for (const skill of allNewSkills) {
-          if (!injectionQueue.has(skill.name)) {
-            injectionQueue.set(skill.name, skill)
-          }
-          // Record skill registration in session metadata (for post-compaction restoration)
-          yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
-            Effect.catch(() => Effect.void)
-          )
+      // Only inject skills that are NOT already in global Skill.Service (those come via system prompt)
+      let injectedCount = 0
+      for (const skill of allNewSkills) {
+        // Check if skill is already globally registered (will come via system prompt)
+        const isGlobal = yield* Skill.Service.pipe(
+          Effect.flatMap((svc) => svc.get(skill.name)),
+          Effect.map((info) => !!info),
+          Effect.catch(() => Effect.succeed(false)),
+        )
+
+        if (!isGlobal && !injectionQueue.has(skill.name)) {
+          injectionQueue.set(skill.name, skill)
+          injectedCount++
         }
-      } else {
-        // Skills were already registered — still record in session metadata
-        for (const skill of allNewSkills) {
-          yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
-            Effect.catch(() => Effect.void)
-          )
-        }
+
+        // Record skill registration in session metadata (for post-compaction restoration)
+        yield* SessionMetadata.addRegisteredSkill(sessionID, skill).pipe(
+          Effect.catch(() => Effect.void)
+        )
       }
 
       if (skillsRegistered > 0) {
@@ -654,6 +664,15 @@ export const scanToolArgs = Effect.fnUntraced(function* (
           sessionID,
           count: skillsRegistered,
           names: skillNames,
+        })
+      }
+
+      if (injectedCount > 0) {
+        log.info("scan-tool-args-injected-for-synthetic", {
+          toolId,
+          sessionID,
+          count: injectedCount,
+          totalScanned: allNewSkills.length,
         })
       }
     }
