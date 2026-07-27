@@ -610,3 +610,29 @@ jq -r '.sessionId' ~/.opencode/log/tools.log | sort | uniq -c | sort -rn
 When `OPENCODE_LOG_TOOLS` is not set (or not `"1"`), the `toolsLog` function is a no-op — there is zero overhead per tool call. The environment variable is cached at module load time; no per-call check is performed.
 
 When enabled, writes are fire-and-forget (best-effort). An unclean process exit may drop the last buffered line(s), which is acceptable for a debugging aid.
+
+---
+
+## 16. Dynamic Skill Discovery on File Mention
+
+📋 [Detailed Spec](./spec/17-tracing-dynamic-skill-discovery.md)
+
+**Status:** ✅ Implemented
+
+**Problem:** Project-scoped skills (`.agents/skills/`, `.opencode/skills/`) are only discovered once at opencode startup, scoped to the current project directory. When a user references a file from a different repo, that repo's skills are never loaded.
+
+**Solution:** File-mention-triggered scanning with two-phase injection:
+- **Phase 1 (immediate):** Skills injected as synthetic user messages — visible in current turn, system prompt unchanged (KV cache preserved)
+- **Phase 2 (post-compaction):** Skills promoted to system prompt — persistent, discoverable via `skill_search`
+
+**Triggers:**
+- User mentions a file path → scanner walks up looking for `.agents/` directories
+- Tool executes with file arg (read, write, edit, grep, etc.) → same scan
+
+**Key properties:**
+- Non-blocking — all scans forked via `Effect.fork`
+- Cached per folder — first mention scans (~10-50ms), subsequent mentions O(1)
+- Deduplicated — never re-scans same `.agents/` directory in a session
+- Survives compaction — session metadata tracks discovered skills
+
+**Tracing logs:** All operations tagged with `tag: "dynamic-skills"` — see [tracing guide](./fork-features/tracing-dynamic-skill-discovery.md).
