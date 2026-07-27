@@ -57,7 +57,7 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
   readonly modelId: OpenAICompatibleChatModelId
   private readonly config: OpenAICompatibleChatConfig
-  private readonly failedResponseHandler: ResponseHandler<APICallError>
+  private readonly failedResponseHandler // type inferred from createJsonErrorResponseHandler
   private readonly chunkSchema // type inferred via constructor
 
   constructor(modelId: OpenAICompatibleChatModelId, config: OpenAICompatibleChatConfig) {
@@ -154,13 +154,13 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
           responseFormat?.type === "json"
             ? this.supportsStructuredOutputs === true && responseFormat.schema != null
               ? {
-                  type: "json_schema",
-                  json_schema: {
-                    schema: responseFormat.schema,
-                    name: responseFormat.name ?? "response",
-                    description: responseFormat.description,
-                  },
-                }
+                type: "json_schema",
+                json_schema: {
+                  schema: responseFormat.schema,
+                  name: responseFormat.name ?? "response",
+                  description: responseFormat.description,
+                },
+              }
               : { type: "json_object" }
             : undefined,
 
@@ -194,11 +194,13 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
     const body = JSON.stringify(args)
 
+    type ChatResponse = z.infer<typeof OpenAICompatibleChatResponseSchema>
+
     const {
       responseHeaders,
       value: responseBody,
       rawValue: rawResponse,
-    } = await postJsonToApi({
+    } = await postJsonToApi<ChatResponse>({
       url: this.config.url({
         path: "/chat/completions",
         modelId: this.modelId,
@@ -315,7 +317,7 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
     const metadataExtractor = this.config.metadataExtractor?.createStreamExtractor()
 
-    const { responseHeaders, value: response } = await postJsonToApi({
+    const { responseHeaders, value: response } = await postJsonToApi<ReadableStream<ParseResult<z.infer<typeof this.chunkSchema>>>>({
       url: this.config.url({
         path: "/chat/completions",
         modelId: this.modelId,
