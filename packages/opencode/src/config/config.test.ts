@@ -3,7 +3,7 @@ import { Schema } from "effect"
 import { Info } from "./config"
 
 describe("Config Schema — unstuck xml_repetition fields", () => {
-  test("enableXmlRepetitionGuard field exists with default true", () => {
+  test("enableXmlRepetitionGuard field exists with default false", () => {
     const parsed = Schema.decodeSync(Info)({}
 )
     // When no unstuck config is provided, the field is optional — defaults come from UnstuckConfig.mergeConfig
