@@ -15,6 +15,7 @@ export const defaultEvidenceThresholds: EvidenceThresholds = {
   selfDiagnosis: 2,
   patternLoop: 2,
   xmlRepetition: 1,
+  doomLoop: 1,
 }
 
 export interface UnstuckConfig {
@@ -35,6 +36,10 @@ export interface UnstuckConfig {
   enableXmlRepetitionGuard: boolean
   xmlRepetitionThreshold: number
   xmlRepetitionWindowSize: number
+  // Enable doom-loop detection (same tool called with identical input repeatedly)
+  enableDoomLoopDetection: boolean
+  // Number of identical tool+input calls in a row to declare a doom loop (matches DOOM_LOOP_THRESHOLD)
+  doomLoopThreshold: number
   maxToolInputTokens: number
   maxTotalToolInputTokens: number
   // Model ID for model-specific threshold overrides (e.g. qwen gets more sensitive detection)
@@ -93,6 +98,10 @@ export const defaultConfig: UnstuckConfig = {
   xmlRepetitionThreshold: 4,
   // Sliding window size for XML tag repetition counting
   xmlRepetitionWindowSize: 10,
+  // Enable doom-loop detection (same tool called with identical input repeatedly)
+  enableDoomLoopDetection: true,
+  // Number of identical tool+input calls in a row to declare a doom loop (matches DOOM_LOOP_THRESHOLD)
+  doomLoopThreshold: 3,
   // Maximum estimated tokens per single tool input before triggering a token-limit XML loop
   maxToolInputTokens: 4000,
   // Maximum estimated total tokens across all tool inputs in the current stream before triggering a token-limit XML loop

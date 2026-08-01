@@ -382,6 +382,9 @@ export const Info = Schema.Struct({
           xmlRepetition: Schema.optional(PositiveInt).annotate({
             description: "Number of xml_repetition detections before intervention (default: 1)",
           }),
+          doomLoop: Schema.optional(PositiveInt).annotate({
+            description: "Number of doom_loop detections before intervention (default: 1)",
+          }),
         }),
       ).annotate({
         description: "Evidence thresholds for each loop type before nudge-and-prune intervention is triggered",
@@ -403,6 +406,12 @@ export const Info = Schema.Struct({
       }),
       maxTotalToolInputTokens: Schema.optional(PositiveInt).annotate({
         description: "Maximum total tokens across all tool calls before interruption (default: 16000)",
+      }),
+      enableDoomLoopDetection: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable doom loop detection (3x identical tool call with identical input) (default: true)",
+      }),
+      doomLoopThreshold: Schema.optional(PositiveInt).annotate({
+        description: "Number of identical tool calls with identical input before a doom_loop is detected (default: 3)",
       }),
     }),
   ).annotate({

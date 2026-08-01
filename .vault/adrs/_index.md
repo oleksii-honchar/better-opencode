@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-07-27T18:00:00Z"
+updatedAt: "2026-08-01T13:22:43Z"
 tags: []
 ---
 
@@ -71,3 +71,8 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0057-two-phase-context-injection.adr.md]] — Two-Phase Context Injection: Synthetic Messages Before Compaction, System Prompt After (ADR-0057, status: accepted)
 - [[0058-self-inject-pattern.adr.md]] — Self-Inject Pattern for Dynamic Skill Discovery (ADR-0058, status: accepted)
 - [[0059-synchronous-scan-decision.adr.md]] — Synchronous Scan for Dynamic Skill Discovery (Removed Fork) (ADR-0059, status: accepted)
+- [[0060-allow-then-catch-doom-loop.adr.md]] — Allow-then-Catch over Deny-then-Nudge for doom_loop (ADR-0060, status: accepted)
+- [[0061-dedicated-doom-loop-detection.adr.md]] — New Dedicated doom_loop Detection Type over Reusing tool_loop (ADR-0061, status: accepted)
+- [[0062-doom-loop-permission-allow-default.adr.md]] — Change Default doom_loop Permission to allow (ADR-0062, status: accepted)
+- [[0063-no-processor-change-nudge-path.adr.md]] — No Processor Change for the Nudge Path (ADR-0063, status: accepted)
+- [[0064-doom-loop-config-migration.adr.md]] — Config Migration is Part of the Deliverable (User Environment) (ADR-0064, status: accepted)

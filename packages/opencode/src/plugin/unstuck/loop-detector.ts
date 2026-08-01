@@ -45,6 +45,14 @@ export function normalizeAndFingerprint(text: string): string {
   return fnv1a(normalized)
 }
 
+// Stable synchronous fingerprint of a resolved tool input. Never log raw inputs —
+// use this for the exact-input equality check and for log fields. Deterministic
+// hash of JSON.stringify(input) (spec suggests sha256(...).slice(0,16); the
+// existing sync fnv1a over the JSON string is used to stay sync and deterministic).
+export function computeInputFingerprint(input: Record<string, unknown>): string {
+  return fnv1a(JSON.stringify(input))
+}
+
 export function computeToolSignature(
   toolName: string,
   input?: Record<string, unknown>,
@@ -111,8 +119,13 @@ export class LoopDetectorImpl implements LoopDetector {
   private inReasoning = false
   private sentenceTracker = new SentenceTracker()
   private currentToolInputAccum: Record<string, string> = {}
+  // Per-step doom-loop run: consecutive identical (tool name + exact input) calls
+  private currentDoomRun: { toolName: string; inputFingerprint: string; count: number } | undefined
+  // Monotonic chunk counter for doom_loop log/evidence context
+  private chunkCount = 0
 
   consumeChunk(chunk: StreamChunk, config: UnstuckConfig): LoopDetectedInfo | undefined {
+    this.chunkCount++
     switch (chunk.type) {
       case "reasoning-delta": {
         this.inReasoning = true
@@ -215,6 +228,45 @@ export class LoopDetectorImpl implements LoopDetector {
           resolvedInput = { _missing: true }
         }
 
+        // --- doom-loop detection (same tool + exact input in a row, within current step) ---
+        if (config.enableDoomLoopDetection !== false) {
+          const inputFingerprint = computeInputFingerprint(resolvedInput)
+          if (resolvedInput._missing === true) {
+            log.debug("doom_loop skipped", { toolName: chunk.toolName, reason: "missing-input" })
+          } else {
+            const threshold = config.doomLoopThreshold ?? 3
+            const current = this.currentDoomRun
+            if (current && current.toolName === chunk.toolName && current.inputFingerprint === inputFingerprint) {
+              // Matching the current run — increment candidate count
+              current.count += 1
+              this.logDoomCandidate(chunk.toolName, current.count, current.inputFingerprint)
+              if (current.count >= threshold) {
+                log.info("doom_loop detected", {
+                  type: "doom_loop",
+                  threshold,
+                  toolName: chunk.toolName,
+                  inputFingerprint,
+                  chunkCount: this.chunkCount,
+                })
+                return { type: "doom_loop", threshold, toolName: chunk.toolName, fingerprint: inputFingerprint }
+              }
+            } else if (current && current.toolName === chunk.toolName) {
+              // Same tool, differing input — run is broken (L3), start a new run at this call
+              log.debug("doom_loop input equality mismatch", {
+                toolName: chunk.toolName,
+                expectedInputFingerprint: current.inputFingerprint,
+                actualInputFingerprint: inputFingerprint,
+              })
+              this.currentDoomRun = { toolName: chunk.toolName, inputFingerprint, count: 1 }
+              this.logDoomCandidate(chunk.toolName, 1, inputFingerprint)
+            } else {
+              // Different tool (or no current run) — start a new run
+              this.currentDoomRun = { toolName: chunk.toolName, inputFingerprint, count: 1 }
+              this.logDoomCandidate(chunk.toolName, 1, inputFingerprint)
+            }
+          }
+        }
+
         const sig = computeToolSignature(chunk.toolName, resolvedInput)
         this.currentTools.push(sig)
         log.debug("consumeChunk", { type: "tool-input-end", toolName: chunk.toolName, signature: sig, toolsInStep: this.currentTools.length })
@@ -310,6 +362,7 @@ export class LoopDetectorImpl implements LoopDetector {
     this.currentText = ""
     this.currentTools = []
     this.currentToolInputAccum = {}
+    this.currentDoomRun = undefined
     this.inReasoning = false
     this.sentenceTracker.reset()
 
@@ -421,6 +474,16 @@ export class LoopDetectorImpl implements LoopDetector {
     }
   }
 
+  // L1 — doom_loop candidate tracked (per qualifying tool-input-end matching the run)
+  private logDoomCandidate(toolName: string, candidateCount: number, inputFingerprint: string): void {
+    log.debug("doom_loop candidate tracked", {
+      toolName,
+      candidateCount,
+      inputFingerprint,
+      currentRun: { toolName, inputFingerprint, count: candidateCount },
+    })
+  }
+
   private computeStepFingerprint(reasoningFp: string, textFp: string, toolSigs: string[]): string {
     return `${reasoningFp}|${textFp}|${toolSigs.join(";")}`
   }
@@ -431,6 +494,7 @@ export class LoopDetectorImpl implements LoopDetector {
     this.currentText = ""
     this.currentTools = []
     this.currentToolInputAccum = {}
+    this.currentDoomRun = undefined
     // history is preserved for evidence accumulation within the same stream episode
     this.inReasoning = false
     this.sentenceTracker.reset()
@@ -443,6 +507,8 @@ export class LoopDetectorImpl implements LoopDetector {
     this.currentText = ""
     this.currentTools = []
     this.currentToolInputAccum = {}
+    this.currentDoomRun = undefined
+    this.chunkCount = 0
     this.history = []
     this.inReasoning = false
     this.sentenceTracker.reset()
@@ -496,6 +562,9 @@ export class EvidenceAccumulatorImpl implements EvidenceAccumulator {
     }
     if (this.countByType("xml_repetition") >= (thresholds.xmlRepetition ?? 1)) {
       return { met: true, type: "xml_repetition" }
+    }
+    if (this.countByType("doom_loop") >= (thresholds.doomLoop ?? 1)) {
+      return { met: true, type: "doom_loop" }
     }
     return { met: false }
   }

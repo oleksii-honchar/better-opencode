@@ -39,6 +39,10 @@ function defaultNudgeMessage(info: LoopDetectedInfo): string {
     }
     return "You're repeating XML tags while constructing a tool call. Stop the repetition and provide a complete, valid tool input with proper parameters."
   }
+  if (info.type === "doom_loop") {
+    const toolInfo = info.toolName ? ` '${info.toolName}'` : ""
+    return `You keep calling the same tool${toolInfo} with the identical input repeatedly — this is a doom loop. Stop and change your approach: fix the input or try a different tool.`
+  }
   return "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction."
 }
 
@@ -216,6 +220,12 @@ export function wrapWithLoopDetection(
     loopThreshold: config.loopThreshold,
   })
 
+  log.debug("doom_loop config", {
+    enableDoomLoopDetection: config.enableDoomLoopDetection,
+    doomLoopThreshold: config.doomLoopThreshold,
+    evidenceDoomLoop: config.evidenceThresholds?.doomLoop,
+  })
+
   const wrapped: LanguageModelV3 = {
     ...model,
     doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
@@ -316,6 +326,7 @@ export function wrapWithLoopDetection(
                 : error.info.type === "self_diagnosis_loop" ? "selfDiagnosis"
                 : error.info.type === "pattern_loop" ? "patternLoop"
                 : error.info.type === "xml_repetition" ? "xmlRepetition"
+                : error.info.type === "doom_loop" ? "doomLoop"
                 : "stepLoop"
               log.info("loop detected but evidence below threshold — continuing stream", {
                 type: error.info.type,
@@ -336,6 +347,7 @@ export function wrapWithLoopDetection(
                 maxNudges: config.maxNudges,
                 fallback: "abort",
                 type: error.info.type,
+                toolName: error.info.toolName,
               })
               throw error
             }
@@ -365,6 +377,7 @@ export function wrapWithLoopDetection(
               prunedMsgs: originalPrompt.length - prunedMessages.length,
               strategy: "nudge-and-prune",
               loopType: error.info.type,
+              toolName: error.info.toolName,
             })
 
             // Clear evidence and detector for fresh start

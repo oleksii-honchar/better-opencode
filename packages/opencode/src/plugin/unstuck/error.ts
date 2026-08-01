@@ -7,7 +7,7 @@ export interface StepRecord {
 }
 
 export interface LoopDetectedInfo {
-  type: "step_loop" | "tool_loop" | "sentence_loop" | "self_diagnosis_loop" | "pattern_loop" | "xml_repetition"
+  type: "step_loop" | "tool_loop" | "sentence_loop" | "self_diagnosis_loop" | "pattern_loop" | "xml_repetition" | "doom_loop"
   threshold: number
   fingerprint?: string
   steps?: StepRecord[]
@@ -26,10 +26,11 @@ export interface EvidenceThresholds {
   selfDiagnosis?: number
   patternLoop?: number
   xmlRepetition?: number
+  doomLoop?: number
 }
 
 export interface EvidenceRecord {
-  type: "step_loop" | "tool_loop" | "sentence_loop" | "self_diagnosis_loop" | "pattern_loop" | "xml_repetition"
+  type: "step_loop" | "tool_loop" | "sentence_loop" | "self_diagnosis_loop" | "pattern_loop" | "xml_repetition" | "doom_loop"
   fingerprint?: string
   sentence?: string
   threshold: number
@@ -68,6 +69,9 @@ export class LoopDetectedError extends Error {
       } else {
         message = `Model loop detected: xml_repetition — XML tag '${info.xmlTag}' repeated ${info.xmlRepetitionCount} times (token limit exceeded: ${info.exceedsTokenLimit})`
       }
+    } else if (info.type === "doom_loop") {
+      const toolInfo = info.toolName ? ` (tool: ${info.toolName})` : ""
+      message = `Model loop detected: doom_loop — same tool called with identical input ${info.threshold} times in a row${toolInfo}`
     } else {
       message = `Model loop detected: ${info.type} (threshold: ${info.threshold})`
     }

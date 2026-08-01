@@ -25,6 +25,10 @@ The **Unstuck** V2 plugin detects and breaks model loops by wrapping the `Langua
 
 When a loop is detected, the plugin accumulates **evidence** across detections. A single detection is not enough — the plugin only intervenes when per-type evidence crosses a configurable threshold (default: 2 for step/tool loops, 1 for sentence loops). Below threshold, the stream is restarted with original args (the model may self-correct). Threshold met, the plugin performs **nudge-and-prune**: aborts the current stream, prunes the looping assistant messages from the conversation, injects a nudge user message telling the model to break the loop, and restarts the stream with the modified conversation.
 
+> **Doom-loop recovery is now unstuck's domain (since 2026-08-01).** The built-in `doom_loop` permission default changed from `"ask"` to `"allow"` — the permission layer no longer hard-stops on a 3× same-tool-same-input pattern. Instead, unstuck detects the doom-loop at the stream level (on `tool-input-end`, before the processor's permission check runs) and routes it through the existing nudge-and-prune machinery (see the doom-loop detection, config, logging, and troubleshooting sections below).
+>
+> **Config migration required:** any explicit `doom_loop: deny` rule in a user's agent config **overrides** the new default and re-introduces the raw `Permission.DeniedError` ("Opencode failed to send message with error: …"). Users with explicit `deny` rules must **remove the `doom_loop:` line** from their agent source files (e.g. `~/Documents/agent-rules-n-skills/agents/`) and redeploy to the effective config (e.g. `~/.config/opencode/agents/`).
+
 ### Architecture
 
 ```
@@ -458,6 +462,7 @@ interface EvidenceThresholds {
   stepLoop: number       // default: 2 — two step_loop detections before nudge
   toolLoop: number       // default: 2 — two tool_loop detections before nudge
   sentenceLoop: number   // default: 1 — one sentence_loop detection triggers nudge
+  doomLoop?: number      // default: 1 — one doom_loop detection triggers nudge
 }
 
 interface UnstuckConfig {
@@ -469,6 +474,10 @@ interface UnstuckConfig {
   minThinkingLength: number  // default: 50
   includeReasoning: boolean  // default: true
   includeText: boolean  // default: true
+
+  // Doom-loop detection (3× same tool + exact input within a step)
+  enableDoomLoopDetection: boolean  // default: true
+  doomLoopThreshold: number         // default: 3 (matches DOOM_LOOP_THRESHOLD)
 
   // Sentence-level loop detection
   enableSentenceLoopDetection: boolean  // default: true
@@ -505,10 +514,13 @@ interface UnstuckConfig {
 | `enableSentenceLoopDetection` | boolean | `true` | When `true`, detect **sentence_loop** events where the same sentence repeats every 1–5 sentences within a single step (e.g., "Let me check the file" appearing 3+ times with periodic spacing). Set to `false` to disable sentence-level detection. |
 | `sentenceLoopThreshold` | number | `3` | Number of periodic repetitions of the same sentence that triggers a **sentence_loop** detection. The sentence must repeat with consistent spacing (within ±1 sentence of the previous gap). |
 | `minSentenceLength` | number | `15` | Minimum number of characters in a sentence before it is considered for loop detection. Short fragments (e.g., "OK", "Hmm") are excluded to avoid false positives from common words. |
-| `evidenceThresholds` | object | `{ stepLoop: 2, toolLoop: 2, sentenceLoop: 1 }` | Per-type evidence accumulation thresholds. Each detection adds one `EvidenceRecord`; the nudge only fires when `countByType(type) >= evidenceThresholds[type]`. **Why different from `toolLoopThreshold`**: `toolLoopThreshold` controls *detection* (how many matching steps to flag as a loop); `evidenceThresholds.toolLoop` controls *intervention* (how many detected loops before nudging). Example: `toolLoopThreshold: 8` means 8 consecutive matching tool steps trigger one detection; `evidenceThresholds.toolLoop: 2` means you need 2 such detections before a nudge fires. This two-stage gating prevents false positives from consuming the nudge budget. |
+| `enableDoomLoopDetection` | boolean | `true` | When `true`, unstuck also detects **doom_loop** events: the same tool called with the exact same input `doomLoopThreshold` consecutive times within the current step (mirroring the processor's built-in `doom_loop` check, `DOOM_LOOP_THRESHOLD = 3`). Detection fires at the stream level on `tool-input-end`, **before** the processor's `doom_loop` permission check runs. Set to `false` to disable doom-loop detection (the processor's `doom_loop` permission then governs — default `allow`). |
+| `doomLoopThreshold` | number | `3` | Number of consecutive identical (tool name + exact `JSON.stringify(input)`) calls within the current step that trigger a single `doom_loop` detection. Matches the built-in `DOOM_LOOP_THRESHOLD`. **Distinct from `evidenceThresholds.doomLoop`**: `doomLoopThreshold` controls *detection* (how many identical calls to flag as a loop); `evidenceThresholds.doomLoop` controls *intervention* (how many detected doom loops before nudging). |
+| `evidenceThresholds` | object | `{ stepLoop: 2, toolLoop: 2, sentenceLoop: 1, doomLoop: 1 }` | Per-type evidence accumulation thresholds. Each detection adds one `EvidenceRecord`; the nudge only fires when `countByType(type) >= evidenceThresholds[type]`. **Why different from `toolLoopThreshold`**: `toolLoopThreshold` controls *detection* (how many matching steps to flag as a loop); `evidenceThresholds.toolLoop` controls *intervention* (how many detected loops before nudging). Example: `toolLoopThreshold: 8` means 8 consecutive matching tool steps trigger one detection; `evidenceThresholds.toolLoop: 2` means you need 2 such detections before a nudge fires. This two-stage gating prevents false positives from consuming the nudge budget. |
 | | | | - **`stepLoop`** (default: 2): Step loops are strong signals (same thinking + same tools), but one false positive can happen if the model legitimately revisits a pattern. Two confirms it's stuck. |
 | | | | - **`toolLoop`** (default: 2): Same reasoning as step loops. |
 | | | | - **`sentenceLoop`** (default: 1): Sentence loops are very strong signals — the detector already requires `sentenceLoopThreshold` repetitions within the stream, so by the time it fires, confidence is high. |
+| | | | - **`doomLoop`** (default: 1): Doom loops are very strong signals — the detector already requires `doomLoopThreshold` identical calls, so a single detection already proves 3 identical calls occurred. |
 | | | | To restore the old immediate-nudge behavior, set all to `1`. |
 | `evidenceWindow` | number | `Infinity` | Maximum evidence records to retain per episode (stream between nudges). Older records are evicted when new ones are added. Default `Infinity` means no windowing — all evidence persists until cleared by a nudge or clean finish. Set a finite value (e.g., `10`) for memory bounds in very long sessions. |
 | `strategy` | `"nudge-and-prune" \| "abort" \| "warn"` | `"nudge-and-prune"` | What to do when a loop is detected: |
@@ -534,10 +546,13 @@ interface UnstuckConfig {
     "enableSentenceLoopDetection": true,
     "sentenceLoopThreshold": 3,
     "minSentenceLength": 15,
+    "enableDoomLoopDetection": true,
+    "doomLoopThreshold": 3,
     "evidenceThresholds": {
       "stepLoop": 2,
       "toolLoop": 2,
-      "sentenceLoop": 1
+      "sentenceLoop": 1,
+      "doomLoop": 1
     },
     "evidenceWindow": 10,
     "strategy": "nudge-and-prune",
@@ -609,6 +624,13 @@ The unstuck plugin emits structured logs tagged with `service: "unstuck"`. Use `
 | INFO | Nudge-and-prune event: nudge number, messages pruned, restart | `log.info("nudge applied", { nudgeCount: 1, prunedMsgs: 3, strategy: "nudge-and-prune" })` |
 | WARN | Max nudges reached, falling back to abort | `log.warn("max nudges reached", { maxNudges: 2, fallback: "abort" })` |
 | ERROR | Unexpected error during stream interception | `log.error("stream wrap error", { error: e.message })` |
+| DEBUG | **L1 — doom_loop candidate tracked**: each `tool-input-end` matching the current doom-loop run (tool name + exact input) | `log.debug("doom_loop candidate tracked", { toolName: "bash", candidateCount: 2, inputFingerprint: "a1b2c3d4e5f6a1b2", currentRun: 1 })` |
+| INFO | **L2 — doom_loop detected**: 3rd identical call seen and the evidence threshold is met | `log.info("doom_loop detected", { type: "doom_loop", threshold: 3, toolName: "bash", inputFingerprint: "a1b2c3d4e5f6a1b2", chunkCount: 42 })` |
+| DEBUG | **L3 — doom_loop input equality mismatch**: a later call in the run differs → run broken (false-negative diagnostic) | `log.debug("doom_loop input equality mismatch", { toolName: "bash", expectedInputFingerprint: "a1b2c3d4e5f6a1b2", actualInputFingerprint: "c3d4e5f6a7b8c9d0" })` |
+| DEBUG | **L4 — doom_loop skipped**: input resolution failed / `_missing` / provider-executed | `log.debug("doom_loop skipped", { toolName: "bash", reason: "missing-input" })` |
+| INFO | **L5 — nudge applied** (doom_loop): nudge fired for the detected doom loop | `log.info("nudge applied", { nudgeCount: 1, loopType: "doom_loop", toolName: "bash", prunedMsgs: 3 })` |
+| WARN | **L6 — max nudges reached, aborting**: the doom loop still recurs after `maxNudges` nudges | `log.warn("max nudges reached, aborting", { maxNudges: 2, type: "doom_loop", toolName: "bash" })` |
+| DEBUG | **L7 — doom_loop config**: emitted once on wrapper init | `log.debug("doom_loop config", { enableDoomLoopDetection: true, doomLoopThreshold: 3, evidenceDoomLoop: 1 })` |
 
 #### Log Commands
 
@@ -702,6 +724,64 @@ grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
 # The nudge message is injected as a synthetic user message in the conversation.
 # Look for `"_unstuckNudge": true` in the conversation history to see what was injected.
 ```
+
+**Doom-loop (doom_loop) troubleshooting** — filter with `rg 'service.*unstuck-plugin' ~/.opencode/logs/* | rg doom_loop` (spec §5a runbook).
+
+**Scenario 4: No nudge happened for a doom loop**
+
+```bash
+rg 'service.*unstuck-plugin' ~/.opencode/logs/* | rg doom_loop
+
+# Check L4 ("doom_loop skipped") and L7 ("doom_loop config").
+# If `enableDoomLoopDetection: false` or `doomLoopThreshold != 3`, config is the cause —
+# enable detection and/or restore the threshold, then retry.
+```
+
+**Scenario 5: Nudge happened but the doom loop recurred**
+
+```bash
+rg 'service.*unstuck-plugin' ~/.opencode/logs/* | rg 'nudge applied|max nudges reached'
+
+# Check L5 `nudgeCount` against L6 — are we aborting after `maxNudges`?
+# If the model re-loops after a nudge, increase `maxNudges` or improve the
+# `nudgeMessage` guidance so the model changes approach.
+```
+
+**Scenario 6: False positive — nudge on legitimate 3× identical calls**
+
+```bash
+rg 'service.*unstuck-plugin' ~/.opencode/logs/* | rg 'doom_loop candidate tracked|doom_loop detected'
+
+# Check L1 `candidateCount` and L2 — if the inputs are genuinely identical 3×, the
+# pattern matches the processor's `doom_loop` semantics by design (same tool, same
+# exact input, 3 consecutive times). If too aggressive, disable via
+# `enableDoomLoopDetection: false`.
+```
+
+**Scenario 7: Raw DeniedError still occurs**
+
+```bash
+rg 'service.*unstuck-plugin' ~/.opencode/logs/* | rg doom_loop
+
+# Check for `doom_loop: deny` in the effective ruleset — the config migration was
+# NOT applied, so the processor's check resolves to `deny` and unstuck never sees
+# the call. Unstuck logs will be absent for that path (interception happens only
+# when unstuck owns the check). Apply the migration (Scenario 8).
+```
+
+**Scenario 8: Config migration — explicit `doom_loop: deny` rules**
+
+The new default permission is `doom_loop: "allow"`, so **no explicit `doom_loop` rule
+is needed**. Any explicit `doom_loop: deny` in a user's agent config overrides the
+default and re-introduces the raw `DeniedError`. To migrate:
+
+1. **Remove** the `doom_loop:` line from the agent **source** files (e.g.
+   `~/Documents/agent-rules-n-skills/agents/` — both `opencode/` and
+   `caveman-opencode/`).
+2. **Redeploy** the source to the effective config (`~/.config/opencode/agents/`).
+3. Verify: `rg doom_loop ~/.config/opencode/agents/` returns nothing, then reproduce
+   the doom-loop scenario — a nudge should appear instead of the raw error.
+
 
 #### Log Format
 

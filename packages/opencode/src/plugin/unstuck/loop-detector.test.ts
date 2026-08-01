@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test"
-import { LoopDetectorImpl, normalizeAndFingerprint, computeToolSignature, EvidenceAccumulatorImpl, type StreamChunk } from "./loop-detector"
+import { describe, expect, spyOn, test } from "bun:test"
+import * as Log from "@opencode-ai/core/util/log"
+import { LoopDetectorImpl, normalizeAndFingerprint, computeToolSignature, computeInputFingerprint, EvidenceAccumulatorImpl, type StreamChunk } from "./loop-detector"
 import { defaultConfig, defaultEvidenceThresholds, mergeConfig, type UnstuckConfig } from "./config"
 import { LoopDetectedError, type LoopDetectedInfo } from "./error"
 import { XmlRepetitionDetector } from "./xml-repetition-detector"
@@ -1401,6 +1402,56 @@ describe("LoopDetectedError — xml_repetition message", () => {
   })
 })
 
+describe("LoopDetectedError — doom_loop message", () => {
+  test("produces distinct message for doom_loop with tool name and threshold", () => {
+    const info: LoopDetectedInfo = {
+      type: "doom_loop",
+      threshold: 3,
+      toolName: "bash",
+    }
+    const error = new LoopDetectedError(info)
+    expect(error.message).toContain("doom_loop")
+    expect(error.message).toContain("bash")
+    expect(error.message).toContain("3")
+    expect(error.message).not.toContain("undefined")
+  })
+
+  test("produces distinct message for doom_loop without tool name", () => {
+    const info: LoopDetectedInfo = {
+      type: "doom_loop",
+      threshold: 2,
+    }
+    const error = new LoopDetectedError(info)
+    expect(error.message).toContain("doom_loop")
+    expect(error.message).toContain("2")
+    expect(error.message).not.toContain("undefined")
+  })
+
+  test("fallback branch still covers generic loop types (no regression)", () => {
+    const stepError = new LoopDetectedError({ type: "step_loop", threshold: 3 })
+    expect(stepError.message).toContain("step_loop")
+    expect(stepError.message).toContain("3")
+
+    const toolError = new LoopDetectedError({ type: "tool_loop", threshold: 2, toolName: "bash" })
+    expect(toolError.message).toContain("tool_loop")
+    expect(toolError.message).toContain("2")
+  })
+})
+
+describe("EvidenceRecord — doom_loop type", () => {
+  test("EvidenceAccumulator accepts doom_loop type", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    const info: LoopDetectedInfo = {
+      type: "doom_loop",
+      threshold: 3,
+      toolName: "bash",
+    }
+    acc.add(info, 1)
+    expect(acc.count).toBe(1)
+    expect(acc.countByType("doom_loop")).toBe(1)
+  })
+})
+
 describe("EvidenceRecord — xml_repetition type", () => {
   test("EvidenceAccumulator accepts xml_repetition type", () => {
     const acc = new EvidenceAccumulatorImpl()
@@ -2097,5 +2148,339 @@ describe("UnstuckConfig — modelId field", () => {
       },
     })
     expect(merged.modelSpecificThresholds?.qwen.repetitionThreshold).toBe(3)
+  })
+})
+
+describe("LoopDetector — doom_loop detection", () => {
+  // Isolation config: disable step/tool/pattern loops so doom_loop is the only signal
+  const doomConfig: UnstuckConfig = {
+    ...defaultConfig,
+    loopThreshold: 100,
+    detectToolOnlyLoops: false,
+    enablePatternLoopDetection: false,
+  }
+
+  function doomEnd(
+    id: string,
+    toolName = "bash",
+    input: Record<string, unknown> = { command: "ls -la" },
+  ): StreamChunk {
+    return { type: "tool-input-end", id, toolName, input }
+  }
+
+  function consumeAll(detector: LoopDetectorImpl, chunks: StreamChunk[], config: UnstuckConfig): LoopDetectedInfo | undefined {
+    let result: LoopDetectedInfo | undefined
+    for (const chunk of chunks) {
+      result = detector.consumeChunk(chunk, config)
+    }
+    return result
+  }
+
+  test("3 consecutive identical tool+input calls within one step → doom_loop", () => {
+    const detector = new LoopDetectorImpl()
+    let result = detector.consumeChunk(doomEnd("call-0"), doomConfig)
+    expect(result).toBeUndefined()
+    result = detector.consumeChunk(doomEnd("call-1"), doomConfig)
+    expect(result).toBeUndefined()
+    result = detector.consumeChunk(doomEnd("call-2"), doomConfig)
+    expect(result).toBeDefined()
+    expect(result!.type).toBe("doom_loop")
+    expect(result!.threshold).toBe(3)
+    expect(result!.toolName).toBe("bash")
+    expect(result!.fingerprint).toBe(computeInputFingerprint({ command: "ls -la" }))
+  })
+
+  test("differing input on 2nd call breaks the run (no detection)", () => {
+    const detector = new LoopDetectorImpl()
+    const chunks: StreamChunk[] = [
+      doomEnd("call-0", "bash", { command: "ls -la" }),
+      doomEnd("call-1", "bash", { command: "ls" }),
+      doomEnd("call-2", "bash", { command: "ls -la" }),
+    ]
+    const result = consumeAll(detector, chunks, doomConfig)
+    expect(result).toBeUndefined()
+  })
+
+  test("differing input on 3rd call breaks the run (no detection)", () => {
+    const detector = new LoopDetectorImpl()
+    const chunks: StreamChunk[] = [
+      doomEnd("call-0", "bash", { command: "ls -la" }),
+      doomEnd("call-1", "bash", { command: "ls -la" }),
+      doomEnd("call-2", "bash", { command: "ls" }),
+    ]
+    const result = consumeAll(detector, chunks, doomConfig)
+    expect(result).toBeUndefined()
+  })
+
+  test("differing tool name breaks the run (no detection)", () => {
+    const detector = new LoopDetectorImpl()
+    const chunks: StreamChunk[] = [
+      doomEnd("call-0", "bash", { command: "ls -la" }),
+      doomEnd("call-1", "bash", { command: "ls -la" }),
+      doomEnd("call-2", "read", { command: "ls -la" }),
+    ]
+    const result = consumeAll(detector, chunks, doomConfig)
+    expect(result).toBeUndefined()
+  })
+
+  test("_missing resolved inputs are skipped (no detection)", () => {
+    const detector = new LoopDetectorImpl()
+    // input: {} cannot be resolved → marked { _missing: true } by the detector
+    const chunks: StreamChunk[] = [
+      { type: "tool-input-end", id: "call-0", toolName: "bash", input: {} },
+      { type: "tool-input-end", id: "call-1", toolName: "bash", input: {} },
+      { type: "tool-input-end", id: "call-2", toolName: "bash", input: {} },
+    ]
+    const result = consumeAll(detector, chunks, doomConfig)
+    expect(result).toBeUndefined()
+  })
+
+  test("providerExecuted tool-input-end chunks are skipped (no detection)", () => {
+    const detector = new LoopDetectorImpl()
+    const chunks: StreamChunk[] = [
+      doomEnd("call-0"),
+      doomEnd("call-1"),
+      doomEnd("call-2"),
+    ].map((c) => ({ ...c, providerExecuted: true }))
+    const result = consumeAll(detector, chunks, doomConfig)
+    expect(result).toBeUndefined()
+  })
+
+  test("custom doomLoopThreshold (2) is honored", () => {
+    const detector = new LoopDetectorImpl()
+    const config: UnstuckConfig = { ...doomConfig, doomLoopThreshold: 2 }
+    let result = detector.consumeChunk(doomEnd("call-0"), config)
+    expect(result).toBeUndefined()
+    result = detector.consumeChunk(doomEnd("call-1"), config)
+    expect(result).toBeDefined()
+    expect(result!.type).toBe("doom_loop")
+    expect(result!.threshold).toBe(2)
+    expect(result!.toolName).toBe("bash")
+  })
+
+  test("enableDoomLoopDetection: false disables detection", () => {
+    const detector = new LoopDetectorImpl()
+    const config: UnstuckConfig = { ...doomConfig, enableDoomLoopDetection: false }
+    const chunks: StreamChunk[] = [doomEnd("call-0"), doomEnd("call-1"), doomEnd("call-2")]
+    const result = consumeAll(detector, chunks, config)
+    expect(result).toBeUndefined()
+  })
+
+  test("run resets on finalizeStep — 3× split across steps does NOT detect", () => {
+    const detector = new LoopDetectorImpl()
+    detector.consumeChunk(doomEnd("call-0"), doomConfig)
+    detector.finalizeStep(doomConfig, "tool-calls")
+    detector.consumeChunk(doomEnd("call-1"), doomConfig)
+    detector.finalizeStep(doomConfig, "tool-calls")
+    const result = detector.consumeChunk(doomEnd("call-2"), doomConfig)
+    expect(result).toBeUndefined()
+  })
+
+  test("run resets on reset() — 3× split across a reset does NOT detect", () => {
+    const detector = new LoopDetectorImpl()
+    detector.consumeChunk(doomEnd("call-0"), doomConfig)
+    detector.consumeChunk(doomEnd("call-1"), doomConfig)
+    detector.reset()
+    const result = detector.consumeChunk(doomEnd("call-2"), doomConfig)
+    expect(result).toBeUndefined()
+  })
+
+  test("run resets on clear() — 3× split across a clear does NOT detect", () => {
+    const detector = new LoopDetectorImpl()
+    detector.consumeChunk(doomEnd("call-0"), doomConfig)
+    detector.consumeChunk(doomEnd("call-1"), doomConfig)
+    detector.clear()
+    const result = detector.consumeChunk(doomEnd("call-2"), doomConfig)
+    expect(result).toBeUndefined()
+  })
+
+  test("doom detection fires at the 3rd call before the pattern reaches finalizeStep", () => {
+    const detector = new LoopDetectorImpl()
+    const chunks: StreamChunk[] = [doomEnd("call-0"), doomEnd("call-1"), doomEnd("call-2")]
+    let detectedAt: LoopDetectedInfo | undefined
+    for (let i = 0; i < chunks.length; i++) {
+      const result = detector.consumeChunk(chunks[i], doomConfig)
+      if (i === 2) detectedAt = result
+    }
+    expect(detectedAt).toBeDefined()
+    expect(detectedAt!.type).toBe("doom_loop")
+  })
+})
+
+describe("LoopDetector — doom_loop logs (L1–L4)", () => {
+  function doomEnd(
+    id: string,
+    toolName = "bash",
+    input: Record<string, unknown> = { command: "ls -la" },
+  ): StreamChunk {
+    return { type: "tool-input-end", id, toolName, input }
+  }
+
+  function getUnstuckLogger() {
+    return Log.create({ service: "unstuck-plugin" })
+  }
+
+  test("L2 info fires on detection with fingerprint and no raw input JSON", () => {
+    const logger = getUnstuckLogger()
+    const infoSpy = spyOn(logger, "info")
+    const debugSpy = spyOn(logger, "debug")
+    try {
+      const detector = new LoopDetectorImpl()
+      const config: UnstuckConfig = {
+        ...defaultConfig,
+        loopThreshold: 100,
+        detectToolOnlyLoops: false,
+        enablePatternLoopDetection: false,
+      }
+      detector.consumeChunk(doomEnd("call-0"), config)
+      detector.consumeChunk(doomEnd("call-1"), config)
+      detector.consumeChunk(doomEnd("call-2"), config)
+
+      expect(infoSpy).toHaveBeenCalledWith(
+        "doom_loop detected",
+        expect.objectContaining({
+          type: "doom_loop",
+          threshold: 3,
+          toolName: "bash",
+          inputFingerprint: computeInputFingerprint({ command: "ls -la" }),
+        }),
+      )
+      // No raw input JSON ("ls -la") may appear in any doom_loop log field
+      const doomLoopLogFields = JSON.stringify([
+        ...infoSpy.mock.calls.filter((c) => String(c[0]).includes("doom_loop")).map((c) => c[1]),
+        ...debugSpy.mock.calls.filter((c) => String(c[0]).includes("doom_loop")).map((c) => c[1]),
+      ])
+      expect(doomLoopLogFields).not.toContain("ls -la")
+    } finally {
+      infoSpy.mockRestore()
+      debugSpy.mockRestore()
+    }
+  })
+
+  test("L1 debug fires on candidate tracking with fingerprint", () => {
+    const logger = getUnstuckLogger()
+    const debugSpy = spyOn(logger, "debug")
+    try {
+      const detector = new LoopDetectorImpl()
+      const config: UnstuckConfig = {
+        ...defaultConfig,
+        loopThreshold: 100,
+        detectToolOnlyLoops: false,
+        enablePatternLoopDetection: false,
+      }
+      detector.consumeChunk(doomEnd("call-0"), config)
+      detector.consumeChunk(doomEnd("call-1"), config)
+
+      expect(debugSpy).toHaveBeenCalledWith(
+        "doom_loop candidate tracked",
+        expect.objectContaining({
+          toolName: "bash",
+          candidateCount: 2,
+          inputFingerprint: computeInputFingerprint({ command: "ls -la" }),
+        }),
+      )
+    } finally {
+      debugSpy.mockRestore()
+    }
+  })
+
+  test("L3 debug fires on input equality mismatch with both fingerprints", () => {
+    const logger = getUnstuckLogger()
+    const debugSpy = spyOn(logger, "debug")
+    try {
+      const detector = new LoopDetectorImpl()
+      const config: UnstuckConfig = {
+        ...defaultConfig,
+        loopThreshold: 100,
+        detectToolOnlyLoops: false,
+        enablePatternLoopDetection: false,
+      }
+      detector.consumeChunk(doomEnd("call-0", "bash", { command: "ls -la" }), config)
+      detector.consumeChunk(doomEnd("call-1", "bash", { command: "ls" }), config)
+
+      expect(debugSpy).toHaveBeenCalledWith(
+        "doom_loop input equality mismatch",
+        expect.objectContaining({
+          toolName: "bash",
+          expectedInputFingerprint: computeInputFingerprint({ command: "ls -la" }),
+          actualInputFingerprint: computeInputFingerprint({ command: "ls" }),
+        }),
+      )
+    } finally {
+      debugSpy.mockRestore()
+    }
+  })
+
+  test("L4 debug fires with reason when input resolution fails (_missing)", () => {
+    const logger = getUnstuckLogger()
+    const debugSpy = spyOn(logger, "debug")
+    try {
+      const detector = new LoopDetectorImpl()
+      const config: UnstuckConfig = {
+        ...defaultConfig,
+        loopThreshold: 100,
+        detectToolOnlyLoops: false,
+        enablePatternLoopDetection: false,
+      }
+      detector.consumeChunk({ type: "tool-input-end", id: "call-0", toolName: "bash", input: {} }, config)
+
+      expect(debugSpy).toHaveBeenCalledWith(
+        "doom_loop skipped",
+        expect.objectContaining({
+          toolName: "bash",
+          reason: "missing-input",
+        }),
+      )
+    } finally {
+      debugSpy.mockRestore()
+    }
+  })
+})
+
+describe("EvidenceAccumulator — doom_loop threshold", () => {
+  test("countByType handles doom_loop", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add({ type: "doom_loop", threshold: 3, toolName: "bash", fingerprint: "fp-1" }, 1)
+    acc.add({ type: "doom_loop", threshold: 3, toolName: "bash", fingerprint: "fp-1" }, 2)
+
+    expect(acc.countByType("doom_loop")).toBe(2)
+    expect(acc.countByType("step_loop")).toBe(0)
+  })
+
+  test("isThresholdMet returns doom_loop when count meets thresholds.doomLoop", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add({ type: "doom_loop", threshold: 3, toolName: "bash", fingerprint: "fp-1" }, 1)
+
+    const result = acc.isThresholdMet(defaultConfig)
+    expect(result.met).toBe(true)
+    expect((result as { met: true; type: string }).type).toBe("doom_loop")
+  })
+
+  test("isThresholdMet doom_loop with custom threshold", () => {
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      evidenceThresholds: { doomLoop: 3 },
+    }
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add({ type: "doom_loop", threshold: 3, toolName: "bash", fingerprint: "fp-1" }, 1)
+    acc.add({ type: "doom_loop", threshold: 3, toolName: "bash", fingerprint: "fp-1" }, 2)
+
+    // Below custom threshold of 3
+    const result = acc.isThresholdMet(config)
+    expect(result.met).toBe(false)
+  })
+
+  test("isThresholdMet doom_loop meets custom threshold", () => {
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      evidenceThresholds: { doomLoop: 2 },
+    }
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add({ type: "doom_loop", threshold: 3, toolName: "bash", fingerprint: "fp-1" }, 1)
+    acc.add({ type: "doom_loop", threshold: 3, toolName: "bash", fingerprint: "fp-1" }, 2)
+
+    const result = acc.isThresholdMet(config)
+    expect(result.met).toBe(true)
+    expect((result as { met: true; type: string }).type).toBe("doom_loop")
   })
 })

@@ -1,9 +1,10 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
+import * as Log from "@opencode-ai/core/util/log"
 import type { LanguageModelV3, LanguageModelV3StreamPart, LanguageModelV3CallOptions, LanguageModelV3StreamResult } from "@ai-sdk/provider"
-import { LoopDetectorImpl } from "./loop-detector"
+import { LoopDetectorImpl, type LoopDetector } from "./loop-detector"
 import { wrapWithLoopDetection } from "./wrapper"
 import { defaultConfig, type UnstuckConfig } from "./config"
-import { LoopDetectedError } from "./error"
+import { LoopDetectedError, type LoopDetectedInfo } from "./error"
 
 function createMockStream(chunks: LanguageModelV3StreamPart[]): ReadableStream<LanguageModelV3StreamPart> {
   let index = 0
@@ -913,6 +914,287 @@ describe("wrapWithLoopDetection — new user message resets state", () => {
 
     // History should have accumulated (not reset) — nudge doesn't count as new user message
     expect(detector.getState().historyLength).toBe(historyAfterFirst + 1)
+  })
+})
+
+describe("wrapWithLoopDetection — doom_loop nudge and logs", () => {
+  function getUnstuckLogger() {
+    return Log.create({ service: "unstuck-plugin" })
+  }
+
+  function doomLoopChunks(count = 3, toolName = "bash", input: Record<string, unknown> = { command: "ls -la" }): LanguageModelV3StreamPart[] {
+    const chunks: LanguageModelV3StreamPart[] = []
+    for (let i = 0; i < count; i++) {
+      chunks.push({ type: "text-delta", id: `${i}-text`, delta: "Doom loop thinking" })
+      chunks.push({ type: "tool-input-start", id: `call-${i}`, toolName })
+      chunks.push({
+        type: "tool-input-end",
+        id: `call-${i}`,
+        input,
+        providerMetadata: undefined,
+      } as any)
+    }
+    chunks.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage })
+    return chunks
+  }
+
+  const recoveryChunks: LanguageModelV3StreamPart[] = [
+    { type: "text-delta", id: "recovery-text", delta: "Recovery response" },
+    { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+  ]
+
+  // Disable unrelated detectors so only doom_loop fires.
+  // nudgeMessage: undefined routes through defaultNudgeMessage (the doom_loop branch),
+  // matching the established xml_repetition test pattern.
+  const doomConfig: UnstuckConfig = {
+    ...defaultConfig,
+    maxNudges: 2,
+    strategy: "nudge-and-prune",
+    loopThreshold: 100,
+    detectToolOnlyLoops: false,
+    enablePatternLoopDetection: false,
+    enableSentenceLoopDetection: false,
+    enableSelfDiagnosisDetection: false,
+    enableXmlRepetitionGuard: false,
+    nudgeMessage: undefined,
+  }
+
+  function createDoomModel(loopChunks: LanguageModelV3StreamPart[]): { model: LanguageModelV3; callCount: () => number; receivedPrompt: () => any[] } {
+    let callCount = 0
+    let receivedPrompt: any[] = []
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() {
+        throw new Error("not implemented")
+      },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        receivedPrompt = args.prompt as any[]
+        // Call 1: doom loop detected → threshold met (doomLoop=1) → nudge
+        // Call 2: recovery
+        if (callCount === 1) {
+          return { stream: createMockStream(loopChunks) }
+        }
+        return { stream: createMockStream(recoveryChunks) }
+      },
+    }
+    return {
+      model,
+      callCount: () => callCount,
+      receivedPrompt: () => receivedPrompt,
+    }
+  }
+
+  test("doom_loop detection with threshold met triggers a nudge naming the tool", async () => {
+    const { model, callCount, receivedPrompt } = createDoomModel(doomLoopChunks())
+    const detector = new LoopDetectorImpl()
+    const wrapped = wrapWithLoopDetection(model, detector, doomConfig)
+
+    const result = await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+    expect(result.length).toBeGreaterThan(0)
+    expect(callCount()).toBe(2)
+
+    const lastContent = receivedPrompt()[receivedPrompt().length - 1].content as Array<{ type: string; text: string }>
+    expect(receivedPrompt()[receivedPrompt().length - 1]._unstuckNudge).toBe(true)
+    expect(lastContent[0]?.text).toContain("bash")
+    expect(lastContent[0]?.text).toContain("doom loop")
+  })
+
+  test("doom_loop nudge without toolName falls back to generic guidance without crashing", async () => {
+    // Stub detector that reports doom_loop with NO toolName
+    let fired = false
+    const stubDetector: LoopDetector = {
+      consumeChunk() {
+        if (!fired) {
+          fired = true
+          return { type: "doom_loop", threshold: 3 } satisfies LoopDetectedInfo
+        }
+        return undefined
+      },
+      finalizeStep() {
+        return undefined
+      },
+      reset() {},
+      clear() {},
+      getState() {
+        return {
+          currentReasoningLength: 0,
+          currentTextLength: 0,
+          currentThinkingLength: 0,
+          currentToolsCount: 0,
+          historyLength: 0,
+          inReasoning: false,
+        }
+      },
+    }
+
+    const { model, callCount, receivedPrompt } = createDoomModel([
+      { type: "text-delta", id: "1", delta: "Doom loop thinking" },
+      { type: "tool-input-start", id: "call-1", toolName: "bash" },
+      { type: "tool-input-end", id: "call-1", input: { command: "ls -la" }, providerMetadata: undefined } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+    ])
+    const wrapped = wrapWithLoopDetection(model, stubDetector, doomConfig)
+
+    const result = await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+    expect(result.length).toBeGreaterThan(0)
+    expect(callCount()).toBe(2)
+
+    const lastContent = receivedPrompt()[receivedPrompt().length - 1].content as Array<{ type: string; text: string }>
+    expect(receivedPrompt()[receivedPrompt().length - 1]._unstuckNudge).toBe(true)
+    expect(lastContent[0]?.text).toContain("doom loop")
+    expect(lastContent[0]?.text).not.toContain("tool '")
+  })
+
+  test("thresholdKey maps doom_loop → doomLoop (evidence below threshold reads config.evidenceThresholds.doomLoop)", async () => {
+    const logger = getUnstuckLogger()
+    const infoSpy = spyOn(logger, "info")
+    try {
+      let callCount = 0
+      let receivedPrompt: any[] = []
+
+      const model: LanguageModelV3 = {
+        modelId: "test-model",
+        provider: "test",
+        specificationVersion: "v3",
+        supportedUrls: {},
+        async doGenerate() {
+          throw new Error("not implemented")
+        },
+        async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+          callCount++
+          receivedPrompt = args.prompt as any[]
+          // Call 1: doom loop detected, evidence doom_loop=1, below doomLoop threshold=2 → restart
+          // Call 2: recovery (no loop)
+          if (callCount === 1) {
+            return { stream: createMockStream(doomLoopChunks()) }
+          }
+          return { stream: createMockStream(recoveryChunks) }
+        },
+      }
+
+      const detector = new LoopDetectorImpl()
+      // doomLoop=2 so the first detection is below threshold. stepLoop=99 ensures the
+      // fallback thresholdKey ("stepLoop") would NOT match — proving doomLoop is read.
+      const config: UnstuckConfig = {
+        ...doomConfig,
+        evidenceThresholds: {
+          ...defaultConfig.evidenceThresholds,
+          stepLoop: 99,
+          toolLoop: 99,
+          sentenceLoop: 99,
+          selfDiagnosis: 99,
+          patternLoop: 99,
+          xmlRepetition: 99,
+          doomLoop: 2,
+        },
+      }
+      const wrapped = wrapWithLoopDetection(model, detector, config)
+
+      const initialMessages = [{ role: "user", content: "Hello" }]
+      await collectStream(wrapped, initialMessages)
+
+      // Below threshold → restart with original args, no nudge
+      expect(callCount).toBe(2)
+      expect(receivedPrompt).toEqual(initialMessages)
+
+      // The below-threshold log must read threshold from evidenceThresholds.doomLoop (2),
+      // NOT the stepLoop fallback (99) — proving the thresholdKey mapping.
+      expect(infoSpy).toHaveBeenCalledWith(
+        "loop detected but evidence below threshold — continuing stream",
+        expect.objectContaining({
+          type: "doom_loop",
+          threshold: 2,
+        }),
+      )
+    } finally {
+      infoSpy.mockRestore()
+    }
+  })
+
+  test("L5 nudge applied log includes loopType: doom_loop and toolName", async () => {
+    const logger = getUnstuckLogger()
+    const infoSpy = spyOn(logger, "info")
+    try {
+      const { model } = createDoomModel(doomLoopChunks())
+      const detector = new LoopDetectorImpl()
+      const wrapped = wrapWithLoopDetection(model, detector, doomConfig)
+
+      await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+      expect(infoSpy).toHaveBeenCalledWith(
+        "nudge applied",
+        expect.objectContaining({
+          loopType: "doom_loop",
+          toolName: "bash",
+        }),
+      )
+    } finally {
+      infoSpy.mockRestore()
+    }
+  })
+
+  test("L6 max nudges reached log includes type: doom_loop", async () => {
+    const logger = getUnstuckLogger()
+    const warnSpy = spyOn(logger, "warn")
+    try {
+      let callCount = 0
+      const loopingModel: LanguageModelV3 = {
+        modelId: "test-model",
+        provider: "test",
+        specificationVersion: "v3",
+        supportedUrls: {},
+        async doGenerate() {
+          throw new Error("not implemented")
+        },
+        async doStream(): Promise<LanguageModelV3StreamResult> {
+          callCount++
+          return { stream: createMockStream(doomLoopChunks()) }
+        },
+      }
+
+      const detector = new LoopDetectorImpl()
+      const config: UnstuckConfig = { ...doomConfig, maxNudges: 1 }
+      const wrapped = wrapWithLoopDetection(loopingModel, detector, config)
+
+      await expectThrowsLoopDetected(() => collectStream(wrapped, [{ role: "user", content: "Hello" }]))
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        "max nudges reached, aborting",
+        expect.objectContaining({
+          type: "doom_loop",
+        }),
+      )
+      expect(callCount).toBeGreaterThan(1)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  test("L7 doom_loop config debug log present on wrapWithLoopDetection init", async () => {
+    const logger = getUnstuckLogger()
+    const debugSpy = spyOn(logger, "debug")
+    try {
+      const model = createMockModel([])
+      const detector = new LoopDetectorImpl()
+      wrapWithLoopDetection(model, detector, defaultConfig)
+
+      expect(debugSpy).toHaveBeenCalledWith(
+        "doom_loop config",
+        expect.objectContaining({
+          enableDoomLoopDetection: true,
+          doomLoopThreshold: 3,
+          evidenceDoomLoop: 1,
+        }),
+      )
+    } finally {
+      debugSpy.mockRestore()
+    }
   })
 })
 

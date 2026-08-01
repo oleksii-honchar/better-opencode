@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { defaultConfig, mergeConfig, validateUnstuckConfig, type UnstuckConfig } from "./config"
+import { defaultConfig, defaultEvidenceThresholds, mergeConfig, validateUnstuckConfig, type UnstuckConfig } from "./config"
 
 describe("UnstuckConfig — new XML fields", () => {
   test("defaultConfig has xmlRepetitionModelId as undefined", () => {
@@ -250,5 +250,70 @@ describe("UnstuckConfig — Task 15: Validation", () => {
     expect(merged.xmlPartialTagThreshold).toBe(2)
     expect(merged.xmlTokenEstimationMultiplier).toBe(1.5)
     expect(merged.xmlRepetitionThreshold).toBe(4)
+  })
+})
+
+describe("UnstuckConfig — Task 2: doom_loop flags", () => {
+  test("UnstuckConfig exposes enableDoomLoopDetection and doomLoopThreshold", () => {
+    const config: UnstuckConfig = defaultConfig
+    expect("enableDoomLoopDetection" in config).toBe(true)
+    expect("doomLoopThreshold" in config).toBe(true)
+  })
+
+  test("defaultConfig.enableDoomLoopDetection === true", () => {
+    expect(defaultConfig.enableDoomLoopDetection).toBe(true)
+  })
+
+  test("defaultConfig.doomLoopThreshold === 3", () => {
+    expect(defaultConfig.doomLoopThreshold).toBe(3)
+  })
+
+  test("defaultEvidenceThresholds.doomLoop === 1", () => {
+    expect(defaultEvidenceThresholds.doomLoop).toBe(1)
+    expect(defaultConfig.evidenceThresholds.doomLoop).toBe(1)
+  })
+
+  test("mergeConfig({}) retains doom_loop defaults", () => {
+    const merged = mergeConfig({})
+    expect(merged.enableDoomLoopDetection).toBe(true)
+    expect(merged.doomLoopThreshold).toBe(3)
+    expect(merged.evidenceThresholds.doomLoop).toBe(1)
+  })
+
+  test("mergeConfig({ doomLoopThreshold: 5 }) overrides threshold", () => {
+    const merged = mergeConfig({ doomLoopThreshold: 5 })
+    expect(merged.doomLoopThreshold).toBe(5)
+    expect(merged.enableDoomLoopDetection).toBe(true)
+  })
+
+  test("mergeConfig({ enableDoomLoopDetection: false }) overrides the switch", () => {
+    const merged = mergeConfig({ enableDoomLoopDetection: false })
+    expect(merged.enableDoomLoopDetection).toBe(false)
+    expect(merged.doomLoopThreshold).toBe(3)
+  })
+
+  test("mergeConfig({ evidenceThresholds: { stepLoop: 3 } }) keeps doomLoop: 1", () => {
+    const merged = mergeConfig({ evidenceThresholds: { stepLoop: 3 } })
+    expect(merged.evidenceThresholds.stepLoop).toBe(3)
+    expect(merged.evidenceThresholds.doomLoop).toBe(1)
+  })
+
+  test("mergeConfig({ evidenceThresholds: { doomLoop: 4 } }) overrides doomLoop", () => {
+    const merged = mergeConfig({ evidenceThresholds: { doomLoop: 4 } })
+    expect(merged.evidenceThresholds.doomLoop).toBe(4)
+    expect(merged.evidenceThresholds.stepLoop).toBe(2)
+  })
+
+  test("validateUnstuckConfig preserves doom_loop fields", () => {
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      enableDoomLoopDetection: false,
+      doomLoopThreshold: 7,
+      evidenceThresholds: { ...defaultConfig.evidenceThresholds, doomLoop: 3 },
+    }
+    const validated = validateUnstuckConfig(config)
+    expect(validated.enableDoomLoopDetection).toBe(false)
+    expect(validated.doomLoopThreshold).toBe(7)
+    expect(validated.evidenceThresholds.doomLoop).toBe(3)
   })
 })

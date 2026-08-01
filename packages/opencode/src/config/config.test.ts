@@ -127,6 +127,81 @@ describe("Config Schema — unstuck xml_repetition fields", () => {
   })
 })
 
+describe("Config Schema — unstuck doom_loop fields", () => {
+  test("enableDoomLoopDetection field accepts true and false", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { enableDoomLoopDetection: true },
+    })
+    expect(parsed.unstuck?.enableDoomLoopDetection).toBe(true)
+
+    const disabled = Schema.decodeSync(Info)({
+      unstuck: { enableDoomLoopDetection: false },
+    })
+    expect(disabled.unstuck?.enableDoomLoopDetection).toBe(false)
+  })
+
+  test("doomLoopThreshold field exists and accepts positive ints", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { doomLoopThreshold: 3 },
+    })
+    expect(parsed.unstuck?.doomLoopThreshold).toBe(3)
+
+    const custom = Schema.decodeSync(Info)({
+      unstuck: { doomLoopThreshold: 2 },
+    })
+    expect(custom.unstuck?.doomLoopThreshold).toBe(2)
+  })
+
+  test("doomLoop field exists in evidenceThresholds", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { evidenceThresholds: { doomLoop: 1 } },
+    })
+    expect(parsed.unstuck?.evidenceThresholds?.doomLoop).toBe(1)
+
+    const custom = Schema.decodeSync(Info)({
+      unstuck: { evidenceThresholds: { doomLoop: 3 } },
+    })
+    expect(custom.unstuck?.evidenceThresholds?.doomLoop).toBe(3)
+  })
+
+  test("backward compatible — config without doom_loop fields still parses (omitted fields stay undefined)", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: {
+        enabled: true,
+        loopThreshold: 3,
+      },
+    })
+    expect(parsed.unstuck?.enabled).toBe(true)
+    expect(parsed.unstuck?.loopThreshold).toBe(3)
+    // New fields are optional — should be undefined when not provided (defaults come from UnstuckConfig.mergeConfig)
+    expect(parsed.unstuck?.enableDoomLoopDetection).toBeUndefined()
+    expect(parsed.unstuck?.doomLoopThreshold).toBeUndefined()
+    expect(parsed.unstuck?.evidenceThresholds?.doomLoop).toBeUndefined()
+  })
+
+  test("invalid values are rejected — doomLoopThreshold 0 throws", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Info)({ unstuck: { doomLoopThreshold: 0 } }),
+    ).toThrow()
+  })
+
+  test("invalid values are rejected — doomLoop 0 throws", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Info)({
+        unstuck: { evidenceThresholds: { doomLoop: 0 } },
+      }),
+    ).toThrow()
+  })
+
+  test("invalid values are rejected — enableDoomLoopDetection non-boolean throws", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Info)({
+        unstuck: { enableDoomLoopDetection: "yes" },
+      }),
+    ).toThrow()
+  })
+})
+
 describe("Config Schema — toolFilter", () => {
   test("toolFilter is optional — defaults to undefined", () => {
     const parsed = Schema.decodeSync(Info)({}
