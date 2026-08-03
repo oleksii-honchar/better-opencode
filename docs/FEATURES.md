@@ -636,3 +636,49 @@ When enabled, writes are fire-and-forget (best-effort). An unclean process exit 
 - Survives compaction — session metadata tracks discovered skills
 
 **Tracing logs:** All operations tagged with `tag: "dynamic-skills"` — see [tracing guide](./fork-features/tracing-dynamic-skill-discovery.md).
+
+---
+
+## 17. Rules Injection Plugin
+
+📋 [Detailed Spec](./spec/18-rules-inject-plugin.md)
+
+**Status:** ✅ Implemented
+
+**Problem:** Agents need access to always-apply rules (e.g., coding standards, repository conventions, tooling preferences) on every session, but there is no built-in way to inject these rules into the system prompt. Previously, this required an external plugin file (`~/.config/opencode/plugins/rules-inject.ts`) with hardcoded paths and no configuration.
+
+**Solution:** The Rules Injection Plugin is a built-in plugin that loads `.mdc` files from a configurable folder and injects them into the system prompt on the first turn of each session. It uses a single system element (prepended to `system[0]`) to match Qwen3 chat template requirements, deduplicates per session to avoid re-injection after compaction, and skips injection for non-session contexts (title generation, agent generation).
+
+**Configuration (opencode.json):**
+
+Default configuration (no user override needed):
+
+```json
+{
+  "rulesInject": {
+    "enabled": true,
+    "alwaysApplyFolder": "~/.rules/always-apply"
+  }
+}
+```
+
+Override example for olho users (use the olho rules folder instead of the generic default):
+
+```json
+{
+  "rulesInject": {
+    "enabled": true,
+    "alwaysApplyFolder": "~/.rules/olho/always-apply"
+  }
+}
+```
+
+Both fields are optional. Set `enabled: false` to disable the plugin without removing the config.
+
+**Behavior notes:**
+
+- **Single system element:** All loaded rules are concatenated and prepended to the first system prompt element (`system[0]`). This matches the Qwen3 chat template, which expects exactly one system message.
+- **Per-session deduplication:** Rules are injected only once per `sessionID`. After compaction, when the system prompt is rebuilt, the deduplication set prevents re-injection.
+- **Skip when no sessionID:** Non-session contexts (title generation, agent generation) do not receive injected rules — the plugin skips when `sessionID` is absent.
+- **Missing folder:** If the configured folder does not exist or is unreadable, the plugin logs a warning and no-ops (no rules injected, no error thrown).
+- **File format:** Only `.mdc` files are loaded. Files are sorted alphabetically by filename. Each file is prefixed with `Instructions from: <absolute-path>` and separated by blank lines.

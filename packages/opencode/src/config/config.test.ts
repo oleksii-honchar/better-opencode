@@ -202,6 +202,35 @@ describe("Config Schema — unstuck doom_loop fields", () => {
   })
 })
 
+describe("Config Schema — rulesInject", () => {
+  test("rulesInject round-trips enabled and alwaysApplyFolder", () => {
+    const parsed = Schema.decodeSync(Info)({
+      rulesInject: { enabled: true, alwaysApplyFolder: "~/.rules/olho/always-apply" },
+    })
+    expect(parsed.rulesInject?.enabled).toBe(true)
+    expect(parsed.rulesInject?.alwaysApplyFolder).toBe("~/.rules/olho/always-apply")
+  })
+
+  test("rulesInject.enabled false is preserved", () => {
+    const parsed = Schema.decodeSync(Info)({
+      rulesInject: { enabled: false, alwaysApplyFolder: "~/.rules/always-apply" },
+    })
+    expect(parsed.rulesInject?.enabled).toBe(false)
+    expect(parsed.rulesInject?.alwaysApplyFolder).toBe("~/.rules/always-apply")
+  })
+
+  test("rulesInject is optional — missing field decodes to undefined", () => {
+    const parsed = Schema.decodeSync(Info)({})
+    expect(parsed.rulesInject).toBeUndefined()
+  })
+
+  test("rulesInject empty object still decodes (all sub-fields optional)", () => {
+    const parsed = Schema.decodeSync(Info)({ rulesInject: {} })
+    expect(parsed.rulesInject?.enabled).toBeUndefined()
+    expect(parsed.rulesInject?.alwaysApplyFolder).toBeUndefined()
+  })
+})
+
 describe("Config Schema — toolFilter", () => {
   test("toolFilter is optional — defaults to undefined", () => {
     const parsed = Schema.decodeSync(Info)({}

@@ -21,6 +21,7 @@ import { CloudflareAIGatewayAuthPlugin, CloudflareWorkersAuthPlugin } from "./cl
 import { AzureAuthPlugin } from "./azure"
 import { DigitalOceanAuthPlugin } from "./digitalocean"
 import { XaiAuthPlugin } from "./xai"
+import { RulesInjectPlugin } from "./rules-inject"
 import { Effect, Layer, Context, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
@@ -77,6 +78,7 @@ const INTERNAL_PLUGINS: PluginInstance[] = [
   AzureAuthPlugin,
   DigitalOceanAuthPlugin,
   XaiAuthPlugin,
+  RulesInjectPlugin,
 ]
 
 function isServerPlugin(value: unknown): value is PluginInstance {

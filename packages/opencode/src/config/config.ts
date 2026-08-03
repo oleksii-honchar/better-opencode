@@ -417,6 +417,18 @@ export const Info = Schema.Struct({
   ).annotate({
     description: "Loop detection configuration — detects and breaks model loops during streaming",
   }),
+  rulesInject: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable injecting always-apply rules into the system prompt (default: true)",
+      }),
+      alwaysApplyFolder: Schema.optional(Schema.String).annotate({
+        description: "Folder containing .mdc rules to inject (default: ~/.rules/always-apply)",
+      }),
+    }),
+  ).annotate({
+    description: "Rules injection configuration — injects always-apply rules into the system prompt",
+  }),
 }).annotate({ identifier: "Config" })
 
 // Uses the shared `DeepMutable` from `@opencode-ai/core/schema`. See the definition
