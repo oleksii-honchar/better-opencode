@@ -27,6 +27,7 @@ export type SkillInfo = Schema.Schema.Type<typeof SkillInfoSchema>
 const StorageSchema = Schema.Struct({
   dynamicSkillsScanned: Schema.Array(Schema.String),
   dynamicSkillsRegistered: Schema.Record(Schema.String, SkillInfoSchema),
+  injectedSkills: Schema.optional(Schema.Array(Schema.String)),
 })
 
 /**
@@ -35,6 +36,7 @@ const StorageSchema = Schema.Struct({
 export type DynamicSkillsMetadata = {
   dynamicSkillsScanned: Set<string>
   dynamicSkillsRegistered: Record<string, SkillInfo>
+  injectedSkills: Set<string>
 }
 
 /**
@@ -55,6 +57,7 @@ export function encodeMetadata(metadata: DynamicSkillsMetadata): Schema.Schema.T
   return {
     dynamicSkillsScanned: Array.from(metadata.dynamicSkillsScanned),
     dynamicSkillsRegistered: metadata.dynamicSkillsRegistered,
+    injectedSkills: Array.from(metadata.injectedSkills),
   }
 }
 
@@ -65,6 +68,7 @@ export function decodeMetadata(data: Schema.Schema.Type<typeof StorageSchema>): 
   return {
     dynamicSkillsScanned: new Set(data.dynamicSkillsScanned),
     dynamicSkillsRegistered: data.dynamicSkillsRegistered,
+    injectedSkills: new Set(data.injectedSkills ?? []),
   }
 }
 
@@ -75,6 +79,7 @@ export function emptyMetadata(): DynamicSkillsMetadata {
   return {
     dynamicSkillsScanned: new Set(),
     dynamicSkillsRegistered: {},
+    injectedSkills: new Set(),
   }
 }
 
@@ -123,6 +128,17 @@ export interface Interface {
    * Clear all dynamic skills metadata for a session.
    */
   readonly clearMetadata: (sessionID: string) => Effect.Effect<void, never>
+
+  /**
+   * Check if a skill has already been injected into this session's context.
+   */
+  readonly wasSkillInjected: (sessionID: string, name: string) => Effect.Effect<boolean, never>
+
+  /**
+   * Record that a skill has been injected into this session's context.
+   * Idempotent: no-op if already present.
+   */
+  readonly addInjectedSkill: (sessionID: string, name: string) => Effect.Effect<void, never>
 }
 
 // Export individual methods for direct use (tests and consumers)
@@ -184,6 +200,26 @@ export const clearMetadata = (sessionID: string) =>
       Option.match(opt, {
         onNone: () => Effect.void,
         onSome: (svc) => svc.clearMetadata(sessionID),
+      }),
+    ),
+  )
+
+export const wasSkillInjected = (sessionID: string, name: string) =>
+  Effect.suspend(() =>
+    Effect.flatMap(Effect.option(SessionMetadataService), (opt) =>
+      Option.match(opt, {
+        onNone: () => Effect.succeed(false),
+        onSome: (svc) => svc.wasSkillInjected(sessionID, name),
+      }),
+    ),
+  )
+
+export const addInjectedSkill = (sessionID: string, name: string) =>
+  Effect.suspend(() =>
+    Effect.flatMap(Effect.option(SessionMetadataService), (opt) =>
+      Option.match(opt, {
+        onNone: () => Effect.void,
+        onSome: (svc) => svc.addInjectedSkill(sessionID, name),
       }),
     ),
   )
@@ -279,6 +315,42 @@ export const layer = Layer.effect(
       yield* storage.remove(storageKey(sessionID)).pipe(Effect.ignore)
     })
 
+    const wasSkillInjected: Interface["wasSkillInjected"] = Effect.fn("SessionMetadata.wasSkillInjected")(
+      function* (sessionID, name) {
+        const metadata = yield* getMetadata(sessionID)
+        return metadata.injectedSkills.has(name)
+      },
+    )
+
+    const addInjectedSkill: Interface["addInjectedSkill"] = Effect.fn("SessionMetadata.addInjectedSkill")(
+      function* (sessionID, name) {
+        yield* storage.update<Schema.Schema.Type<typeof StorageSchema>>(
+          storageKey(sessionID),
+          (draft) => {
+            if (!draft) {
+              draft = encodeMetadata(emptyMetadata())
+            }
+            const m = draft as { dynamicSkillsScanned: string[]; dynamicSkillsRegistered: Record<string, SkillInfo>; injectedSkills?: string[] }
+            if (!m.injectedSkills) {
+              m.injectedSkills = []
+            }
+            if (!m.injectedSkills.includes(name)) {
+              m.injectedSkills.push(name)
+            }
+          },
+        ).pipe(
+          Effect.catch(() =>
+            storage.write(storageKey(sessionID), {
+              dynamicSkillsScanned: [],
+              dynamicSkillsRegistered: {},
+              injectedSkills: [name],
+            }),
+          ),
+          Effect.catch(() => Effect.void),
+        )
+      },
+    )
+
     return SessionMetadataService.of({
       getMetadata,
       addScannedDirectory,
@@ -286,6 +358,8 @@ export const layer = Layer.effect(
       wasDirectoryScanned,
       getRegisteredSkills,
       clearMetadata,
+      wasSkillInjected,
+      addInjectedSkill,
     })
   }),
 )

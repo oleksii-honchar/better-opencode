@@ -82,6 +82,9 @@ function createMockSkill(): Skill.Interface {
     available: Effect.fn("MockSkill.available")(function* () {
       return []
     }),
+    allIncludingDynamic: Effect.fn("MockSkill.allIncludingDynamic")(function* () {
+      return []
+    }),
     registerDynamic: Effect.fn("MockSkill.registerDynamic")(function* () {
       return { added: 0, skipped: 0 }
     }),

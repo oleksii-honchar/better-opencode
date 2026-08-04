@@ -2,7 +2,7 @@
 type: index
 title: "Specifications"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-01T13:22:43Z"
+updatedAt: "2026-08-04T18:11:23Z"
 tags: []
 ---
 
@@ -24,3 +24,4 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 - [[0010-enhanced-xml-detection.spec.md]] — Enhanced XML Repetition Detection — Partial/Malformed Tag Support (kind: feature, status: completed)
 - [[0011-dynamic-skill-discovery.spec.md]] — Dynamic Skill Discovery on File Mention (kind: feature, status: completed)
 - [[0012-doom-loop-nudge.spec.md]] — doom_loop → Unstuck Nudge (Allow-then-Catch) (kind: feature, status: completed)
+- [[0013-dynamic-skill-loading-fix.spec.md]] — Dynamic Skill Loading Fix — Visibility, Per-Session Injection, Cache TTL (kind: feature, status: implemented)

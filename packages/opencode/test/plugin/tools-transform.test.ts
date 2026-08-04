@@ -11,6 +11,7 @@ import { Config } from "../../src/config/config"
 import { Env } from "../../src/env"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
 import { Plugin } from "../../src/plugin/index"
+import { Skill } from "../../src/skill"
 import { LLM } from "../../src/session/llm"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -125,6 +126,107 @@ describe("plugin.trigger experimental.tools.transform", () => {
         const tools = yield* triggerToolsTransform()
         expect(tools["existing-tool"]).toBeUndefined()
         expect(tools["replacement"]).toBeDefined()
+      }),
+    ),
+  )
+})
+
+describe("plugin.getDynamicSkills integration", () => {
+  const skillLayer = Skill.defaultLayer.pipe(
+    Layer.provide(Bus.layer),
+    Layer.provide(configLayer),
+    Layer.provide(RuntimeFlags.layer({ disableDefaultPlugins: true })),
+  )
+
+  const itIntegration = testEffect(
+    Layer.mergeAll(
+      skillLayer,
+      LLMTest,
+      CrossSpawnSpawner.defaultLayer,
+    ),
+  )
+
+  function withSkillInstance<A, E, R>(self: Effect.Effect<A, E, R>) {
+    return provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const file = path.join(dir, "opencode.json")
+        yield* Effect.promise(() =>
+          Bun.write(
+            file,
+            JSON.stringify({ $schema: "https://opencode.ai/config.json" }, null, 2),
+          ),
+        )
+        return yield* self
+      }),
+    )
+  }
+
+  itIntegration.live("getDynamicSkills returns dynamic skills registered via Skill.Service", () =>
+    withSkillInstance(
+      Effect.gen(function* () {
+        const skillSrv = yield* Skill.Service
+
+        // Register a dynamic skill
+        const registerResult = yield* skillSrv.registerDynamic([
+          {
+            name: "test-dynamic-skill",
+            description: "A dynamically registered test skill",
+            location: "file:///tmp/test/.agents/skills/test-dynamic-skill/SKILL.md",
+            content: "---\nname: test-dynamic-skill\ndescription: A dynamically registered test skill\n---\nTest content",
+          },
+        ])
+        expect(registerResult.added).toBe(1)
+        expect(registerResult.skipped).toBe(0)
+
+        // allIncludingDynamic should return the dynamic skill
+        const allIncludingDynamic = yield* skillSrv.allIncludingDynamic()
+        const dynamicSkill = allIncludingDynamic.find((s) => s.name === "test-dynamic-skill")
+        expect(dynamicSkill).toBeDefined()
+        expect(dynamicSkill?.description).toBe("A dynamically registered test skill")
+
+        // Verify the skill is truly dynamic (not in startup skills)
+        const startupSkills = yield* skillSrv.all()
+        const inStartup = startupSkills.some((s) => s.name === "test-dynamic-skill")
+        expect(inStartup).toBe(false)
+
+        return { registered: registerResult.added, foundInAllIncludingDynamic: !!dynamicSkill, foundInStartup: inStartup }
+      }),
+    ),
+  )
+
+  itIntegration.live("allIncludingDynamic includes both startup and dynamic skills", () =>
+    withSkillInstance(
+      Effect.gen(function* () {
+        const skillSrv = yield* Skill.Service
+
+        // Register multiple dynamic skills
+        yield* skillSrv.registerDynamic([
+          {
+            name: "test-dynamic-1",
+            description: "First dynamic skill",
+            location: "file:///tmp/test/.agents/skills/test-dynamic-1/SKILL.md",
+            content: "---\nname: test-dynamic-1\n---\n",
+          },
+          {
+            name: "test-dynamic-2",
+            description: "Second dynamic skill",
+            location: "file:///tmp/test/.agents/skills/test-dynamic-2/SKILL.md",
+            content: "---\nname: test-dynamic-2\n---\n",
+          },
+        ])
+
+        const allIncludingDynamic = yield* skillSrv.allIncludingDynamic()
+        const startupSkills = yield* skillSrv.all()
+
+        const hasDynamic1 = allIncludingDynamic.some((s) => s.name === "test-dynamic-1")
+        const hasDynamic2 = allIncludingDynamic.some((s) => s.name === "test-dynamic-2")
+        const hasStartup = allIncludingDynamic.length > startupSkills.length
+
+        expect(hasDynamic1).toBe(true)
+        expect(hasDynamic2).toBe(true)
+        expect(hasStartup).toBe(true)
+
+        return { hasDynamic1, hasDynamic2, hasStartup, totalIncludingDynamic: allIncludingDynamic.length, totalStartup: startupSkills.length }
       }),
     ),
   )

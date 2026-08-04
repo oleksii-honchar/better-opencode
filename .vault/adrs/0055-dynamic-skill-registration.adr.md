@@ -11,6 +11,8 @@ superseded_by: []
 see_also:
   - "concepts/0010-dynamic-context-injection.concept.md"
   - "specifications/0011-dynamic-skill-discovery.spec.md"
+  - "adrs/0065-dynamic-skill-visibility-read-path.adr.md"
+  - "adrs/0066-per-session-injection-tracking.adr.md"
 deprecated:
   date: null
   reason: null
@@ -43,4 +45,5 @@ Add `registerDynamic()` and `promoteDynamicToStartup()` methods to `Skill.Servic
 - **Positive:** KV cache preserved before compaction (system prompt identical every turn)
 - **Positive:** minimal core change (additive, doesn't touch startup paths)
 - **Positive:** works regardless of agent-meta-tool presence
-- **Negative:** dynamic skills not searchable via `skill_search` until post-compaction promotion (they are visible via conversation context in the meantime)
+- **Negative:** dynamic skills not in the system prompt until post-compaction promotion (they are visible via conversation context in the meantime)
+- **Negative (mitigated):** dynamic skills were not searchable via `skill_search` pre-compaction — resolved by the read-only visibility path in ADR-0065

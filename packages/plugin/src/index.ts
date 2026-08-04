@@ -67,6 +67,8 @@ export type PluginInput = {
   llm: PluginLLMService
   /** Current chat session ID (optional — may not be available at plugin init time) */
   sessionId?: string
+  /** Direct access to dynamic skills (startup + dynamic) — per-call freshness */
+  getDynamicSkills?: () => Promise<Array<{ name: string; description?: string; location: string }>>
 }
 
 export type PluginOptions = Record<string, unknown>

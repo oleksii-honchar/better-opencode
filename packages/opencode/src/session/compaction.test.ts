@@ -61,6 +61,9 @@ function createMockSkillService(initialState?: Partial<SkillState>): Skill.Inter
     available: Effect.fn("MockSkill.available")(function* () {
       return Object.values(state.skills).toSorted((a, b) => a.name.localeCompare(b.name))
     }),
+    allIncludingDynamic: Effect.fn("MockSkill.allIncludingDynamic")(function* () {
+      return [...Object.values(state.skills), ...Object.values(state.dynamicSkills)]
+    }),
     registerDynamic: Effect.fn("MockSkill.registerDynamic")(function* (newSkills: Skill.Info[]) {
       let added = 0
       let skipped = 0
@@ -487,7 +490,7 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
       SessionMetadataService,
       {
         getMetadata: (_sessionID: string) =>
-          Effect.succeed({ dynamicSkillsScanned: new Set<string>(), dynamicSkillsRegistered: {} }),
+          Effect.succeed({ dynamicSkillsScanned: new Set<string>(), dynamicSkillsRegistered: {}, injectedSkills: new Set<string>() }),
         addScannedDirectory: Effect.fn("MockSessionMetadata.addScannedDirectory")(function* () {}),
         addRegisteredSkill: Effect.fn("MockSessionMetadata.addRegisteredSkill")(function* () {}),
         wasDirectoryScanned: Effect.fn("MockSessionMetadata.wasDirectoryScanned")(function* () {
@@ -496,6 +499,10 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
         getRegisteredSkills: Effect.fn("MockSessionMetadata.getRegisteredSkills")(function* () {
           return []
         }),
+        wasSkillInjected: Effect.fn("MockSessionMetadata.wasSkillInjected")(function* () {
+          return false
+        }),
+        addInjectedSkill: Effect.fn("MockSessionMetadata.addInjectedSkill")(function* () {}),
         clearMetadata: Effect.fn("MockSessionMetadata.clearMetadata")(function* () {}),
       },
     )
@@ -596,6 +603,9 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
       available: Effect.fn("MockSkill.available")(function* () {
         return []
       }),
+      allIncludingDynamic: Effect.fn("MockSkill.allIncludingDynamic")(function* () {
+        return []
+      }),
       registerDynamic: Effect.fn("MockSkill.registerDynamic")(function* () {
         return { added: 0, skipped: 0 }
       }),
@@ -655,6 +665,9 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
         return []
       }),
       available: Effect.fn("MockSkill.available")(function* () {
+        return []
+      }),
+      allIncludingDynamic: Effect.fn("MockSkill.allIncludingDynamic")(function* () {
         return []
       }),
       registerDynamic: Effect.fn("MockSkill.registerDynamic")(function* () {

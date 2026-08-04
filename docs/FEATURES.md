@@ -634,6 +634,9 @@ When enabled, writes are fire-and-forget (best-effort). An unclean process exit 
 - Cached per folder — first mention scans (~10-50ms), subsequent mentions O(1)
 - Deduplicated — never re-scans same `.agents/` directory in a session
 - Survives compaction — session metadata tracks discovered skills
+- **skill_search visibility:** `skill_search` meta-tool now sees dynamically registered skills (via a direct `getDynamicSkills` function passed in plugin input, called fresh on each `skill_search`), so agents can discover and load them without relying solely on synthetic injection
+- **Per-session injection:** Each session receives synthetic `<available_skills>` injection for newly discovered skills independently; startup skills already in the system prompt are excluded to avoid duplicate context
+- **scanCache behavior:** 5-minute TTL on cached scan results (stale entries re-scanned); empty scan results are never cached, preventing transient failures from poisoning the cache
 
 **Tracing logs:** All operations tagged with `tag: "dynamic-skills"` — see [tracing guide](./fork-features/tracing-dynamic-skill-discovery.md).
 

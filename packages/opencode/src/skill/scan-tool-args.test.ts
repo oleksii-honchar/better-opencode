@@ -70,8 +70,11 @@ function createMockService(): Skill.Interface {
     state.promoted = true
     return { promoted: count }
   })
+  const allIncludingDynamic = Effect.fn("MockSkill.allIncludingDynamic")(function* () {
+    return [...Object.values(state.skills), ...Object.values(state.dynamicSkills)]
+  })
 
-  return { get, require, all, dirs, available, registerDynamic, promoteDynamicToStartup }
+  return { get, require, all, dirs, available, allIncludingDynamic, registerDynamic, promoteDynamicToStartup }
 }
 
 function mockSkillLayer(): Layer.Layer<Skill.Service> {

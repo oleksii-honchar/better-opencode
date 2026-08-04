@@ -58,6 +58,7 @@ const SKILL_PATTERN = "skill/**/SKILL.md"
 
 // In-memory cache keyed by realpath of the directory being scanned
 const scanCache = new Map<string, CacheEntry>()
+export { scanCache } // exported for testing TTL behavior
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -135,11 +136,15 @@ export const findAgentsDirectories = Effect.fnUntraced(function* (filePath: stri
 export const scanAgentsSkills = Effect.fnUntraced(function* (agentsDir: string) {
   const cacheKey = yield* resolveRealpath(agentsDir)
 
-  // Check cache
+  // Check cache with 5-minute TTL
   const cached = scanCache.get(cacheKey)
-  if (cached) {
+  const isStale = cached && Date.now() - cached.timestamp > 300_000
+  if (cached && !isStale) {
     log.debug("cache-hit", { dir: cacheKey, skillsCount: cached.skills.length })
     return cached.skills
+  }
+  if (isStale) {
+    log.debug("cache-stale", { dir: cacheKey, ageMs: Date.now() - cached.timestamp })
   }
 
   log.debug("cache-miss", { dir: cacheKey })
@@ -205,8 +210,10 @@ export const scanAgentsSkills = Effect.fnUntraced(function* (agentsDir: string) 
     }
   }
 
-  // Store in cache
-  scanCache.set(cacheKey, { skills, timestamp: Date.now() })
+  // Store in cache only if non-empty (avoid caching transient empty results)
+  if (skills.length > 0) {
+    scanCache.set(cacheKey, { skills, timestamp: Date.now() })
+  }
   log.info("scan-complete", { dir: cacheKey, skillsCount: skills.length })
 
   return skills
@@ -433,19 +440,32 @@ export const scanParts = Effect.fnUntraced(function* (
     let skillNames: string[] = []
 
     if (allNewSkills.length > 0) {
-      // First: determine which skills are NEW (not yet registered) — need to inject these as synthetic
-      // Must check BEFORE registerDynamic, because after registration they'll be found via get()
+      // Per-session injection gate:
+      // - Never re-inject startup skills (already in system prompt via all())
+      // - Inject for every new session that hasn't seen this skill yet
+      // - Dedupe within same session via SessionMetadata.wasSkillInjected
+      // - registerDynamic remains process-wide dedupe (unchanged)
+      const startupNames = new Set(
+        (yield* Skill.Service.pipe(
+          Effect.flatMap((svc) => svc.all()),
+          Effect.catch(() => Effect.succeed([] as Skill.Info[])),
+        )).map((s) => s.name),
+      )
+
       const newSkillsToInject: Skill.Info[] = []
       for (const skill of allNewSkills) {
-        const isAlreadyRegistered = yield* Skill.Service.pipe(
-          Effect.flatMap((svc) => svc.get(skill.name)),
-          Effect.map((info) => !!info),
+        if (startupNames.has(skill.name)) continue
+
+        const alreadyInjectedThisSession = yield* SessionMetadata.wasSkillInjected(sessionID, skill.name).pipe(
           Effect.catch(() => Effect.succeed(false)),
         )
 
-        if (!isAlreadyRegistered && !injectionQueue.has(skill.name)) {
+        if (!alreadyInjectedThisSession && !injectionQueue.has(skill.name)) {
           newSkillsToInject.push(skill)
           injectionQueue.set(skill.name, skill)
+          yield* SessionMetadata.addInjectedSkill(sessionID, skill.name).pipe(
+            Effect.catch(() => Effect.void),
+          )
         }
       }
 
@@ -576,9 +596,57 @@ export const scanToolArgs = Effect.fnUntraced(function* (
       }
     }
   } else {
-    // Unknown tool — no-op, log for visibility
-    log.debug("unknown-tool", { toolId, sessionID })
-    return { pathsFound: 0, scannedPaths: [], skillsRegistered: 0, skillNames: [] }
+    // Unknown tool (e.g., MCP tools like octocode_localSearchCode):
+    // Scan path-keyed string args for absolute paths using same regex as scanParts.
+    // Prefer path-keyed args first to bound false positives.
+    const absPathRegex = /((?:^|[\s"'`({,])((?:\/[^"\s'`)}\],]+)|(?:[A-Za-z]:\\[^"\s'`)}\],]+)))/g
+
+    function isAbsolutePath(p: string): boolean {
+      return path.isAbsolute(p) || /^[A-Za-z]:\\/.test(p)
+    }
+
+    const pathKeys = ["filePath", "path", "directory", "dir", "file", "filename"]
+
+    // First: check path-keyed args
+    for (const key of pathKeys) {
+      const val = args[key]
+      if (typeof val === "string" && val.length > 0) {
+        if (isAbsolutePath(val)) {
+          paths.add(val)
+        } else {
+          // Also try regex extraction for inline paths
+          let match: RegExpExecArray | null
+          while ((match = absPathRegex.exec(val)) !== null) {
+            const candidate = match[2] || match[1]
+            if (candidate && isAbsolutePath(candidate)) {
+              paths.add(candidate)
+            }
+          }
+        }
+      }
+    }
+
+    // If no paths found via keyed args, scan all string args with regex
+    if (paths.size === 0) {
+      for (const val of Object.values(args)) {
+        if (typeof val === "string" && val.length > 0) {
+          let match: RegExpExecArray | null
+          while ((match = absPathRegex.exec(val)) !== null) {
+            const candidate = match[2] || match[1]
+            if (candidate && isAbsolutePath(candidate)) {
+              paths.add(candidate)
+            }
+          }
+        }
+      }
+    }
+
+    if (paths.size === 0) {
+      log.debug("unknown-tool-no-paths", { toolId, sessionID })
+      return { pathsFound: 0, scannedPaths: [], skillsRegistered: 0, skillNames: [] }
+    }
+
+    log.debug("unknown-tool-paths-found", { toolId, sessionID, pathCount: paths.size })
   }
 
   if (paths.size === 0) {
@@ -628,19 +696,32 @@ export const scanToolArgs = Effect.fnUntraced(function* (
     let skillNames: string[] = []
 
     if (allNewSkills.length > 0) {
-      // First: determine which skills are NEW (not yet registered) — need to inject these as synthetic
-      // Must check BEFORE registerDynamic, because after registration they'll be found via get()
+      // Per-session injection gate:
+      // - Never re-inject startup skills (already in system prompt via all())
+      // - Inject for every new session that hasn't seen this skill yet
+      // - Dedupe within same session via SessionMetadata.wasSkillInjected
+      // - registerDynamic remains process-wide dedupe (unchanged)
+      const startupNames = new Set(
+        (yield* Skill.Service.pipe(
+          Effect.flatMap((svc) => svc.all()),
+          Effect.catch(() => Effect.succeed([] as Skill.Info[])),
+        )).map((s) => s.name),
+      )
+
       const newSkillsToInject: Skill.Info[] = []
       for (const skill of allNewSkills) {
-        const isAlreadyRegistered = yield* Skill.Service.pipe(
-          Effect.flatMap((svc) => svc.get(skill.name)),
-          Effect.map((info) => !!info),
+        if (startupNames.has(skill.name)) continue
+
+        const alreadyInjectedThisSession = yield* SessionMetadata.wasSkillInjected(sessionID, skill.name).pipe(
           Effect.catch(() => Effect.succeed(false)),
         )
 
-        if (!isAlreadyRegistered && !injectionQueue.has(skill.name)) {
+        if (!alreadyInjectedThisSession && !injectionQueue.has(skill.name)) {
           newSkillsToInject.push(skill)
           injectionQueue.set(skill.name, skill)
+          yield* SessionMetadata.addInjectedSkill(sessionID, skill.name).pipe(
+            Effect.catch(() => Effect.void),
+          )
         }
       }
 

@@ -11,6 +11,8 @@ import {
   wasDirectoryScanned,
   getRegisteredSkills,
   clearMetadata,
+  wasSkillInjected,
+  addInjectedSkill,
   layer as SessionMetadataLayer,
 } from "@/skill/session-metadata"
 import type { DynamicSkillsMetadata } from "@/skill/session-metadata"
@@ -32,6 +34,8 @@ type SessionMetadataType = {
   wasDirectoryScanned: typeof wasDirectoryScanned
   getRegisteredSkills: typeof getRegisteredSkills
   clearMetadata: typeof clearMetadata
+  wasSkillInjected: typeof wasSkillInjected
+  addInjectedSkill: typeof addInjectedSkill
 }
 
 const SessionMetadata: SessionMetadataType = {
@@ -44,6 +48,8 @@ const SessionMetadata: SessionMetadataType = {
   wasDirectoryScanned,
   getRegisteredSkills,
   clearMetadata,
+  wasSkillInjected,
+  addInjectedSkill,
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +137,7 @@ describe("SessionMetadata — Dynamic Skills Tracking", () => {
             content: "# Skill A",
           },
         },
+        injectedSkills: new Set(),
       }
 
       const encoded = SessionMetadata.encodeMetadata(input)
@@ -147,6 +154,7 @@ describe("SessionMetadata — Dynamic Skills Tracking", () => {
       const empty: DynamicSkillsMetadata = {
         dynamicSkillsScanned: new Set(),
         dynamicSkillsRegistered: {},
+        injectedSkills: new Set(),
       }
 
       const encoded = SessionMetadata.encodeMetadata(empty)
@@ -178,6 +186,7 @@ describe("SessionMetadata — Dynamic Skills Tracking", () => {
             content: "# Skill X",
           },
         },
+        injectedSkills: new Set(),
       }
 
       const encoded = SessionMetadata.encodeMetadata(initial)
@@ -446,6 +455,35 @@ describe("SessionMetadata — Dynamic Skills Tracking", () => {
       expect(readResult.dynamicSkillsScanned.size).toBe(1)
       expect(readResult.dynamicSkillsScanned.has("/repo/.agents")).toBe(true)
       expect(readResult.dynamicSkillsRegistered["persistent-skill"].name).toBe("persistent-skill")
+    })
+  })
+
+  describe("injectedSkills", () => {
+    test("wasSkillInjected returns false for unseen skills", async () => {
+      const result = await run(SessionMetadata.wasSkillInjected(SESSION_ID, "unknown-skill"))
+      expect(result).toBe(false)
+    })
+
+    test("addInjectedSkill + wasSkillInjected returns true after add", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          yield* SessionMetadata.addInjectedSkill(SESSION_ID, "my-skill")
+          return yield* SessionMetadata.wasSkillInjected(SESSION_ID, "my-skill")
+        }),
+      )
+      expect(result).toBe(true)
+    })
+
+    test("decode backward compatibility — missing injectedSkills decodes to empty", () => {
+      // Simulate old storage data without injectedSkills field
+      const oldData = {
+        dynamicSkillsScanned: ["/repo/.agents"],
+        dynamicSkillsRegistered: {},
+      }
+
+      const decoded = SessionMetadata.decodeMetadata(oldData as any)
+      expect(decoded.injectedSkills).toBeInstanceOf(Set)
+      expect(decoded.injectedSkills.size).toBe(0)
     })
   })
 })

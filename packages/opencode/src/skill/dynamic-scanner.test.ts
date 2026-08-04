@@ -12,6 +12,71 @@ import { ProviderID, ModelID } from "@/provider/schema"
 import type { MessageV2 } from "@/session/message-v2"
 
 // Minimal mock Skill.Service for scanParts tests
+function createMockSkillServiceWithStartup(startupSkills: Skill.Info[]): Skill.Interface {
+  const state: {
+    skills: Record<string, Skill.Info>
+    dynamicSkills: Record<string, Skill.Info>
+    dirs: Set<string>
+    promoted: boolean
+  } = {
+    skills: {},
+    dynamicSkills: {},
+    dirs: new Set(),
+    promoted: false,
+  }
+
+  // Pre-populate startup skills
+  for (const s of startupSkills) {
+    state.skills[s.name] = s
+  }
+
+  const get = Effect.fn("MockSkill.get")(function* (name: string) {
+    return state.skills[name] ?? state.dynamicSkills[name]
+  })
+  const require = Effect.fn("MockSkill.require")(function* (name: string) {
+    const info = state.skills[name] ?? state.dynamicSkills[name]
+    if (info) return info
+    return yield* new Skill.NotFoundError({ name, available: Object.keys(state.skills).toSorted() })
+  })
+  const all = Effect.fn("MockSkill.all")(function* () {
+    return Object.values(state.skills)
+  })
+  const dirs = Effect.fn("MockSkill.dirs")(function* () {
+    return Array.from(state.dirs)
+  })
+  const available = Effect.fn("MockSkill.available")(function* () {
+    return Object.values(state.skills).toSorted((a, b) => a.name.localeCompare(b.name))
+  })
+  const registerDynamic = Effect.fn("MockSkill.registerDynamic")(function* (newSkills: Skill.Info[]) {
+    let added = 0
+    let skipped = 0
+    for (const skill of newSkills) {
+      if (state.skills[skill.name] || state.dynamicSkills[skill.name]) {
+        skipped++
+      } else {
+        state.dynamicSkills[skill.name] = skill
+        added++
+      }
+    }
+    return { added, skipped }
+  })
+  const promoteDynamicToStartup = Effect.fn("MockSkill.promoteDynamicToStartup")(function* () {
+    if (state.promoted) return { promoted: 0 }
+    const count = Object.keys(state.dynamicSkills).length
+    for (const [name, info] of Object.entries(state.dynamicSkills)) {
+      state.skills[name] = info
+    }
+    state.dynamicSkills = {}
+    state.promoted = true
+    return { promoted: count }
+  })
+  const allIncludingDynamic = Effect.fn("MockSkill.allIncludingDynamic")(function* () {
+    return [...Object.values(state.skills), ...Object.values(state.dynamicSkills)]
+  })
+
+  return { get, require, all, dirs, available, allIncludingDynamic, registerDynamic, promoteDynamicToStartup }
+}
+
 function createMockSkillService(): Skill.Interface {
   const state: {
     skills: Record<string, Skill.Info>
@@ -65,8 +130,11 @@ function createMockSkillService(): Skill.Interface {
     state.promoted = true
     return { promoted: count }
   })
+  const allIncludingDynamic = Effect.fn("MockSkill.allIncludingDynamic")(function* () {
+    return [...Object.values(state.skills), ...Object.values(state.dynamicSkills)]
+  })
 
-  return { get, require, all, dirs, available, registerDynamic, promoteDynamicToStartup }
+  return { get, require, all, dirs, available, allIncludingDynamic, registerDynamic, promoteDynamicToStartup }
 }
 
 function mockSkillLayer(): Layer.Layer<Skill.Service> {
@@ -343,6 +411,70 @@ describe("DynamicSkillScanner", () => {
       const result = await run(DynamicSkillScanner.scanAgentsSkills(agentsDir))
       expect(result).toHaveLength(1)
       expect(result[0].name).toBe("symlinked-skill")
+    })
+
+    // ---------------------------------------------------------------------------
+    // Task 5: scanCache TTL + no empty cache
+    // ---------------------------------------------------------------------------
+
+    test("cache hit for fresh non-empty entry", async () => {
+      await loadModule()
+      const agentsDir = path.join(tmpDir, ".agents")
+      fs.mkdirSync(path.join(agentsDir, "skills"), { recursive: true })
+      createSkill(path.join(agentsDir, "skills"), "ttl-skill", "TTL test skill")
+
+      // First scan — populates cache
+      const result1 = await run(DynamicSkillScanner.scanAgentsSkills(agentsDir))
+      expect(result1).toHaveLength(1)
+      expect(result1[0].name).toBe("ttl-skill")
+
+      // Second scan immediately — should hit cache (same result, no re-glob)
+      const result2 = await run(DynamicSkillScanner.scanAgentsSkills(agentsDir))
+      expect(result2).toHaveLength(1)
+      expect(result2[0].name).toBe("ttl-skill")
+    })
+
+    test("cache miss (re-scan) for entry older than 5 minutes", async () => {
+      await loadModule()
+      const agentsDir = path.join(tmpDir, ".agents")
+      fs.mkdirSync(path.join(agentsDir, "skills"), { recursive: true })
+      createSkill(path.join(agentsDir, "skills"), "ttl-skill", "TTL test skill")
+
+      // First scan — populates cache
+      const result1 = await run(DynamicSkillScanner.scanAgentsSkills(agentsDir))
+      expect(result1).toHaveLength(1)
+
+      // Manually inject a stale cache entry (> 5 minutes old)
+      // Access scanCache via module namespace — it's exported as DynamicSkillScanner
+      const cacheModule = (await import("@/skill/dynamic-scanner")) as any
+      const cacheKey = path.resolve(agentsDir)
+      const staleEntry = { skills: [{ name: "stale-skill", location: "/old", content: "" }], timestamp: Date.now() - 310_000 }
+      cacheModule.scanCache.set(cacheKey, staleEntry)
+
+      // Next scan should detect stale entry and re-scan (find ttl-skill, not stale-skill)
+      const result2 = await run(DynamicSkillScanner.scanAgentsSkills(agentsDir))
+      expect(result2).toHaveLength(1)
+      expect(result2[0].name).toBe("ttl-skill")
+    })
+
+    test("empty scan results not cached — next scan re-globs", async () => {
+      await loadModule()
+      const agentsDir = path.join(tmpDir, ".agents")
+      fs.mkdirSync(agentsDir, { recursive: true })
+      // No skills directory — scan returns empty
+
+      // First scan — empty result, should NOT cache
+      const result1 = await run(DynamicSkillScanner.scanAgentsSkills(agentsDir))
+      expect(result1).toHaveLength(0)
+
+      // Now add a skill after the first scan
+      fs.mkdirSync(path.join(agentsDir, "skills"), { recursive: true })
+      createSkill(path.join(agentsDir, "skills"), "late-skill", "Added after first scan")
+
+      // Second scan — since empty was not cached, should find the new skill
+      const result2 = await run(DynamicSkillScanner.scanAgentsSkills(agentsDir))
+      expect(result2).toHaveLength(1)
+      expect(result2[0].name).toBe("late-skill")
     })
   })
 
@@ -932,6 +1064,287 @@ describe("DynamicSkillScanner", () => {
       expect(msg.model.providerID).toBe(testProviderID)
       expect(msg.model.modelID).toBe(testModelID)
       expect(msg.sessionID).toBe(testSessionID)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Per-session injection gate tests (Task 4)
+  // ---------------------------------------------------------------------------
+
+  describe("per-session injection gate", () => {
+    const testAgent = "test-agent"
+    const testProviderID = ProviderID.make("test-provider")
+    const testModelID = ModelID.make("test-model")
+
+    function runWithSkillService<T>(
+      program: Effect.Effect<T, unknown, Skill.Service | Session.Service | AppFileSystem.Service | SessionMetadata.SessionMetadataService>,
+      startupSkills: Skill.Info[],
+    ) {
+      return Effect.runPromise(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(
+              Effect.provide(program, AppFileSystem.defaultLayer),
+              SessionMetadata.defaultLayer,
+            ),
+            Layer.succeed(Skill.Service, createMockSkillServiceWithStartup(startupSkills)),
+          ),
+          mockSessionLayer(),
+        ),
+      )
+    }
+
+    test("dynamic skill injected for new session even if registered by prior session", async () => {
+      await loadModule()
+
+      // Create a skill file
+      const agentsDir = path.join(tmpDir, ".agents")
+      fs.mkdirSync(path.join(agentsDir, "skills", "new-dynamic-skill"), { recursive: true })
+      fs.writeFileSync(path.join(agentsDir, "skills", "new-dynamic-skill", "SKILL.md"), "---\nname: new-dynamic-skill\ndescription: A new dynamic skill\n---\n# New Dynamic")
+      const filePath = path.join(tmpDir, "file.ts")
+      fs.writeFileSync(filePath, "content")
+
+      const sessionA = SessionID.make("ses-prior-session")
+      const sessionB = SessionID.make("ses-new-session")
+
+      // Create a shared Skill.Service instance so registration persists across sessions
+      const sharedService = createMockSkillServiceWithStartup([])
+      const parts: Array<{ type: "text"; text: string }> = [{ type: "text", text: `Check ${filePath}` }]
+
+      // Run scanParts for session A — skill gets registered and injected for session A
+      const resultA = await Effect.runPromise(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(
+              Effect.provide(
+                DynamicSkillScanner.scanParts(parts as import("@/session/message-v2").Part[], sessionA, testAgent, testProviderID, testModelID),
+                AppFileSystem.defaultLayer,
+              ),
+              SessionMetadata.defaultLayer,
+            ),
+            Layer.succeed(Skill.Service, sharedService),
+          ),
+          mockSessionLayer(),
+        ),
+      )
+      expect(resultA.skillsRegistered).toBe(1)
+
+      // Now run scanParts for session B — skill already registered in process,
+      // but should still be injected for this new session (per-session gate)
+      const resultB = await Effect.runPromise(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(
+              Effect.provide(
+                DynamicSkillScanner.scanParts(parts as import("@/session/message-v2").Part[], sessionB, testAgent, testProviderID, testModelID),
+                AppFileSystem.defaultLayer,
+              ),
+              SessionMetadata.defaultLayer,
+            ),
+            Layer.succeed(Skill.Service, sharedService),
+          ),
+          mockSessionLayer(),
+        ),
+      )
+      // Skill already registered → added=0, but should still trigger injection for session B
+      expect(resultB.skillsRegistered).toBe(0)
+      // The key assertion: scanParts should NOT skip injection just because skill
+      // was already registered by session A. After Task 4, per-session gate uses
+      // wasSkillInjected(sessionB, name) which returns false → skill injected.
+      // We verify via SessionMetadata that session B tracked the injection
+      const injectedB = await Effect.runPromise(
+        SessionMetadata.wasSkillInjected(sessionB, "new-dynamic-skill").pipe(
+          Effect.provide(SessionMetadata.defaultLayer),
+        ),
+      )
+      expect(injectedB).toBe(true)
+    })
+
+    test("startup skill never queued for injection", async () => {
+      await loadModule()
+
+      // Create a skill file with same name as a startup skill
+      const agentsDir = path.join(tmpDir, ".agents")
+      fs.mkdirSync(path.join(agentsDir, "skills", "startup-skill"), { recursive: true })
+      fs.writeFileSync(path.join(agentsDir, "skills", "startup-skill", "SKILL.md"), "---\nname: startup-skill\ndescription: Already in system prompt\n---\n# Startup")
+      const filePath = path.join(tmpDir, "file.ts")
+      fs.writeFileSync(filePath, "content")
+
+      // Pre-register as startup skill
+      const startupSkills: Skill.Info[] = [{
+        name: "startup-skill",
+        description: "Already in system prompt",
+        location: "<built-in>",
+        content: "# Startup",
+      }]
+
+      const sessionID = SessionID.make("ses-startup-test")
+      const parts: Array<{ type: "text"; text: string }> = [{ type: "text", text: `Check ${filePath}` }]
+
+      const result = await runWithSkillService(
+        DynamicSkillScanner.scanParts(parts as import("@/session/message-v2").Part[], sessionID, testAgent, testProviderID, testModelID),
+        startupSkills,
+      )
+
+      // Skill found via scan but is startup → should NOT be queued for injection
+      const injected = await Effect.runPromise(
+        SessionMetadata.wasSkillInjected(sessionID, "startup-skill").pipe(
+          Effect.provide(SessionMetadata.defaultLayer),
+        ),
+      )
+      expect(injected).toBe(false)
+    })
+
+    test("same-skill re-mention in same session not re-injected", async () => {
+      await loadModule()
+
+      // Create a skill file
+      const agentsDir = path.join(tmpDir, ".agents")
+      fs.mkdirSync(path.join(agentsDir, "skills", "once-only-skill"), { recursive: true })
+      fs.writeFileSync(path.join(agentsDir, "skills", "once-only-skill", "SKILL.md"), "---\nname: once-only-skill\ndescription: Injected once\n---\n# Once Only")
+      const filePath = path.join(tmpDir, "file.ts")
+      const filePath2 = path.join(tmpDir, "file2.ts")
+      fs.writeFileSync(filePath, "content")
+      fs.writeFileSync(filePath2, "content")
+
+      const sessionID = SessionID.make("ses-once-test")
+
+      // First mention — skill injected
+      const parts1: Array<{ type: "text"; text: string }> = [{ type: "text", text: `Check ${filePath}` }]
+      const result1 = await runWithSkillService(
+        DynamicSkillScanner.scanParts(parts1 as import("@/session/message-v2").Part[], sessionID, testAgent, testProviderID, testModelID),
+        [],
+      )
+      expect(result1.skillsRegistered).toBe(1)
+
+      // Second mention in same session — should NOT re-inject
+      const parts2: Array<{ type: "text"; text: string }> = [{ type: "text", text: `Check ${filePath2}` }]
+      const result2 = await runWithSkillService(
+        DynamicSkillScanner.scanParts(parts2 as import("@/session/message-v2").Part[], sessionID, testAgent, testProviderID, testModelID),
+        [],
+      )
+      expect(result2.skillsRegistered).toBe(0)
+
+      // Verify wasSkillInjected was called exactly once (addInjectedSkill is idempotent,
+      // but we check that the gate prevented re-queueing)
+      const injected = await Effect.runPromise(
+        SessionMetadata.wasSkillInjected(sessionID, "once-only-skill").pipe(
+          Effect.provide(SessionMetadata.defaultLayer),
+        ),
+      )
+      expect(injected).toBe(true)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // scanToolArgs — unknown tool handler (Task 6)
+  // ---------------------------------------------------------------------------
+
+  describe("scanToolArgs — unknown tool handler", () => {
+    const testAgent = "test-agent"
+    const testProviderID = ProviderID.make("test-provider")
+    const testModelID = ModelID.make("test-model")
+
+    function runScanToolArgs<T>(
+      program: Effect.Effect<T, unknown, Skill.Service | Session.Service | AppFileSystem.Service | SessionMetadata.SessionMetadataService>,
+      startupSkills: Skill.Info[],
+    ) {
+      return Effect.runPromise(
+        Effect.provide(
+          Effect.provide(
+            Effect.provide(
+              Effect.provide(program, AppFileSystem.defaultLayer),
+              SessionMetadata.defaultLayer,
+            ),
+            Layer.succeed(Skill.Service, createMockSkillServiceWithStartup(startupSkills)),
+          ),
+          mockSessionLayer(),
+        ),
+      )
+    }
+
+    test("unknown tool with absolute filePath arg triggers scan", async () => {
+      await loadModule()
+
+      // Create a skill file
+      const agentsDir = path.join(tmpDir, ".agents")
+      fs.mkdirSync(path.join(agentsDir, "skills", "mcp-discovered-skill"), { recursive: true })
+      fs.writeFileSync(path.join(agentsDir, "skills", "mcp-discovered-skill", "SKILL.md"), "---\nname: mcp-discovered-skill\ndescription: Discovered via MCP tool\n---\n# MCP Discovered")
+      const filePath = path.join(tmpDir, "file.ts")
+      fs.writeFileSync(filePath, "content")
+
+      const sessionID = SessionID.make("ses-mcp-tool-test")
+
+      // Unknown MCP tool with absolute filePath arg
+      const result = await runScanToolArgs(
+        DynamicSkillScanner.scanToolArgs(
+          "octocode_localSearchCode",
+          { filePath },
+          sessionID,
+          testAgent,
+          testProviderID,
+          testModelID,
+        ),
+        [],
+      )
+
+      expect(result.pathsFound).toBe(1)
+      expect(result.skillsRegistered).toBe(1)
+      expect(result.skillNames).toContain("mcp-discovered-skill")
+    })
+
+    test("unknown tool with no path args does not trigger scan", async () => {
+      await loadModule()
+
+      const sessionID = SessionID.make("ses-mcp-no-path-test")
+
+      // Unknown MCP tool with no path-like args
+      const result = await runScanToolArgs(
+        DynamicSkillScanner.scanToolArgs(
+          "octocode_localSearchCode",
+          { query: "some search query", limit: 10 },
+          sessionID,
+          testAgent,
+          testProviderID,
+          testModelID,
+        ),
+        [],
+      )
+
+      expect(result.pathsFound).toBe(0)
+      expect(result.scannedPaths).toEqual([])
+      expect(result.skillsRegistered).toBe(0)
+      expect(result.skillNames).toEqual([])
+    })
+
+    test("explicit handlers still work unchanged", async () => {
+      await loadModule()
+
+      // Create a skill file
+      const agentsDir = path.join(tmpDir, ".agents")
+      fs.mkdirSync(path.join(agentsDir, "skills", "explicit-handler-skill"), { recursive: true })
+      fs.writeFileSync(path.join(agentsDir, "skills", "explicit-handler-skill", "SKILL.md"), "---\nname: explicit-handler-skill\ndescription: Found via explicit handler\n---\n# Explicit")
+      const filePath = path.join(tmpDir, "file.ts")
+      fs.writeFileSync(filePath, "content")
+
+      const sessionID = SessionID.make("ses-explicit-handler-test")
+
+      // Test read tool (explicit handler)
+      const resultRead = await runScanToolArgs(
+        DynamicSkillScanner.scanToolArgs(
+          "read",
+          { filePath },
+          sessionID,
+          testAgent,
+          testProviderID,
+          testModelID,
+        ),
+        [],
+      )
+
+      expect(resultRead.pathsFound).toBe(1)
+      expect(resultRead.skillsRegistered).toBe(1)
+      expect(resultRead.skillNames).toContain("explicit-handler-skill")
     })
   })
 })

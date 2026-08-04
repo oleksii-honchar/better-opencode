@@ -49,6 +49,9 @@ function createMockSkillService(initialSkills?: Record<string, Skill.Info>): Ski
     available: Effect.fn("MockSkill.available")(function* () {
       return Object.values(state.skills).toSorted((a, b) => a.name.localeCompare(b.name))
     }),
+    allIncludingDynamic: Effect.fn("MockSkill.allIncludingDynamic")(function* () {
+      return [...Object.values(state.skills), ...Object.values(state.dynamicSkills)]
+    }),
     registerDynamic: Effect.fn("MockSkill.registerDynamic")(function* (newSkills: Skill.Info[]) {
       let added = 0
       let skipped = 0
@@ -105,6 +108,9 @@ function createMockServiceWithTracking(initialSkills?: Record<string, Skill.Info
     }),
     available: Effect.fn("MockSkill.available")(function* () {
       return Object.values(state.skills).toSorted((a, b) => a.name.localeCompare(b.name))
+    }),
+    allIncludingDynamic: Effect.fn("MockSkill.allIncludingDynamic")(function* () {
+      return [...Object.values(state.skills), ...Object.values(state.dynamicSkills)]
     }),
     registerDynamic: Effect.fn("MockSkill.registerDynamic")(function* (newSkills: Skill.Info[]) {
       let added = 0

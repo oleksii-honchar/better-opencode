@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-01T13:22:43Z"
+updatedAt: "2026-08-04T18:11:23Z"
 tags: []
 ---
 
@@ -76,3 +76,7 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0062-doom-loop-permission-allow-default.adr.md]] — Change Default doom_loop Permission to allow (ADR-0062, status: accepted)
 - [[0063-no-processor-change-nudge-path.adr.md]] — No Processor Change for the Nudge Path (ADR-0063, status: accepted)
 - [[0064-doom-loop-config-migration.adr.md]] — Config Migration is Part of the Deliverable (User Environment) (ADR-0064, status: accepted)
+- [[0065-dynamic-skill-visibility-read-path.adr.md]] — Read-Only Visibility Path for Dynamic Skills — allIncludingDynamic (ADR-0065, status: accepted)
+- [[0066-per-session-injection-tracking.adr.md]] — Per-Session Injection Tracking in SessionMetadata (ADR-0066, status: accepted)
+- [[0067-scan-cache-ttl.adr.md]] — scanCache TTL with No Caching of Empty Results (ADR-0067, status: accepted)
+- [[0068-scan-tool-args-mcp-extension.adr.md]] — Extend scanToolArgs to MCP Tool String Args (ADR-0068, status: accepted)

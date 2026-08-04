@@ -71,7 +71,11 @@ function createMockService(initialSkills: Record<string, Skill.Info> = {}): Skil
     return { promoted: count }
   })
 
-  return { get, require, all, dirs, available, registerDynamic, promoteDynamicToStartup }
+  const allIncludingDynamic = Effect.fn("MockSkill.allIncludingDynamic")(function* () {
+    return [...Object.values(state.skills), ...Object.values(state.dynamicSkills)]
+  })
+
+  return { get, require, all, dirs, available, registerDynamic, promoteDynamicToStartup, allIncludingDynamic }
 }
 
 function mockLayer(initialSkills: Record<string, Skill.Info> = {}): Layer.Layer<Skill.Service> {
@@ -436,6 +440,68 @@ describe("Skill.Service — Dynamic Skills", () => {
       )
 
       expect(Array.isArray(result)).toBe(true)
+    })
+  })
+
+  describe("allIncludingDynamic", () => {
+    test("returns both startup and dynamic skills when both exist", async () => {
+      const startupSkill: Skill.Info = {
+        name: "startup",
+        description: "Startup skill",
+        location: "/startup/SKILL.md",
+        content: "# Startup",
+      }
+
+      const dynamicSkill: Skill.Info = {
+        name: "dynamic",
+        description: "Dynamic skill",
+        location: "/dynamic/SKILL.md",
+        content: "# Dynamic",
+      }
+
+      const result = await run(
+        Effect.gen(function* () {
+          const svc = yield* Skill.Service
+          yield* svc.registerDynamic([dynamicSkill])
+          return yield* svc.allIncludingDynamic()
+        }),
+        { startupSkill },
+      )
+
+      expect(result).toHaveLength(2)
+      expect(result.find((s) => s.name === "startup")).toBeDefined()
+      expect(result.find((s) => s.name === "dynamic")).toBeDefined()
+    })
+
+    test("returns startup-only when no dynamic skills registered", async () => {
+      const startupSkill: Skill.Info = {
+        name: "startup",
+        description: "Startup skill",
+        location: "/startup/SKILL.md",
+        content: "# Startup",
+      }
+
+      const result = await run(
+        Effect.gen(function* () {
+          const svc = yield* Skill.Service
+          return yield* svc.allIncludingDynamic()
+        }),
+        { startupSkill },
+      )
+
+      expect(result).toHaveLength(1)
+      expect(result[0].name).toBe("startup")
+    })
+
+    test("returns empty when neither startup nor dynamic skills exist", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const svc = yield* Skill.Service
+          return yield* svc.allIncludingDynamic()
+        }),
+      )
+
+      expect(result).toHaveLength(0)
     })
   })
 

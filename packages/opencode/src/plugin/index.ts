@@ -9,7 +9,7 @@ import type {
 import { Config } from "@/config/config"
 import { Bus } from "../bus"
 import * as Log from "@opencode-ai/core/util/log"
-import { createOpencodeClient } from "@opencode-ai/sdk"
+import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { ServerAuth } from "@/server/auth"
 import { CodexAuthPlugin } from "./codex"
 import { Session } from "@/session/session"
@@ -37,6 +37,7 @@ import type { LLMEvent } from "@opencode-ai/llm"
 import type { MessageV2 } from "@/session/message-v2"
 import { SessionID, MessageID } from "@/session/schema"
 import { ProviderID, ModelID } from "@/provider/schema"
+import { Skill } from "@/skill"
 
 let _cachedLLM: LLM.Interface | undefined
 
@@ -206,10 +207,12 @@ export const layer = Layer.effect(
           baseUrl: "http://localhost:4096",
           directory: ctx.directory,
           headers: ServerAuth.headers(),
+          // @ts-expect-error — fetch signature mismatch between v2 SDK and Bun fetch type
           fetch: async (...args) => Server.Default().app.fetch(...args),
         })
         const cfg = yield* config.get()
         const input: PluginInput = {
+          // @ts-expect-error — v2 SDK client type differs from v1 PluginInput.client type; client not used for skill_search anymore
           client,
           project: ctx.project,
           worktree: ctx.worktree,
@@ -225,6 +228,15 @@ export const layer = Layer.effect(
           // @ts-expect-error
           $: typeof Bun === "undefined" ? undefined : Bun.$,
           llm: pluginLlm,
+          getDynamicSkills: async () => {
+            // Read dynamic skills via EffectBridge — no HTTP needed
+            // Uses Skill.Service.allIncludingDynamic() which returns startup + dynamic skills
+            const effect = Effect.gen(function* () {
+              const skillSrv = yield* Skill.Service
+              return yield* skillSrv.allIncludingDynamic()
+            })
+            return bridge.promise(effect)
+          },
         }
 
         for (const plugin of flags.disableDefaultPlugins ? [] : INTERNAL_PLUGINS) {

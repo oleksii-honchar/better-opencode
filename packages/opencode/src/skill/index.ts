@@ -99,6 +99,7 @@ export interface Interface {
   readonly get: (name: string) => Effect.Effect<Info | undefined>
   readonly require: (name: string) => Effect.Effect<Info, NotFoundError>
   readonly all: () => Effect.Effect<Info[]>
+  readonly allIncludingDynamic: () => Effect.Effect<Info[]>
   readonly dirs: () => Effect.Effect<string[]>
   readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
   readonly registerDynamic: (newSkills: Info[]) => Effect.Effect<{ added: number; skipped: number }>
@@ -305,6 +306,11 @@ export const layer = Layer.effect(
       return Object.values(s.skills)
     })
 
+    const allIncludingDynamic = Effect.fn("Skill.allIncludingDynamic")(function* () {
+      const s = yield* InstanceState.get(state)
+      return [...Object.values(s.skills), ...Object.values(s.dynamicSkills)]
+    })
+
     const dirs = Effect.fn("Skill.dirs")(function* () {
       return (yield* InstanceState.get(discovered)).dirs
     })
@@ -351,7 +357,7 @@ export const layer = Layer.effect(
       return { promoted: count }
     })
 
-    return Service.of({ get, require, all, dirs, available, registerDynamic, promoteDynamicToStartup })
+    return Service.of({ get, require, all, allIncludingDynamic, dirs, available, registerDynamic, promoteDynamicToStartup })
   }),
 )
 

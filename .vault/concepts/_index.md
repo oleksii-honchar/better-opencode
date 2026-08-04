@@ -2,7 +2,7 @@
 type: index
 title: "Domain Concepts"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-01T13:22:43Z"
+updatedAt: "2026-08-04T18:11:23Z"
 tags: []
 ---
 
@@ -22,3 +22,4 @@ Mental models, domain vocabulary, and architectural patterns used in better-open
 - [[0008-agent-model-selection.concept.md]] — Agent Model Selection from Frontmatter: three fields (models, model, modelPreset), resolution chain, provider-model format
 - [[0009-agent-model-variant-parsing.concept.md]] — Agent Model Variant Parsing (`:variant` Syntax): inline variant extraction, precedence rules, single/multi-model propagation
 - [[0010-dynamic-context-injection.concept.md]] — Dynamic Context Injection with KV Cache Preservation: two-phase pattern (synthetic messages before compaction, system prompt after)
+- [[0011-dynamic-skill-visibility.concept.md]] — Dynamic Skill Visibility Chain (Registered but Invisible): process-wide registration vs per-session injection, plugin search blind spot, KV-cache-driven visibility gap
