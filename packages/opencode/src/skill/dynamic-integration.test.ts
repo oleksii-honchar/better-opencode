@@ -1,6 +1,6 @@
 import path from "path"
-import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { Effect, Layer } from "effect"
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test"
+import { Effect, Layer, Stream } from "effect"
 import * as fs from "fs"
 import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -11,6 +11,7 @@ import { PartID, SessionID, MessageID } from "@/session/schema"
 import { ProviderID, ModelID } from "@/provider/schema"
 import { Session } from "@/session/session"
 import { Option } from "effect"
+import { Ripgrep } from "@/file/ripgrep"
 
 // ---------------------------------------------------------------------------
 // Mock Skill.Service — tracks dynamic skills, promotion, and available()
@@ -189,6 +190,19 @@ function mockSessionLayer(): Layer.Layer<Session.Service> {
   return Layer.succeed(Session.Service, createMockSessionService())
 }
 
+// Minimal mock Ripgrep.Service for file scanning
+function createMockRipgrepService(): Ripgrep.Interface {
+  return {
+    files: () => Stream.empty,
+    tree: () => Effect.succeed(""),
+    search: () => Effect.succeed({ items: [], partial: false }),
+  }
+}
+
+function mockRipgrepLayer(): Layer.Layer<Ripgrep.Service> {
+  return Layer.succeed(Ripgrep.Service, createMockRipgrepService())
+}
+
 const dummyAgent = "test-agent"
 const dummyProviderID = ProviderID.make("test-provider")
 const dummyModelID = ModelID.make("test-model")
@@ -226,7 +240,7 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
 
   // Run with mock Skill.Service, AppFileSystem, and SessionMetadata — matches scan-parts.test.ts pattern
   function runWithMockSkill<T>(
-    program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service>,
+    program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service | Ripgrep.Service>,
     initialSkills?: Record<string, Skill.Info>,
   ): { result: Promise<T>; skillState: SkillState } {
     const { service, state } = createMockServiceWithTracking(initialSkills)
@@ -237,12 +251,15 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       Effect.provide(
         Effect.provide(
           Effect.provide(
-            Effect.provide(program, AppFileSystem.defaultLayer),
-            skillLayer,
+            Effect.provide(
+              Effect.provide(program, AppFileSystem.defaultLayer),
+              skillLayer,
+            ),
+            SessionMetadata.defaultLayer,
           ),
-          SessionMetadata.defaultLayer,
+          mockSessionLayer(),
         ),
-        mockSessionLayer(),
+        mockRipgrepLayer(),
       ),
     ).catch(() => {
       // swallow error if SessionMetadata.Service is not provided (graceful degradation)
@@ -955,6 +972,261 @@ describe("Dynamic Skill Discovery — Integration Tests", () => {
       // A grep verification is performed separately:
       // grep '"tag":"dynamic-skills"' packages/opencode/src/skill/dynamic-scanner.ts
       expect(true).toBe(true)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Task 2: End-to-end — scanToolArgs auto-loads skills (full content in injected message)
+  // ---------------------------------------------------------------------------
+
+  describe("Task 2: scanToolArgs discovers skill → injected message includes full skill content", () => {
+    test("scanToolArgs end-to-end: injected message contains <skill_content> with full content, base dir, and file list", async () => {
+      await loadModule()
+
+      // Setup: create a real repo with .agents/skills and a skill with extra files
+      const repoDir = path.join(tmpDir, "e2e-toolargs-repo")
+      const agentsDir = path.join(repoDir, ".agents")
+      const skillsDir = path.join(agentsDir, "skills")
+      const skillDir = path.join(skillsDir, "e2e-toolargs-skill")
+      fs.mkdirSync(skillDir, { recursive: true })
+
+      // Write SKILL.md with specific content we can assert on
+      const skillContent = "# E2E ToolArgs Skill\n\nThis skill should be auto-loaded via scanToolArgs."
+      const skillFrontmatter = `---\nname: e2e-toolargs-skill\ndescription: E2E test skill for scanToolArgs\n---\n\n${skillContent}`
+      fs.writeFileSync(path.join(skillDir, "SKILL.md"), skillFrontmatter)
+
+      // Write an extra file in the skill dir (ripgrep will find it)
+      fs.mkdirSync(path.join(skillDir, "scripts"), { recursive: true })
+      fs.writeFileSync(path.join(skillDir, "scripts", "helper.sh"), "#!/bin/bash\necho hello")
+
+      // Create the target file that the tool will access
+      const filePath = path.join(repoDir, "src", "file.ts")
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, "export const x = 1")
+
+      // Capture flushInjectedMessages input via spyOn
+      let capturedFlushInput: { injected: Array<{ role: string; text: string }> } | undefined
+      const flushSpy = spyOn(DynamicSkillScanner, "flushInjectedMessages")
+      flushSpy.mockImplementation((input: unknown) => {
+        capturedFlushInput = input as { injected: Array<{ role: string; text: string }> }
+        return Effect.void
+      })
+
+      try {
+        // Use real Ripgrep (Ripgrep.defaultLayer) for file scanning in skill dirs
+        const { result, skillState } = runWithMockSkill(
+          DynamicSkillScanner.scanToolArgs(
+            "read",
+            { filePath },
+            SessionID.make(sessionID),
+            dummyAgent,
+            dummyProviderID,
+            dummyModelID,
+          ),
+        )
+
+        const scanResult = await result
+
+        // Verify skill was registered
+        expect(scanResult.skillsRegistered).toBe(1)
+        expect(scanResult.skillNames).toContain("e2e-toolargs-skill")
+
+        // Verify flushInjectedMessages was called with the injected message
+        expect(capturedFlushInput).toBeDefined()
+        expect(capturedFlushInput!.injected).toHaveLength(1)
+
+        const injectedText = capturedFlushInput!.injected[0].text
+
+        // CRITICAL: Verify the injected message contains full skill content
+        expect(injectedText).toContain('<skill_content name="e2e-toolargs-skill">')
+        expect(injectedText).toContain("This skill should be auto-loaded via scanToolArgs.")
+        expect(injectedText).toContain("</skill_content>")
+
+        // Verify base directory is included
+        expect(injectedText).toContain("Base directory for this skill: file://")
+        expect(injectedText).toContain(skillDir.replace(/\\/g, "/"))
+
+        // Verify file list section exists
+        expect(injectedText).toContain("<skill_files>")
+        expect(injectedText).toContain("</skill_files>")
+
+        // Verify available_skills metadata is also included
+        expect(injectedText).toContain("<available_skills>")
+        expect(injectedText).toContain("</available_skills>")
+      } finally {
+        flushSpy.mockRestore()
+      }
+    })
+  })
+
+  describe("Task 2: scanParts discovers skill → injected message includes full skill content", () => {
+    test("scanParts end-to-end: injected message contains <skill_content> with full content, base dir, and file list", async () => {
+      await loadModule()
+
+      // Setup: create a real repo with .agents/skills
+      const repoDir = path.join(tmpDir, "e2e-parts-repo")
+      const agentsDir = path.join(repoDir, ".agents")
+      const skillsDir = path.join(agentsDir, "skills")
+      const skillDir = path.join(skillsDir, "e2e-parts-skill")
+      fs.mkdirSync(skillDir, { recursive: true })
+
+      const skillContent = "# E2E Parts Skill\n\nThis skill should be auto-loaded via scanParts."
+      const skillFrontmatter = `---\nname: e2e-parts-skill\ndescription: E2E test skill for scanParts\n---\n\n${skillContent}`
+      fs.writeFileSync(path.join(skillDir, "SKILL.md"), skillFrontmatter)
+
+      // Extra file in skill dir
+      fs.mkdirSync(path.join(skillDir, "reference"), { recursive: true })
+      fs.writeFileSync(path.join(skillDir, "reference", "guide.md"), "# Guide\n\nSome guide content.")
+
+      const filePath = path.join(repoDir, "src", "file.ts")
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, "export const y = 2")
+
+      // Capture flushInjectedMessages input via spyOn
+      let capturedFlushInput: { injected: Array<{ role: string; text: string }> } | undefined
+      const flushSpy = spyOn(DynamicSkillScanner, "flushInjectedMessages")
+      flushSpy.mockImplementation((input: unknown) => {
+        capturedFlushInput = input as { injected: Array<{ role: string; text: string }> }
+        return Effect.void
+      })
+
+      try {
+        const parts: MessageV2.Part[] = [
+          {
+            type: "text",
+            id: PartID.ascending(),
+            sessionID: SessionID.make(sessionID),
+            messageID: MessageID.make("msg-1"),
+            text: `Please look at ${filePath} and help me fix it`,
+          },
+        ]
+
+        const { result } = runWithMockSkill(
+          DynamicSkillScanner.scanParts(
+            parts,
+            SessionID.make(sessionID),
+            dummyAgent,
+            dummyProviderID,
+            dummyModelID,
+          ),
+        )
+
+        const scanResult = await result
+
+        // Verify skill was registered
+        expect(scanResult.skillsRegistered).toBe(1)
+        expect(scanResult.skillNames).toContain("e2e-parts-skill")
+
+        // Verify flushInjectedMessages was called
+        expect(capturedFlushInput).toBeDefined()
+        expect(capturedFlushInput!.injected).toHaveLength(1)
+
+        const injectedText = capturedFlushInput!.injected[0].text
+
+        // CRITICAL: Verify the injected message contains full skill content
+        expect(injectedText).toContain('<skill_content name="e2e-parts-skill">')
+        expect(injectedText).toContain("This skill should be auto-loaded via scanParts.")
+        expect(injectedText).toContain("</skill_content>")
+
+        // Verify base directory
+        expect(injectedText).toContain("Base directory for this skill: file://")
+        expect(injectedText).toContain(skillDir.replace(/\\/g, "/"))
+
+        // Verify file list section exists
+        expect(injectedText).toContain("<skill_files>")
+        expect(injectedText).toContain("</skill_files>")
+
+        // Verify available_skills
+        expect(injectedText).toContain("<available_skills>")
+      } finally {
+        flushSpy.mockRestore()
+      }
+    })
+  })
+
+  describe("Task 2: Multiple skills discovered → all skill contents injected", () => {
+    test("scanToolArgs end-to-end: multiple skills discovered → all <skill_content> blocks present in injected message", async () => {
+      await loadModule()
+
+      // Setup: create a repo with two skills
+      const repoDir = path.join(tmpDir, "e2e-multi-repo")
+      const agentsDir = path.join(repoDir, ".agents")
+      const skillsDir = path.join(agentsDir, "skills")
+
+      const skill1Dir = path.join(skillsDir, "multi-skill-alpha")
+      const skill2Dir = path.join(skillsDir, "multi-skill-beta")
+      fs.mkdirSync(skill1Dir, { recursive: true })
+      fs.mkdirSync(skill2Dir, { recursive: true })
+
+      const content1 = "# Multi Skill Alpha\n\nAlpha skill content for multi-skill test."
+      const content2 = "# Multi Skill Beta\n\nBeta skill content for multi-skill test."
+
+      fs.writeFileSync(path.join(skill1Dir, "SKILL.md"), `---\nname: multi-skill-alpha\ndescription: Alpha skill\n---\n\n${content1}`)
+      fs.writeFileSync(path.join(skill2Dir, "SKILL.md"), `---\nname: multi-skill-beta\ndescription: Beta skill\n---\n\n${content2}`)
+
+      // Extra files in each skill dir
+      fs.writeFileSync(path.join(skill1Dir, "alpha-script.sh"), "#!/bin/bash\necho alpha")
+      fs.writeFileSync(path.join(skill2Dir, "beta-script.sh"), "#!/bin/bash\necho beta")
+
+      // Create a file in the repo
+      const filePath = path.join(repoDir, "src", "file.ts")
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, "export const z = 3")
+
+      // Capture flushInjectedMessages input via spyOn
+      let capturedFlushInput: { injected: Array<{ role: string; text: string }> } | undefined
+      const flushSpy = spyOn(DynamicSkillScanner, "flushInjectedMessages")
+      flushSpy.mockImplementation((input: unknown) => {
+        capturedFlushInput = input as { injected: Array<{ role: string; text: string }> }
+        return Effect.void
+      })
+
+      try {
+        const { result } = runWithMockSkill(
+          DynamicSkillScanner.scanToolArgs(
+            "read",
+            { filePath },
+            SessionID.make(sessionID),
+            dummyAgent,
+            dummyProviderID,
+            dummyModelID,
+          ),
+        )
+
+        const scanResult = await result
+
+        // Verify both skills were registered
+        expect(scanResult.skillsRegistered).toBe(2)
+        expect(scanResult.skillNames).toContain("multi-skill-alpha")
+        expect(scanResult.skillNames).toContain("multi-skill-beta")
+
+        // Verify flushInjectedMessages was called
+        expect(capturedFlushInput).toBeDefined()
+        expect(capturedFlushInput!.injected).toHaveLength(1)
+
+        const injectedText = capturedFlushInput!.injected[0].text
+
+        // CRITICAL: Both skill content blocks must be present
+        expect(injectedText).toContain('<skill_content name="multi-skill-alpha">')
+        expect(injectedText).toContain("Alpha skill content for multi-skill test.")
+        expect(injectedText).toContain('<skill_content name="multi-skill-beta">')
+        expect(injectedText).toContain("Beta skill content for multi-skill test.")
+
+        // Both base directories
+        expect(injectedText).toContain(skill1Dir.replace(/\\/g, "/"))
+        expect(injectedText).toContain(skill2Dir.replace(/\\/g, "/"))
+
+        // Both file list sections exist
+        expect(injectedText).toContain("<skill_files>")
+        expect(injectedText).toContain("</skill_files>")
+
+        // available_skills includes both
+        expect(injectedText).toContain("<available_skills>")
+        expect(injectedText).toContain("multi-skill-alpha")
+        expect(injectedText).toContain("multi-skill-beta")
+      } finally {
+        flushSpy.mockRestore()
+      }
     })
   })
 })

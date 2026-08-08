@@ -1,6 +1,6 @@
 import path from "path"
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { Effect, Layer, Fiber } from "effect"
+import { Effect, Layer, Fiber, Stream } from "effect"
 import * as fs from "fs"
 import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -10,6 +10,7 @@ import { PartID, SessionID, MessageID } from "@/session/schema"
 import { ProviderID, ModelID } from "@/provider/schema"
 import { Session } from "@/session/session"
 import type { Session as SessionModule } from "@/session/session"
+import { Ripgrep } from "@/file/ripgrep"
 
 // ---------------------------------------------------------------------------
 // Mock Skill.Service layer (same pattern as scan-parts.test.ts)
@@ -113,6 +114,19 @@ function mockSessionLayer(): Layer.Layer<Session.Service> {
   return Layer.succeed(Session.Service, createMockSessionService())
 }
 
+// Minimal mock Ripgrep.Service for file scanning
+function createMockRipgrepService(): Ripgrep.Interface {
+  return {
+    files: () => Stream.empty,
+    tree: () => Effect.succeed(""),
+    search: () => Effect.succeed({ items: [], partial: false }),
+  }
+}
+
+function mockRipgrepLayer(): Layer.Layer<Ripgrep.Service> {
+  return Layer.succeed(Ripgrep.Service, createMockRipgrepService())
+}
+
 // Deferred import — loaded after implementation exists
 let DynamicSkillScanner: typeof import("@/skill/dynamic-scanner")
 
@@ -133,17 +147,20 @@ describe("DynamicSkillScanner.scanToolArgs", () => {
     }
   }
 
-  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service>) {
+  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service | Ripgrep.Service>) {
     return Effect.runPromise(
       Effect.provide(
         Effect.provide(
           Effect.provide(
-            Effect.provide(program, AppFileSystem.defaultLayer),
-            mockSkillLayer(),
+            Effect.provide(
+              Effect.provide(program, AppFileSystem.defaultLayer),
+              mockSkillLayer(),
+            ),
+            SessionMetadata.defaultLayer,
           ),
-          SessionMetadata.defaultLayer,
+          mockSessionLayer(),
         ),
-        mockSessionLayer(),
+        mockRipgrepLayer(),
       ),
     )
   }
@@ -382,20 +399,36 @@ describe("DynamicSkillScanner.injectDiscoveredSkills", () => {
     }
   }
 
-  function run<T>(program: Effect.Effect<T, unknown, Skill.Service | SessionMetadata.SessionMetadataService>) {
+  function run<T>(program: Effect.Effect<T, unknown, Skill.Service | SessionMetadata.SessionMetadataService | Ripgrep.Service>) {
     return Effect.runPromise(
       Effect.provide(
-        Effect.provide(program, mockSkillLayer()),
-        SessionMetadata.defaultLayer,
+        Effect.provide(
+          Effect.provide(program, mockSkillLayer()),
+          SessionMetadata.defaultLayer,
+        ),
+        mockRipgrepLayer(),
       ),
     )
   }
 
   describe("synthetic message formatting", () => {
-    test("formats skills as <available_skills> XML", async () => {
+    test("formats skills as <available_skills> XML with full content injection", async () => {
       await loadModule()
 
-      // First register some dynamic skills manually via the mock
+      // Create real skill directories so ripgrep can scan files
+      const skill1Dir = path.join(tmpDir, "test-skill-1")
+      const skill2Dir = path.join(tmpDir, "test-skill-2")
+      fs.mkdirSync(skill1Dir, { recursive: true })
+      fs.mkdirSync(skill2Dir, { recursive: true })
+      fs.writeFileSync(path.join(skill1Dir, "SKILL.md"), "---\nname: test-skill-1\ndescription: First test skill\n---\n\n# Test Skill 1\n\nThis is the full content of skill 1.")
+      fs.mkdirSync(path.join(skill1Dir, "scripts"), { recursive: true })
+      fs.writeFileSync(path.join(skill1Dir, "scripts", "helper.sh"), "#!/bin/bash\necho hello")
+      fs.writeFileSync(path.join(skill2Dir, "SKILL.md"), "---\nname: test-skill-2\ndescription: Second test skill\n---\n\n# Test Skill 2\n\nThis is the full content of skill 2.")
+      fs.writeFileSync(path.join(skill2Dir, "reference.md"), "# Reference\n\nSome reference material.")
+
+      const skill1Path = path.join(skill1Dir, "SKILL.md")
+      const skill2Path = path.join(skill2Dir, "SKILL.md")
+
       const mockSvc = createMockService()
       const mockLayer = Layer.succeed(Skill.Service, mockSvc)
 
@@ -403,14 +436,14 @@ describe("DynamicSkillScanner.injectDiscoveredSkills", () => {
         {
           name: "test-skill-1",
           description: "First test skill",
-          location: "/some/path/SKILL.md",
-          content: "# Test Skill 1",
+          location: skill1Path,
+          content: "# Test Skill 1\n\nThis is the full content of skill 1.",
         },
         {
           name: "test-skill-2",
           description: "Second test skill",
-          location: "/another/path/SKILL.md",
-          content: "# Test Skill 2",
+          location: skill2Path,
+          content: "# Test Skill 2\n\nThis is the full content of skill 2.",
         },
       ]
 
@@ -418,20 +451,54 @@ describe("DynamicSkillScanner.injectDiscoveredSkills", () => {
         Effect.provide(mockSvc.registerDynamic(skills), mockLayer),
       )
 
-      // Skills must be in injection queue — registerDynamic alone doesn't add them
       for (const skill of skills) {
         await Effect.runPromise(DynamicSkillScanner.trackSkillForInjection(skill))
       }
 
       const result = await Effect.runPromise(
         Effect.provide(
-          DynamicSkillScanner.injectDiscoveredSkills("ses-test"),
-          mockLayer,
+          Effect.provide(
+            DynamicSkillScanner.injectDiscoveredSkills("ses-test"),
+            mockLayer,
+          ),
+          Ripgrep.defaultLayer,
         ),
       )
 
       expect(result.injected).toBeGreaterThanOrEqual(1)
       expect(result.skillCount).toBeGreaterThanOrEqual(1)
+      expect(result.xml).toBeDefined()
+
+      const xml = result.xml!
+
+      // Verify <skill_content> wrapper with full content for each skill
+      expect(xml).toContain('<skill_content name="test-skill-1">')
+      expect(xml).toContain("# Test Skill 1")
+      expect(xml).toContain("This is the full content of skill 1.")
+      expect(xml).toContain("</skill_content>")
+
+      expect(xml).toContain('<skill_content name="test-skill-2">')
+      expect(xml).toContain("# Test Skill 2")
+      expect(xml).toContain("This is the full content of skill 2.")
+
+      // Verify base directory (file:// URL from pathToFileURL)
+      expect(xml).toContain(`Base directory for this skill: file://${skill1Dir.replace(/\\/g, "/")}`)
+      expect(xml).toContain(`Base directory for this skill: file://${skill2Dir.replace(/\\/g, "/")}`)
+
+      // Verify file list section
+      expect(xml).toContain("<skill_files>")
+      expect(xml).toContain("</skill_files>")
+
+      // Verify <available_skills> XML is still included
+      expect(xml).toContain("<available_skills>")
+      expect(xml).toContain("</available_skills>")
+    })
+
+    test("returns no injection when no dynamic skills exist", async () => {
+      await loadModule()
+      const result = await run(DynamicSkillScanner.injectDiscoveredSkills("ses-test"))
+      expect(result.injected).toBe(0)
+      expect(result.skillCount).toBe(0)
     })
 
     test("returns no injection when no dynamic skills exist", async () => {
@@ -470,8 +537,11 @@ describe("DynamicSkillScanner.injectDiscoveredSkills", () => {
 
       const result = await Effect.runPromise(
         Effect.provide(
-          DynamicSkillScanner.injectDiscoveredSkills("ses-test"),
-          mockLayer,
+          Effect.provide(
+            DynamicSkillScanner.injectDiscoveredSkills("ses-test"),
+            mockLayer,
+          ),
+          mockRipgrepLayer(),
         ),
       )
 
@@ -524,17 +594,20 @@ describe("DynamicSkillScanner.scanToolArgs self-injection", () => {
     }
   }
 
-  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service>) {
+  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service | Ripgrep.Service>) {
     return Effect.runPromise(
       Effect.provide(
         Effect.provide(
           Effect.provide(
-            Effect.provide(program, AppFileSystem.defaultLayer),
-            mockSkillLayer(),
+            Effect.provide(
+              Effect.provide(program, AppFileSystem.defaultLayer),
+              mockSkillLayer(),
+            ),
+            SessionMetadata.defaultLayer,
           ),
-          SessionMetadata.defaultLayer,
+          mockSessionLayer(),
         ),
-        mockSessionLayer(),
+        mockRipgrepLayer(),
       ),
     )
   }
@@ -687,14 +760,17 @@ describe("DynamicSkillScanner integration: scanToolArgs + injectDiscoveredSkills
         Effect.provide(
           Effect.provide(
             Effect.provide(
-              DynamicSkillScanner.scanToolArgs("read", args, sessionID, "test-agent", ProviderID.make("test-provider"), ModelID.make("test-model")),
-              AppFileSystem.defaultLayer,
+              Effect.provide(
+                DynamicSkillScanner.scanToolArgs("read", args, sessionID, "test-agent", ProviderID.make("test-provider"), ModelID.make("test-model")),
+                AppFileSystem.defaultLayer,
+              ),
+              mockSkillLayer(),
             ),
-            mockSkillLayer(),
+            SessionMetadata.defaultLayer,
           ),
-          SessionMetadata.defaultLayer,
+          mockSessionLayer(),
         ),
-        mockSessionLayer(),
+        mockRipgrepLayer(),
       ),
     )
 
@@ -706,10 +782,13 @@ describe("DynamicSkillScanner integration: scanToolArgs + injectDiscoveredSkills
     const afterInject = await Effect.runPromise(
       Effect.provide(
         Effect.provide(
-          DynamicSkillScanner.injectDiscoveredSkills(sessionID),
-          mockSkillLayer(),
+          Effect.provide(
+            DynamicSkillScanner.injectDiscoveredSkills(sessionID),
+            mockSkillLayer(),
+          ),
+          SessionMetadata.defaultLayer,
         ),
-        SessionMetadata.defaultLayer,
+        mockRipgrepLayer(),
       ),
     )
     expect(afterInject.injected).toBe(0)

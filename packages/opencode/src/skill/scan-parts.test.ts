@@ -1,6 +1,6 @@
 import path from "path"
 import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test"
-import { Effect, Layer, Context, Fiber, Option } from "effect"
+import { Effect, Layer, Context, Fiber, Option, Stream } from "effect"
 import * as fs from "fs"
 import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -11,6 +11,7 @@ import { PartID, SessionID, MessageID } from "@/session/schema"
 import { ProviderID, ModelID } from "@/provider/schema"
 import { Session } from "@/session/session"
 import type { Session as SessionModule } from "@/session/session"
+import { Ripgrep } from "@/file/ripgrep"
 
 // Minimal mock layer: provides Skill.Service with controlled state
 // Bypasses InstanceState complexity by directly providing the interface
@@ -112,6 +113,19 @@ function mockSessionLayer(): Layer.Layer<Session.Service> {
   return Layer.succeed(Session.Service, createMockSessionService())
 }
 
+// Minimal mock Ripgrep.Service for file scanning
+function createMockRipgrepService(): Ripgrep.Interface {
+  return {
+    files: () => Stream.empty,
+    tree: () => Effect.succeed(""),
+    search: () => Effect.succeed({ items: [], partial: false }),
+  }
+}
+
+function mockRipgrepLayer(): Layer.Layer<Ripgrep.Service> {
+  return Layer.succeed(Ripgrep.Service, createMockRipgrepService())
+}
+
 // We test the scanParts function that will be added to dynamic-scanner
 // Import is deferred until after implementation exists
 let DynamicSkillScanner: typeof import("@/skill/dynamic-scanner")
@@ -133,17 +147,20 @@ describe("DynamicSkillScanner.scanParts", () => {
     }
   }
 
-  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service>) {
+  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | Skill.Service | SessionMetadata.SessionMetadataService | Session.Service | Ripgrep.Service>) {
     return Effect.runPromise(
       Effect.provide(
         Effect.provide(
           Effect.provide(
-            Effect.provide(program, AppFileSystem.defaultLayer),
-            mockSkillLayer(),
+            Effect.provide(
+              Effect.provide(program, AppFileSystem.defaultLayer),
+              mockSkillLayer(),
+            ),
+            SessionMetadata.defaultLayer,
           ),
-          SessionMetadata.defaultLayer,
+          mockSessionLayer(),
         ),
-        mockSessionLayer(),
+        mockRipgrepLayer(),
       ),
     )
   }
@@ -674,6 +691,74 @@ describe("DynamicSkillScanner.scanParts", () => {
       expect(flushSpy).not.toHaveBeenCalled()
 
       flushSpy.mockRestore()
+    })
+
+    test("scanParts auto-load: injected message contains <skill_content> with full skill content", async () => {
+      await loadModule()
+      const { repoDir } = createTestRepo("autoload-repo", "autoload-skill")
+      const filePath = path.join(repoDir, "src", "file.ts")
+      fs.mkdirSync(path.dirname(filePath), { recursive: true })
+      fs.writeFileSync(filePath, "content")
+
+      const parts: MessageV2.Part[] = [
+        {
+          type: "text",
+          id: PartID.ascending(),
+          sessionID: SessionID.make("ses-autoload-test"),
+          messageID: MessageID.make("msg-1"),
+          text: `Check this file: ${filePath}`,
+        },
+      ]
+
+      const sessionID = SessionID.make("ses-autoload-test")
+      const agent = "test-agent"
+      const providerID = ProviderID.make("test-provider")
+      const modelID = ModelID.make("test-model")
+
+      // Capture flushInjectedMessages input to verify the injected XML
+      let capturedFlushInput: { injected: Array<{ role: string; text: string }> } | undefined
+      const flushSpy = spyOn(DynamicSkillScanner, "flushInjectedMessages")
+      flushSpy.mockImplementation((input: unknown) => {
+        capturedFlushInput = input as { injected: Array<{ role: string; text: string }> }
+        return Effect.void
+      })
+
+      try {
+        const program = Effect.gen(function* () {
+          return yield* DynamicSkillScanner.scanParts(parts, sessionID, agent, providerID, modelID)
+        })
+
+        const result = await run(program)
+
+        // Verify skill was registered
+        expect(result.pathsFound).toBeGreaterThanOrEqual(1)
+        expect(result.skillsRegistered).toBeGreaterThanOrEqual(1)
+        expect(result.skillNames).toContain("autoload-skill")
+
+        // Verify flushInjectedMessages was called with the injected message
+        expect(capturedFlushInput).toBeDefined()
+        expect(capturedFlushInput!.injected).toHaveLength(1)
+
+        const injectedText = capturedFlushInput!.injected[0].text
+
+        // CRITICAL: Verify the injected message contains full skill content
+        expect(injectedText).toContain('<skill_content name="autoload-skill">')
+        expect(injectedText).toContain("Skill content for autoload-skill")
+        expect(injectedText).toContain("</skill_content>")
+
+        // Verify base directory is included
+        expect(injectedText).toContain("Base directory for this skill: file://")
+
+        // Verify file list section exists
+        expect(injectedText).toContain("<skill_files>")
+        expect(injectedText).toContain("</skill_files>")
+
+        // Verify available_skills metadata
+        expect(injectedText).toContain("<available_skills>")
+        expect(injectedText).toContain("</available_skills>")
+      } finally {
+        flushSpy.mockRestore()
+      }
     })
   })
 })

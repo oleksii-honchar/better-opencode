@@ -1,9 +1,12 @@
 import path from "path"
-import { Effect } from "effect"
+import { pathToFileURL } from "url"
+import { Effect, Option } from "effect"
+import * as Stream from "effect/Stream"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Glob } from "@opencode-ai/core/util/glob"
 import { ConfigMarkdown } from "@/config/markdown"
 import { Skill } from "@/skill"
+import { Ripgrep } from "@/file/ripgrep"
 import * as SessionMetadata from "@/skill/session-metadata"
 import * as Log from "@opencode-ai/core/util/log"
 import { isRecord } from "@/util/record"
@@ -800,9 +803,36 @@ export const scanToolArgs = Effect.fnUntraced(function* (
 // ---------------------------------------------------------------------------
 
 /**
+ * Scan files in a skill directory using ripgrep (same logic as the skill tool).
+ * Returns a string of <file>...</file> tags, or empty string on error or missing service.
+ */
+const scanSkillFiles = Effect.fnUntraced(function* (dir: string) {
+  const rg = yield* Ripgrep.Service.pipe(
+    Effect.option,
+    Effect.flatMap((opt) => Option.isSome(opt) ? Effect.succeed(opt.value) : Effect.fail("NoRipgrep")),
+  ).pipe(
+    Effect.catch(() => Effect.succeed(undefined)),
+  )
+  if (rg === undefined) return ""
+
+  const limit = 10
+  const files = yield* rg.files({ cwd: dir, follow: false, hidden: true }).pipe(
+    Stream.filter((file) => !file.includes("SKILL.md")),
+    Stream.map((file) => path.resolve(dir, file)),
+    Stream.take(limit),
+    Stream.runCollect,
+    Effect.map((chunk) => [...chunk].map((file) => `<file>${file}</file>`).join("\n")),
+  ).pipe(
+    Effect.catch(() => Effect.succeed("")),
+  )
+  return files
+})
+
+/**
  * Format dynamically discovered skills as a synthetic user message and prepare it for injection.
- * Reads dynamicSkills from Skill.Service, formats them as <available_skills> XML using
- * the same format as Skill.fmt(list, {verbose: true}), and returns the formatted text.
+ * Embeds full skill content (from Skill.Info.content) for each discovered skill, including
+ * base directory and file list, matching the skill tool output format.
+ * Also includes <available_skills> XML for metadata visibility.
  *
  * Deduplication: only includes skills that are currently in dynamicSkills (not yet promoted).
  * The caller (tools.ts) is responsible for calling flushInjectedMessages with the result.
@@ -821,37 +851,67 @@ export const injectDiscoveredSkills = Effect.fnUntraced(function* (
       return { injected: 0, skillCount: 0 }
     }
 
-    // Format skills as <available_skills> XML with a system-reminder nudge
     const described = dynamicSkills.filter((skill) => skill.description !== undefined)
-    const nudgeNames = described.map((s) => s.name).join(", ")
-    const xml = [
-      "<system-reminder>",
-      "The following workspace-local skills were discovered from files you're working on. Consider loading them via the skill tool:",
-      `Available: ${nudgeNames}`,
-      "</system-reminder>",
+    const sorted = described.toSorted((a, b) => a.name.localeCompare(b.name))
+
+    // Build full skill content blocks (matching skill tool output format)
+    const skillContents: string[] = []
+    for (const skill of sorted) {
+      const dir = path.dirname(skill.location)
+      const base = pathToFileURL(dir).href
+
+      // Scan files in the skill directory (graceful — empty string on error)
+      const files = yield* scanSkillFiles(dir)
+
+      const skillBlock = [
+        `<skill_content name="${skill.name}">`,
+        `# Skill: ${skill.name}`,
+        "",
+        skill.content.trim(),
+        "",
+        `Base directory for this skill: ${base}`,
+        "Relative paths in this skill (e.g., scripts/, reference/) are relative to this base directory.",
+        "Note: file list is sampled.",
+        "",
+        "<skill_files>",
+        files,
+        "</skill_files>",
+        "</skill_content>",
+      ].join("\n")
+
+      skillContents.push(skillBlock)
+    }
+
+    // Build <available_skills> XML for metadata visibility
+    const availableSkillsXml = [
       "<available_skills>",
-      ...described
-        .toSorted((a, b) => a.name.localeCompare(b.name))
-        .flatMap((skill) => [
-          "  <skill>",
-          `    <name>${skill.name}</name>`,
-          `    <description>${skill.description}</description>`,
-          `    <location>${skill.location}</location>`,
-          "  </skill>",
-        ]),
+      ...sorted.flatMap((skill) => [
+        "  <skill>",
+        `    <name>${skill.name}</name>`,
+        `    <description>${skill.description}</description>`,
+        `    <location>${skill.location}</location>`,
+        "  </skill>",
+      ]),
       "</available_skills>",
+    ].join("\n")
+
+    // Combine: full content blocks + available_skills metadata
+    const xml = [
+      ...skillContents,
+      "",
+      availableSkillsXml,
     ].join("\n")
 
     log.info("synthetic-injected", {
       sessionID,
-      skillCount: described.length,
-      skillNames: described.map((s) => s.name),
+      skillCount: sorted.length,
+      skillNames: sorted.map((s) => s.name),
     })
 
     // Clear the injection queue after formatting — caller will flush the message
     clearDynamicSkillsInjectionQueue()
 
-    return { injected: 1, skillCount: described.length, xml }
+    return { injected: 1, skillCount: sorted.length, xml }
   } catch (error) {
     log.warn("injectDiscoveredSkills-error", { error: String(error) })
     return { injected: 0, skillCount: 0 }

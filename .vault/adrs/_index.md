@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-04T18:11:23Z"
+updatedAt: "2026-08-08T20:00:00Z"
 tags: []
 ---
 
@@ -80,3 +80,4 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0066-per-session-injection-tracking.adr.md]] — Per-Session Injection Tracking in SessionMetadata (ADR-0066, status: accepted)
 - [[0067-scan-cache-ttl.adr.md]] — scanCache TTL with No Caching of Empty Results (ADR-0067, status: accepted)
 - [[0068-scan-tool-args-mcp-extension.adr.md]] — Extend scanToolArgs to MCP Tool String Args (ADR-0068, status: accepted)
+- [[0069-dynamic-skill-auto-load.adr.md]] — Auto-Load Discovered Skills via Injected Skill Content (ADR-0069, status: accepted)

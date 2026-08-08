@@ -1,6 +1,6 @@
 import path from "path"
 import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test"
-import { Effect, Fiber, Layer, Option } from "effect"
+import { Effect, Fiber, Layer, Option, Stream } from "effect"
 import * as fs from "fs"
 import * as os from "os"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -10,6 +10,7 @@ import { Session } from "@/session/session"
 import { SessionID, MessageID, PartID } from "@/session/schema"
 import { ProviderID, ModelID } from "@/provider/schema"
 import type { MessageV2 } from "@/session/message-v2"
+import { Ripgrep } from "@/file/ripgrep"
 
 // Minimal mock Skill.Service for scanParts tests
 function createMockSkillServiceWithStartup(startupSkills: Skill.Info[]): Skill.Interface {
@@ -173,6 +174,19 @@ function mockSessionLayer(): Layer.Layer<Session.Service> {
   return Layer.succeed(Session.Service, createMockSessionService())
 }
 
+// Minimal mock Ripgrep.Service for file scanning
+function createMockRipgrepService(): Ripgrep.Interface {
+  return {
+    files: () => Stream.empty,
+    tree: () => Effect.succeed(""),
+    search: () => Effect.succeed({ items: [], partial: false }),
+  }
+}
+
+function mockRipgrepLayer(): Layer.Layer<Ripgrep.Service> {
+  return Layer.succeed(Ripgrep.Service, createMockRipgrepService())
+}
+
 // We test the public API of dynamic-scanner module
 // Import is deferred until after implementation exists
 let DynamicSkillScanner: typeof import("@/skill/dynamic-scanner")
@@ -194,11 +208,14 @@ describe("DynamicSkillScanner", () => {
     }
   }
 
-  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | SessionMetadata.SessionMetadataService>) {
+  function run<T>(program: Effect.Effect<T, unknown, AppFileSystem.Service | SessionMetadata.SessionMetadataService | Ripgrep.Service>) {
     return Effect.runPromise(
       Effect.provide(
-        Effect.provide(program, AppFileSystem.defaultLayer),
-        SessionMetadata.defaultLayer,
+        Effect.provide(
+          Effect.provide(program, AppFileSystem.defaultLayer),
+          SessionMetadata.defaultLayer,
+        ),
+        mockRipgrepLayer(),
       ),
     )
   }
@@ -1077,19 +1094,22 @@ describe("DynamicSkillScanner", () => {
     const testModelID = ModelID.make("test-model")
 
     function runWithSkillService<T>(
-      program: Effect.Effect<T, unknown, Skill.Service | Session.Service | AppFileSystem.Service | SessionMetadata.SessionMetadataService>,
+      program: Effect.Effect<T, unknown, Skill.Service | Session.Service | AppFileSystem.Service | SessionMetadata.SessionMetadataService | Ripgrep.Service>,
       startupSkills: Skill.Info[],
     ) {
       return Effect.runPromise(
         Effect.provide(
           Effect.provide(
             Effect.provide(
-              Effect.provide(program, AppFileSystem.defaultLayer),
-              SessionMetadata.defaultLayer,
+              Effect.provide(
+                Effect.provide(program, AppFileSystem.defaultLayer),
+                SessionMetadata.defaultLayer,
+              ),
+              Layer.succeed(Skill.Service, createMockSkillServiceWithStartup(startupSkills)),
             ),
-            Layer.succeed(Skill.Service, createMockSkillServiceWithStartup(startupSkills)),
+            mockSessionLayer(),
           ),
-          mockSessionLayer(),
+          mockRipgrepLayer(),
         ),
       )
     }
@@ -1117,14 +1137,17 @@ describe("DynamicSkillScanner", () => {
           Effect.provide(
             Effect.provide(
               Effect.provide(
-                DynamicSkillScanner.scanParts(parts as import("@/session/message-v2").Part[], sessionA, testAgent, testProviderID, testModelID),
-                AppFileSystem.defaultLayer,
+                Effect.provide(
+                  DynamicSkillScanner.scanParts(parts as import("@/session/message-v2").Part[], sessionA, testAgent, testProviderID, testModelID),
+                  AppFileSystem.defaultLayer,
+                ),
+                SessionMetadata.defaultLayer,
               ),
-              SessionMetadata.defaultLayer,
+              Layer.succeed(Skill.Service, sharedService),
             ),
-            Layer.succeed(Skill.Service, sharedService),
+            mockSessionLayer(),
           ),
-          mockSessionLayer(),
+          mockRipgrepLayer(),
         ),
       )
       expect(resultA.skillsRegistered).toBe(1)
@@ -1136,14 +1159,17 @@ describe("DynamicSkillScanner", () => {
           Effect.provide(
             Effect.provide(
               Effect.provide(
-                DynamicSkillScanner.scanParts(parts as import("@/session/message-v2").Part[], sessionB, testAgent, testProviderID, testModelID),
-                AppFileSystem.defaultLayer,
+                Effect.provide(
+                  DynamicSkillScanner.scanParts(parts as import("@/session/message-v2").Part[], sessionB, testAgent, testProviderID, testModelID),
+                  AppFileSystem.defaultLayer,
+                ),
+                SessionMetadata.defaultLayer,
               ),
-              SessionMetadata.defaultLayer,
+              Layer.succeed(Skill.Service, sharedService),
             ),
-            Layer.succeed(Skill.Service, sharedService),
+            mockSessionLayer(),
           ),
-          mockSessionLayer(),
+          mockRipgrepLayer(),
         ),
       )
       // Skill already registered → added=0, but should still trigger injection for session B
@@ -1246,19 +1272,22 @@ describe("DynamicSkillScanner", () => {
     const testModelID = ModelID.make("test-model")
 
     function runScanToolArgs<T>(
-      program: Effect.Effect<T, unknown, Skill.Service | Session.Service | AppFileSystem.Service | SessionMetadata.SessionMetadataService>,
+      program: Effect.Effect<T, unknown, Skill.Service | Session.Service | AppFileSystem.Service | SessionMetadata.SessionMetadataService | Ripgrep.Service>,
       startupSkills: Skill.Info[],
     ) {
       return Effect.runPromise(
         Effect.provide(
           Effect.provide(
             Effect.provide(
-              Effect.provide(program, AppFileSystem.defaultLayer),
-              SessionMetadata.defaultLayer,
+              Effect.provide(
+                Effect.provide(program, AppFileSystem.defaultLayer),
+                SessionMetadata.defaultLayer,
+              ),
+              Layer.succeed(Skill.Service, createMockSkillServiceWithStartup(startupSkills)),
             ),
-            Layer.succeed(Skill.Service, createMockSkillServiceWithStartup(startupSkills)),
+            mockSessionLayer(),
           ),
-          mockSessionLayer(),
+          mockRipgrepLayer(),
         ),
       )
     }
