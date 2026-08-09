@@ -693,12 +693,15 @@ describe("DynamicSkillScanner", () => {
           Effect.provide(
             Effect.provide(
               Effect.provide(
-                Effect.provide(program, AppFileSystem.defaultLayer),
-                mockSkillLayer(),
+                Effect.provide(
+                  Effect.provide(program, AppFileSystem.defaultLayer),
+                  mockSkillLayer(),
+                ),
+                SessionMetadata.defaultLayer,
               ),
-              SessionMetadata.defaultLayer,
+              mockSessionLayer(),
             ),
-            mockSessionLayer(),
+            mockRipgrepLayer(),
           ),
         )
         const elapsed = Date.now() - startTime
