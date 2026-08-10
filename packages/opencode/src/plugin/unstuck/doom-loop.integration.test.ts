@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { LanguageModelV3, LanguageModelV3CallOptions, LanguageModelV3StreamPart, LanguageModelV3StreamResult } from "@ai-sdk/provider"
 import { Permission } from "@/permission"
-import { LoopDetectorImpl } from "./loop-detector"
 import { wrapWithLoopDetection } from "./wrapper"
 import { defaultConfig, type UnstuckConfig } from "./config"
 import { LoopDetectedError } from "./error"
@@ -131,8 +130,7 @@ function createDoomLoopModel(loopChunks: LanguageModelV3StreamPart[]): {
 describe("doom_loop integration — nudge instead of Permission.DeniedError", () => {
   test("3× identical tool calls → nudge injected, stream restarted, no LoopDetectedError escapes", async () => {
     const { model, callCount, receivedPrompt } = createDoomLoopModel(doomLoopChunks())
-    const detector = new LoopDetectorImpl()
-    const wrapped = wrapWithLoopDetection(model, detector, doomConfig)
+    const wrapped = wrapWithLoopDetection(model, doomConfig)
 
     // If LoopDetectedError escaped after the nudge, collectStream would reject.
     let escaped: unknown = undefined
@@ -196,8 +194,7 @@ describe("doom_loop integration — nudge instead of Permission.DeniedError", ()
 
   test("no raw permission error (DeniedError) surfaces for the doom-loop sequence", async () => {
     const { model } = createDoomLoopModel(doomLoopChunks())
-    const detector = new LoopDetectorImpl()
-    const wrapped = wrapWithLoopDetection(model, detector, doomConfig)
+    const wrapped = wrapWithLoopDetection(model, doomConfig)
 
     let escaped: unknown = undefined
     try {

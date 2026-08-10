@@ -766,9 +766,19 @@ describe("EvidenceAccumulator — self_diagnosis_loop", () => {
     expect(acc.countByType("step_loop")).toBe(0)
   })
 
-  test("isThresholdMet checks selfDiagnosis threshold", () => {
+  test("isThresholdMet returns false with single self_diagnosis_loop at default threshold 2", () => {
     const acc = new EvidenceAccumulatorImpl()
     acc.add({ type: "self_diagnosis_loop", threshold: 1 }, 1)
+
+    // defaultConfig has selfDiagnosis: 2, so 1 record should NOT meet threshold
+    const result = acc.isThresholdMet(defaultConfig)
+    expect(result.met).toBe(false)
+  })
+
+  test("isThresholdMet returns true with two self_diagnosis_loop records at default threshold 2", () => {
+    const acc = new EvidenceAccumulatorImpl()
+    acc.add({ type: "self_diagnosis_loop", threshold: 1 }, 1)
+    acc.add({ type: "self_diagnosis_loop", threshold: 1 }, 2)
 
     const result = acc.isThresholdMet(defaultConfig)
     expect(result.met).toBe(true)
@@ -803,6 +813,87 @@ describe("LoopDetector — provider-executed tools", () => {
     }
 
     expect(detector.getState().currentToolsCount).toBe(0)
+  })
+})
+
+describe("Self-diagnosis threshold-2 behavior (ADR-0002)", () => {
+  function makeSelfDiagnosisStep(detector: LoopDetectorImpl, config: UnstuckConfig) {
+    detector.consumeChunk(
+      { type: "reasoning-delta", text: "I think I'm stuck in a loop here. Let me try something different." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-0", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+    return detector.finalizeStep(config, "tool-calls")
+  }
+
+  test("single self-diagnosis phrase does NOT trigger intervention at threshold 2", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+    }
+
+    const acc = new EvidenceAccumulatorImpl()
+
+    // One step with self-diagnosis phrase
+    const detection = makeSelfDiagnosisStep(detector, config)
+    expect(detection).toBeDefined()
+    expect(detection?.type).toBe("self_diagnosis_loop")
+
+    // Accumulate the detection
+    if (detection) {
+      acc.add(detection, 1, config)
+    }
+
+    // Threshold 2 not met with only 1 detection
+    const result = acc.isThresholdMet(config)
+    expect(result.met).toBe(false)
+  })
+
+  test("two self-diagnosis phrases across two steps DO trigger intervention at threshold 2", () => {
+    const detector = createDetector()
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      loopThreshold: 10,
+      detectToolOnlyLoops: false,
+      enableSelfDiagnosisDetection: true,
+    }
+
+    const acc = new EvidenceAccumulatorImpl()
+
+    // First step with self-diagnosis phrase
+    const detection1 = makeSelfDiagnosisStep(detector, config)
+    expect(detection1).toBeDefined()
+    expect(detection1?.type).toBe("self_diagnosis_loop")
+    if (detection1) {
+      acc.add(detection1, 1, config)
+    }
+
+    // Second step with a different self-diagnosis phrase
+    detector.consumeChunk(
+      { type: "reasoning-delta", text: "I cannot progress further with this approach." },
+      config,
+    )
+    detector.consumeChunk(
+      { type: "tool-input-end", id: "call-1", toolName: "ReadFile", input: { path: "/foo" } },
+      config,
+    )
+    const detection2 = detector.finalizeStep(config, "tool-calls")
+    expect(detection2).toBeDefined()
+    expect(detection2?.type).toBe("self_diagnosis_loop")
+    if (detection2) {
+      acc.add(detection2, 2, config)
+    }
+
+    // Threshold 2 met with 2 detections — intervention triggered
+    const result = acc.isThresholdMet(config)
+    expect(result.met).toBe(true)
+    expect((result as { met: true; type: string }).type).toBe("self_diagnosis_loop")
   })
 })
 

@@ -2,13 +2,14 @@
 type: concept
 title: "Unstuck Loop Detection System"
 createdAt: "2026-06-21T00:00:00Z"
-updatedAt: "2026-08-01T13:22:43Z"
+updatedAt: "2026-08-10T18:45:00Z"
 tags: [unstuck, loop-detection, fingerprint, nudge-and-prune, xml-repetition, partial-tags, model-thresholds, doom-loop]
 see_also:
   - "../specifications/0004-unstuck-loop-detection.spec.md"
   - "../specifications/0009-xml-repetition-detection.spec.md"
   - "../specifications/0010-enhanced-xml-detection.spec.md"
   - "../specifications/0012-doom-loop-nudge.spec.md"
+  - "../specifications/0015-fix-false-self-diagnosis-loop.spec.md"
   - "../adrs/0016-clear-detector-history.adr.md"
   - "../adrs/0020-detector-state-sharing.adr.md"
   - "../adrs/0051-xml-repetition-detection.adr.md"
@@ -18,6 +19,8 @@ see_also:
   - "../adrs/0062-doom-loop-permission-allow-default.adr.md"
   - "../adrs/0063-no-processor-change-nudge-path.adr.md"
   - "../adrs/0064-doom-loop-config-migration.adr.md"
+  - "../adrs/0072-per-stream-loop-detector.adr.md"
+  - "../adrs/0073-self-diagnosis-threshold-2.adr.md"
 ---
 
 # CONCEPT-0007: Unstuck Loop Detection System
@@ -39,10 +42,11 @@ LLM agents frequently enter behavioral loops (e.g., 697+ iterations of the same 
 - **Architecture:** Two-level — `LoopDetectorImpl` (detection) + `wrapWithLoopDetection` (stream wrapper)
 - **Detection types:** 7 types — `step_loop` (identical step fingerprints), `tool_loop` (identical tools with gap tolerance), `sentence_loop` (periodic sentence repetition within a step), `self_diagnosis_loop` (model acknowledges being stuck), `pattern_loop` (period-2 alternating pattern), `xml_repetition` (repeating XML tags within tool input stream, including partial/prefix tags), `doom_loop` (3× same tool + exact same input within current step)
 - **Fingerprinting:** FNV-1a hash of normalized thinking text + tool signatures → step fingerprint
-- **Evidence accumulation:** Multiple detection events must be accumulated before intervention (thresholds: 2 for step/tool/pattern, 1 for self-diagnosis/sentence/doom_loop)
+- **Evidence accumulation:** Multiple detection events must be accumulated before intervention (thresholds: 2 for step/tool/pattern/self-diagnosis, 1 for sentence/doom_loop)
 - **Intervention strategies:** `nudge-and-prune` (inject user message + prune looping messages), `abort` (throw), `warn` (log and rethrow)
-- **Cross-stream history:** `detector.clear()` removed from clean-completion path; history preserved across LLM call streams (ADR-0016), capped at `historySize: 10`
-- **User message reset:** `detector.clear()`, `evidence.clear()`, `nudgeCount=0` on new user message (detects by counting user messages in prompt)
+- **Per-stream lifecycle (ADR-0072):** the detector is scoped to ONE `doStream` call — `new LoopDetectorImpl()` inside `doStream` (wrapper.ts:238); the wrapped function remains cached per model in `s.models`; each agent response starts with a fresh detector, so no cross-stream history, evidence, or nudgeCount accumulation (reverses the ADR-0020 global-singleton design)
+- **No user-message reset needed:** the fragile `userMessageCount > lastUserMessageCount` reset was removed — each `doStream` starts clean; `detector.clear()` / `evidence.clear()` retained only on the nudge path (a nudge restarts the SAME doStream)
+- **Self-diagnosis threshold 2 (ADR-0073):** `evidenceThresholds.selfDiagnosis: 2` — a single natural-language phrase ("I cannot proceed") no longer triggers intervention; two self-diagnosis detections within one response do (supersedes ADR-0019 threshold 1)
 
 ### Doom Loop Detection (ADR-0060…0064, spec 0012)
 

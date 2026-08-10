@@ -2,7 +2,7 @@
 type: index
 title: "Specifications"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-10T09:58:08Z"
+updatedAt: "2026-08-10T18:45:00Z"
 tags: []
 ---
 
@@ -26,3 +26,4 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 - [[0012-doom-loop-nudge.spec.md]] — doom_loop → Unstuck Nudge (Allow-then-Catch) (kind: feature, status: completed)
 - [[0013-dynamic-skill-loading-fix.spec.md]] — Dynamic Skill Loading Fix — Visibility, Per-Session Injection, Cache TTL (kind: feature, status: implemented)
 - [[0014-rules-inject-position.spec.md]] — rules-inject: Opt-in "after persona" Injection Position (kind: feature, status: completed)
+- [[0015-fix-false-self-diagnosis-loop.spec.md]] — Fix False self_diagnosis_loop Triggers (kind: feature, status: completed)

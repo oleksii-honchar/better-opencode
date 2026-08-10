@@ -3,7 +3,7 @@ import * as Log from "@opencode-ai/core/util/log"
 import type { UnstuckConfig } from "./config"
 import { LoopDetectedError, type LoopDetectedInfo } from "./error"
 import type { LoopDetector, StreamChunk } from "./loop-detector"
-import { EvidenceAccumulatorImpl } from "./loop-detector"
+import { LoopDetectorImpl, EvidenceAccumulatorImpl } from "./loop-detector"
 
 const log = Log.create({ service: "unstuck-plugin" })
 
@@ -204,13 +204,8 @@ class DetectedStreamResult {
 
 export function wrapWithLoopDetection(
   model: LanguageModelV3,
-  detector: LoopDetector,
   config: UnstuckConfig,
 ): LanguageModelV3 {
-  let nudgeCount = 0
-  const evidence = new EvidenceAccumulatorImpl()
-  let lastUserMessageCount = 0
-
   log.debug("wrapWithLoopDetection", {
     modelId: model.modelId,
     provider: model.provider,
@@ -239,17 +234,10 @@ export function wrapWithLoopDetection(
         return model.doStream(args as any) as any
       }
 
-      // CRITICAL: Reset detector for NEW user messages
-      const messages = args.prompt as Message[]
-      const userMessageCount = messages.filter((m) => m.role === "user" && !(m as any)._unstuckNudge).length
-      if (userMessageCount > lastUserMessageCount) {
-        // New user message detected — clear all state for fresh start
-        detector.clear()
-        evidence.clear()
-        nudgeCount = 0
-        lastUserMessageCount = userMessageCount
-        log.debug("new user message detected — detector, evidence, and nudgeCount cleared", { userMessageCount })
-      }
+      // Per-stream isolation: fresh detector, evidence, and nudgeCount for each doStream call
+      const detector = new LoopDetectorImpl()
+      const evidence = new EvidenceAccumulatorImpl()
+      let nudgeCount = 0
 
       async function* wrappedStream(): AsyncGenerator<LanguageModelV3StreamPart, void, unknown> {
         let chunkCount = 0
@@ -261,9 +249,8 @@ export function wrapWithLoopDetection(
               chunkCount++
               yield chunk
             }
-            // Clean finish — clear evidence (per-episode) but preserve detector history (cross-stream)
-            evidence.clear()
-            log.debug("stream completed normally, evidence cleared", { chunkCount })
+            // Clean finish — evidence and detector die with doStream, no explicit clear needed
+            log.debug("stream completed normally", { chunkCount })
             return
           } catch (error) {
             if (!(error instanceof LoopDetectedError)) throw error

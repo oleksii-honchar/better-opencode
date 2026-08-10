@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-10T09:58:08Z"
+updatedAt: "2026-08-10T18:45:00Z"
 tags: []
 ---
 
@@ -30,8 +30,8 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0016-clear-detector-history.adr.md]] — Stop Clearing Detector History on Clean Stream Completion (ADR-1, status: accepted)
 - [[0017-tool-detection-gap-tolerance.adr.md]] — Add Tool-Only Detection with Gap Tolerance (ADR-2, status: accepted)
 - [[0018-alternating-pattern-detection.adr.md]] — Add Period-2 Alternating Pattern Detection (ADR-3, status: accepted)
-- [[0019-self-diagnosis-detection.adr.md]] — Self-Diagnosis Detection with Immediate Intervention (ADR-4, status: accepted)
-- [[0020-detector-state-sharing.adr.md]] — Detector State Sharing — No Per-Thread Isolation Needed (ADR-5, status: accepted)
+- [[0019-self-diagnosis-detection.adr.md]] — Self-Diagnosis Detection with Immediate Intervention (ADR-4, status: superseded by ADR-0073)
+- [[0020-detector-state-sharing.adr.md]] — Detector State Sharing — No Per-Thread Isolation Needed (ADR-5, status: deprecated → superseded by ADR-0072)
 - [[0021-loop-reflection-in-nudges.adr.md]] — Agent-Persona-Coach Loop Reflection in Existing Nudges (ADR-6, status: accepted)
 - [[0022-multi-provider-model-field.adr.md]] — Add models: Field to Agent Configuration (ADR-0022, status: accepted)
 - [[0023-resolution-priority.adr.md]] — Resolution Priority — models Before model (ADR-0023, status: accepted)
@@ -83,3 +83,5 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0069-dynamic-skill-auto-load.adr.md]] — Auto-Load Discovered Skills via Injected Skill Content (ADR-0069, status: accepted)
 - [[0070-rules-inject-position-config.adr.md]] — Position Config as `position: "before" | "after-persona"` Enum (ADR-0070, status: accepted)
 - [[0071-rules-inject-after-persona-placement.adr.md]] — "After Persona" = Between Persona and Env Block, Split on Env Marker (ADR-0071, status: accepted)
+- [[0072-per-stream-loop-detector.adr.md]] — Per-Stream Loop Detector Instead of Global Singleton (ADR-0072, status: accepted, supersedes ADR-0020)
+- [[0073-self-diagnosis-threshold-2.adr.md]] — Increase Self-Diagnosis Evidence Threshold to 2 (ADR-0073, status: accepted, supersedes ADR-0019)

@@ -2,7 +2,7 @@
 type: index
 title: "Atomic Memories"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-10T09:58:08Z"
+updatedAt: "2026-08-10T18:45:00Z"
 tags: []
 ---
 
@@ -22,7 +22,7 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0008-forked-effect-hang-race-gotcha.memory.md]] — Forked Dynamic Skill Scan Hung and Raced (Fixed by Going Synchronous)
 - [[0009-doom-loop-fingerprint-fnv1a.memory.md]] — Doom Loop Input Fingerprint Uses fnv1a, Not sha256
 - [[0010-doom-loop-missing-input-run.memory.md]] — Missing-Input Call Does Not Reset Doom Loop Run
-- [[0011-unstuck-test-default-drift.memory.md]] — Unstuck Tests Drift from Defaults (xml guard + selfDiagnosis)
+- [[0011-unstuck-test-default-drift.memory.md]] — Unstuck Tests Drift from Defaults (xml guard; selfDiagnosis drift resolved by ADR-0073)
 - [[0012-cross-session-injection-bleed.memory.md]] — Cross-Session Injection Bleed — registerDynamic is Process-Wide
 - [[0013-scan-cache-empty-poison.memory.md]] — scanCache Poisoned Empty — Timestamp Never Read
 - [[0014-env-marker-persona-boundary.memory.md]] — Env-Block Marker "You are powered by the model named" is the Deterministic Persona Boundary

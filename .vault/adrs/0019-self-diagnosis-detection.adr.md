@@ -2,19 +2,31 @@
 type: adr
 title: "Self-Diagnosis Detection with Immediate Intervention"
 id: 4
-status: accepted
+status: superseded
 createdAt: "2026-06-21T00:00:00Z"
+updatedAt: "2026-08-10T18:45:00Z"
 tags: [unstuck, loop-detection, self-diagnosis]
+supersedes: []
+superseded_by: [ADR-0073]
+deprecated:
+  date: 2026-08-10
+  reason: "Self-diagnosis evidence threshold raised from 1 to 2 to eliminate natural-language false positives"
+  superseded_by: ADR-0073
 see_also:
   - "0016-clear-detector-history.adr.md"
+  - "0073-self-diagnosis-threshold-2.adr.md"
   - "../specifications/0004-unstuck-loop-detection.spec.md"
 ---
 
 # ADR-0019: Self-Diagnosis Detection with Immediate Intervention
 
 **ADR ID:** ADR-4
-**Status:** accepted
+**Status:** superseded by ADR-0073
 **Date:** 2026-06-21
+
+> ## Superseded
+>
+> **2026-08-10:** The "single match triggers" decision (threshold 1) is **superseded** by [[0073-self-diagnosis-threshold-2.adr.md]] (ADR-0073). During normal conversation the model naturally uses phrases like "I cannot proceed" — one match caused false `self_diagnosis_loop` triggers. The evidence threshold is now 2. Keep this ADR as the historical record of the original detection decision (697-run evidence remains relevant context).
 
 ## Context
 
