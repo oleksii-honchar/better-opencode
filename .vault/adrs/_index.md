@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-08T20:00:00Z"
+updatedAt: "2026-08-10T09:58:08Z"
 tags: []
 ---
 
@@ -81,3 +81,5 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0067-scan-cache-ttl.adr.md]] — scanCache TTL with No Caching of Empty Results (ADR-0067, status: accepted)
 - [[0068-scan-tool-args-mcp-extension.adr.md]] — Extend scanToolArgs to MCP Tool String Args (ADR-0068, status: accepted)
 - [[0069-dynamic-skill-auto-load.adr.md]] — Auto-Load Discovered Skills via Injected Skill Content (ADR-0069, status: accepted)
+- [[0070-rules-inject-position-config.adr.md]] — Position Config as `position: "before" | "after-persona"` Enum (ADR-0070, status: accepted)
+- [[0071-rules-inject-after-persona-placement.adr.md]] — "After Persona" = Between Persona and Env Block, Split on Env Marker (ADR-0071, status: accepted)

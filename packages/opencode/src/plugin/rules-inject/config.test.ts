@@ -10,10 +10,15 @@ describe("RulesInjectConfig — defaults", () => {
     expect(defaultConfig.alwaysApplyFolder).toBe("~/.rules/always-apply")
   })
 
+  test('defaultConfig.position === "before"', () => {
+    expect(defaultConfig.position).toBe("before")
+  })
+
   test("defaultConfig satisfies the RulesInjectConfig interface", () => {
     const config: RulesInjectConfig = defaultConfig
     expect(config.enabled).toBe(true)
     expect(config.alwaysApplyFolder).toBe("~/.rules/always-apply")
+    expect(config.position).toBe("before")
   })
 })
 
@@ -23,6 +28,7 @@ describe("RulesInjectConfig — mergeConfig", () => {
     expect(merged).toEqual(defaultConfig)
     expect(merged.enabled).toBe(true)
     expect(merged.alwaysApplyFolder).toBe("~/.rules/always-apply")
+    expect(merged.position).toBe("before")
   })
 
   test("mergeConfig({ enabled: false }) flips only enabled", () => {
@@ -37,6 +43,13 @@ describe("RulesInjectConfig — mergeConfig", () => {
     expect(merged.alwaysApplyFolder).toBe("~/.rules/olho/always-apply")
   })
 
+  test('mergeConfig({ position: "after-persona" }) overrides only position', () => {
+    const merged = mergeConfig({ position: "after-persona" })
+    expect(merged.position).toBe("after-persona")
+    expect(merged.enabled).toBe(true)
+    expect(merged.alwaysApplyFolder).toBe("~/.rules/always-apply")
+  })
+
   test("mergeConfig overrides both fields at once", () => {
     const merged = mergeConfig({
       enabled: false,
@@ -47,8 +60,9 @@ describe("RulesInjectConfig — mergeConfig", () => {
   })
 
   test("mergeConfig does not mutate defaultConfig", () => {
-    mergeConfig({ enabled: false, alwaysApplyFolder: "~/.rules/olho/always-apply" })
+    mergeConfig({ enabled: false, alwaysApplyFolder: "~/.rules/olho/always-apply", position: "after-persona" })
     expect(defaultConfig.enabled).toBe(true)
     expect(defaultConfig.alwaysApplyFolder).toBe("~/.rules/always-apply")
+    expect(defaultConfig.position).toBe("before")
   })
 })

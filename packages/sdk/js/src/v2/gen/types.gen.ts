@@ -1376,6 +1376,7 @@ export type Config = {
   rulesInject?: {
     enabled?: boolean
     alwaysApplyFolder?: string
+    position?: "before" | "after-persona"
   }
 }
 

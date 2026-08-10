@@ -53,7 +53,11 @@ export async function loadRules(folder: string): Promise<string> {
 export async function RulesInjectPlugin(_input: PluginInput): Promise<Hooks> {
   return {
     config: async (cfg) => {
-      const partial = (cfg as { rulesInject?: { enabled?: boolean; alwaysApplyFolder?: string } }).rulesInject ?? {}
+      const partial = (
+        cfg as {
+          rulesInject?: { enabled?: boolean; alwaysApplyFolder?: string; position?: "before" | "after-persona" }
+        }
+      ).rulesInject ?? {}
       activeConfig = mergeConfig(partial)
     },
     "experimental.chat.system.transform": async (input, output) => {
@@ -78,7 +82,18 @@ export async function RulesInjectPlugin(_input: PluginInput): Promise<Hooks> {
         return
       }
 
-      output.system[0] = rules + "\n\n" + output.system[0]
+      if (activeConfig.position === "after-persona") {
+        const marker = "You are powered by the model named"
+        const idx = output.system[0].indexOf(marker)
+        if (idx !== -1) {
+          output.system[0] = output.system[0].slice(0, idx) + rules + "\n\n" + output.system[0].slice(idx)
+        } else {
+          log.debug("env marker not found; falling back to prepend")
+          output.system[0] = rules + "\n\n" + output.system[0]
+        }
+      } else {
+        output.system[0] = rules + "\n\n" + output.system[0]
+      }
       injected.add(input.sessionID)
     },
   }

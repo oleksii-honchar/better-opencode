@@ -121,6 +121,50 @@ describe("RulesInjectPlugin — transform hook", () => {
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 
+  test("after-persona inserts rules between persona text and env marker", async () => {
+    resetForTesting()
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rules-test-"))
+    fs.writeFileSync(path.join(tmp, "always.mdc"), "ALWAYS RULE\n")
+
+    const hooks = await RulesInjectPlugin({} as any)
+    hooks.config?.({ rulesInject: { alwaysApplyFolder: tmp, position: "after-persona" } } as any)
+
+    const persona = "persona text\n\n"
+    const envMarker = "You are powered by the model named test-model"
+    const system = [persona + envMarker]
+    await hooks["experimental.chat.system.transform"]?.(makeTransformInput("session-after-persona"), { system })
+
+    const rules = "Instructions from: " + path.join(tmp, "always.mdc") + "\nALWAYS RULE\n"
+
+    expect(system).toHaveLength(1)
+    expect(system[0]).toBe(persona + rules + "\n\n" + envMarker)
+    expect(system[0]).toStartWith(persona)
+    expect(system[0]).toContain(rules)
+    expect(system[0].indexOf(envMarker)).toBeGreaterThan(system[0].indexOf(rules))
+
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  test("after-persona falls back to prepend when env marker absent", async () => {
+    resetForTesting()
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rules-test-"))
+    fs.writeFileSync(path.join(tmp, "always.mdc"), "ALWAYS RULE\n")
+
+    const hooks = await RulesInjectPlugin({} as any)
+    hooks.config?.({ rulesInject: { alwaysApplyFolder: tmp, position: "after-persona" } } as any)
+
+    const original = "original system prompt"
+    const system = [original]
+    await hooks["experimental.chat.system.transform"]?.(makeTransformInput("session-fallback"), { system })
+
+    const rules = "Instructions from: " + path.join(tmp, "always.mdc") + "\nALWAYS RULE\n"
+
+    expect(system).toHaveLength(1)
+    expect(system[0]).toBe(rules + "\n\n" + original)
+
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
   test("dedupes per sessionID — second call for same session no-ops", async () => {
     resetForTesting()
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rules-test-"))

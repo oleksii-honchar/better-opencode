@@ -47,6 +47,7 @@ The plugin loads `.mdc` files from a configurable folder and injects them into t
 |-----|------|---------|-------------|
 | `enabled` | boolean | `true` | Master switch. When `false`, the plugin skips injection entirely. Set to `false` to disable rule injection without removing the config. |
 | `alwaysApplyFolder` | string | `"~/.rules/always-apply"` | Folder path to scan for `.mdc` rule files. The `~` is expanded to the user's home directory. Files are sorted alphabetically by filename. If the folder does not exist or is unreadable, the plugin logs a warning and no-ops (no rules injected, no error thrown — see ADR-003). |
+| `position` | `"before" \| "after-persona"` | `"before"` | Where to inject rules relative to the agent persona block. `"before"` prepends rules to the start of the system prompt (default, backward compatible). `"after-persona"` inserts rules between the persona block and the env block — the plugin splits `system[0]` at the first occurrence of the env marker `"You are powered by the model named"` and places rules directly before it. If the marker is not found, it falls back to prepend with a debug log (see Behavior Notes). |
 
 ### Configuration via opencode config
 
@@ -72,6 +73,20 @@ Override for olho users (use the olho-specific rules folder):
 }
 ```
 
+Inject rules after the agent persona block (olho users):
+
+```json
+{
+  "rulesInject": {
+    "enabled": true,
+    "alwaysApplyFolder": "~/.rules/olho/always-apply",
+    "position": "after-persona"
+  }
+}
+```
+
+With `"position": "after-persona"`, rules land between the agent persona block and the env block (`"You are powered by the model named ..."`), instead of before the persona.
+
 Disable entirely:
 
 ```json
@@ -85,6 +100,8 @@ Disable entirely:
 ### Behavior Notes
 
 **Single system element:** All loaded rules are concatenated and prepended to the first system prompt element (`system[0]`). This matches the Qwen3 chat template, which expects exactly one system message. The plugin does not create additional system elements.
+
+**Placement (`position`):** With the default `"before"`, rules are prepended to `system[0]` as described above. With `"after-persona"`, the plugin finds the first occurrence of the env marker `"You are powered by the model named"` in `system[0]` and inserts `rules + "\n\n"` immediately BEFORE the marker — placing rules between the agent persona block and the env block. The env block is generated deterministically by the runtime (session/system.ts), so the marker is a stable persona boundary. If the marker is not found (unusual paths), the plugin logs a debug message and falls back to prepend, so rules are still injected. Placement is per-session like all injection; the `injected` dedupe set applies regardless of position.
 
 **Per-session deduplication:** Rules are injected only once per `sessionID`. The plugin maintains an in-memory `Set<string>` of session IDs that have already received injection. After compaction, when the system prompt is rebuilt, the deduplication set prevents re-injection.
 

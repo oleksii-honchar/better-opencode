@@ -229,6 +229,33 @@ describe("Config Schema — rulesInject", () => {
     expect(parsed.rulesInject?.enabled).toBeUndefined()
     expect(parsed.rulesInject?.alwaysApplyFolder).toBeUndefined()
   })
+
+  test("rulesInject.position 'after-persona' decodes successfully", () => {
+    const parsed = Schema.decodeSync(Info)({
+      rulesInject: { position: "after-persona" },
+    })
+    expect(parsed.rulesInject?.position).toBe("after-persona")
+  })
+
+  test("rulesInject.position 'before' decodes successfully", () => {
+    const parsed = Schema.decodeSync(Info)({
+      rulesInject: { position: "before" },
+    })
+    expect(parsed.rulesInject?.position).toBe("before")
+  })
+
+  test("invalid rulesInject.position value is rejected at decode", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Info)({ rulesInject: { position: "end" } }),
+    ).toThrow()
+  })
+
+  test("rulesInject without position decodes to undefined (merge default covers it)", () => {
+    const parsed = Schema.decodeSync(Info)({
+      rulesInject: { enabled: true, alwaysApplyFolder: "~/.rules/olho/always-apply" },
+    })
+    expect(parsed.rulesInject?.position).toBeUndefined()
+  })
 })
 
 describe("Config Schema — toolFilter", () => {

@@ -425,6 +425,9 @@ export const Info = Schema.Struct({
       alwaysApplyFolder: Schema.optional(Schema.String).annotate({
         description: "Folder containing .mdc rules to inject (default: ~/.rules/always-apply)",
       }),
+      position: Schema.optional(Schema.Literals(["before", "after-persona"])).annotate({
+        description: "Where to inject rules into the system prompt: 'before' prepends to the top, 'after-persona' inserts after the agent persona block (default: 'before')",
+      }),
     }),
   ).annotate({
     description: "Rules injection configuration — injects always-apply rules into the system prompt",
