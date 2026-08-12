@@ -2,8 +2,8 @@
 type: concept
 title: "Unstuck Loop Detection System"
 createdAt: "2026-06-21T00:00:00Z"
-updatedAt: "2026-08-10T18:45:00Z"
-tags: [unstuck, loop-detection, fingerprint, nudge-and-prune, xml-repetition, partial-tags, model-thresholds, doom-loop]
+updatedAt: "2026-08-12T18:50:00Z"
+tags: [unstuck, loop-detection, fingerprint, nudge-and-prune, xml-repetition, partial-tags, model-thresholds, doom-loop, cross-stream]
 see_also:
   - "../specifications/0004-unstuck-loop-detection.spec.md"
   - "../specifications/0009-xml-repetition-detection.spec.md"
@@ -21,6 +21,7 @@ see_also:
   - "../adrs/0064-doom-loop-config-migration.adr.md"
   - "../adrs/0072-per-stream-loop-detector.adr.md"
   - "../adrs/0073-self-diagnosis-threshold-2.adr.md"
+  - "../adrs/0074-cross-stream-doom-loop-detection.adr.md"
 ---
 
 # CONCEPT-0007: Unstuck Loop Detection System
@@ -28,6 +29,7 @@ see_also:
 **Date:** 2026-06-21
 **Updated:** 2026-07-15 (added partial/prefix XML detection, model-specific thresholds, user message reset)
 **Updated:** 2026-08-01 (added doom_loop detection — Allow-then-Catch; unstuck now owns doom-loop recovery)
+**Updated:** 2026-08-12 (added cross-stream doom-loop detection — ADR-0074)
 
 ## What
 
@@ -57,6 +59,16 @@ LLM agents frequently enter behavioral loops (e.g., 697+ iterations of the same 
 - **Skipped when:** input resolution failed (`{ _missing: true }`) or provider-executed tools.
 - **Processor unchanged:** `DOOM_LOOP_THRESHOLD` stays as the fallback guard, now resolving to `allow` (ADR-0063).
 - **Config migration:** users with explicit `doom_loop: deny` in agent configs must remove the key (new default is `allow`) — ADR-0064.
+
+### Cross-Stream Doom-Loop Detection (ADR-0074)
+
+- **Gap:** Per-stream detector (ADR-0072) sees at most 1 call per `doStream` — when an agent calls the same tool with identical input across multiple streams, the threshold (default 3) is never reached.
+- **Incident:** Session `ses_009302293ffe3KacIsKYNnejAD` — 30 identical `sed -i` calls across 30 streams, never detected; model self-escaped after ~147s.
+- **Solution:** Per-session rolling record in `CrossStreamDoomLoopManager` (keyed by session ID from `<env>` block). After per-step doom-loop detection in `streamWithDetection`, check the session record. If (tool name + input fingerprint) matches, increment count; if count >= threshold, trigger nudge-and-prune.
+- **Reset:** On nudge, `resetSession(sessionId)` clears the counter. On session end, `clearAll()` clears all records.
+- **Config:** `enableCrossStreamDoomLoopDetection` (default true), `crossStreamDoomLoopThreshold` (default 3).
+- **Session ID extraction:** Regex on `Session ID: ses_xxxxx` from prompt's `<env>` block; fallback to empty string (no cross-stream detection for that call).
+- **Preserves per-stream isolation:** additive to ADR-0072 — the per-stream detector still operates independently; cross-stream detection is a separate layer at the provider/wrapper level.
 
 ### XML Repetition Detection (ADR-0051, ADR-0052)
 

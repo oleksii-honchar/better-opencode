@@ -1,9 +1,10 @@
 import type { LanguageModelV3, LanguageModelV3CallOptions, LanguageModelV3StreamPart, LanguageModelV3StreamResult } from "@ai-sdk/provider"
 import * as Log from "@opencode-ai/core/util/log"
 import type { UnstuckConfig } from "./config"
+import type { CrossStreamDoomLoopManager } from "./cross-stream-doom-loop"
 import { LoopDetectedError, type LoopDetectedInfo } from "./error"
 import type { LoopDetector, StreamChunk } from "./loop-detector"
-import { LoopDetectorImpl, EvidenceAccumulatorImpl } from "./loop-detector"
+import { LoopDetectorImpl, EvidenceAccumulatorImpl, computeInputFingerprint } from "./loop-detector"
 
 const log = Log.create({ service: "unstuck-plugin" })
 
@@ -102,11 +103,38 @@ function mapStreamChunk(chunk: LanguageModelV3StreamPart, toolNameMap: Map<strin
   }
 }
 
+// Extract session ID from the prompt's <env> block.
+// Walks through prompt array looking for "Session ID: ses_xxxxx" in system message content.
+// Returns "" if not found or if prompt is not in expected format.
+export function extractSessionId(prompt: unknown): string {
+  if (!Array.isArray(prompt)) return ""
+  for (const msg of prompt as Array<{ role?: string; content?: unknown }>) {
+    const content = msg.content
+    // Content can be a string or an array of { type, text }
+    const textParts: string[] = []
+    if (typeof content === "string") {
+      textParts.push(content)
+    } else if (Array.isArray(content)) {
+      for (const part of content as Array<{ type?: string; text?: string }>) {
+        if (typeof part.text === "string") {
+          textParts.push(part.text)
+        }
+      }
+    }
+    for (const text of textParts) {
+      const match = text.match(/Session ID:\s*(ses_\w+)/)
+      if (match) return match[1]
+    }
+  }
+  return ""
+}
+
 async function* streamWithDetection(
   model: LanguageModelV3,
   detector: LoopDetector,
   config: UnstuckConfig,
   args: LanguageModelV3CallOptions,
+  crossStreamManager?: CrossStreamDoomLoopManager,
 ): AsyncGenerator<LanguageModelV3StreamPart, void, unknown> {
   // model.doStream returns Promise<LanguageModelV3StreamResult>.
   // We need to get the underlying async iterable. The LanguageModelV3StreamResult
@@ -121,6 +149,9 @@ async function* streamWithDetection(
   // Track tool name from tool-input-start to tool-input-end, keyed by id
   const toolNameMap = new Map<string, string>()
   let chunkCount = 0
+
+  // Extract session ID from prompt for cross-stream detection
+  const sessionId = extractSessionId(args.prompt)
 
   try {
     while (true) {
@@ -154,6 +185,39 @@ async function* streamWithDetection(
             exceedsTokenLimit: loopInfo.exceedsTokenLimit,
           })
           throw new LoopDetectedError(loopInfo)
+        }
+
+        // Cross-stream doom-loop detection: after per-stream check, on tool-input-end,
+        // call manager.recordCall if cross-stream detection is enabled and manager exists.
+        if (mappedChunk.type === "tool-input-end" && !mappedChunk.providerExecuted) {
+          if (config.enableCrossStreamDoomLoopDetection && crossStreamManager && sessionId) {
+            const input = (mappedChunk as any).input ?? {}
+            if (input._missing !== true) {
+              const inputFingerprint = computeInputFingerprint(input)
+              const threshold = config.crossStreamDoomLoopThreshold ?? 3
+              const thresholdReached = crossStreamManager.recordCall(
+                sessionId,
+                mappedChunk.toolName,
+                inputFingerprint,
+                threshold,
+              )
+              if (thresholdReached) {
+                log.info("cross-stream doom_loop detected", {
+                  type: "doom_loop",
+                  threshold,
+                  toolName: mappedChunk.toolName,
+                  inputFingerprint,
+                  sessionId,
+                })
+                throw new LoopDetectedError({
+                  type: "doom_loop",
+                  threshold,
+                  toolName: mappedChunk.toolName,
+                  fingerprint: inputFingerprint,
+                })
+              }
+            }
+          }
         }
       }
       yield value
@@ -205,6 +269,7 @@ class DetectedStreamResult {
 export function wrapWithLoopDetection(
   model: LanguageModelV3,
   config: UnstuckConfig,
+  crossStreamManager?: CrossStreamDoomLoopManager,
 ): LanguageModelV3 {
   log.debug("wrapWithLoopDetection", {
     modelId: model.modelId,
@@ -239,13 +304,16 @@ export function wrapWithLoopDetection(
       const evidence = new EvidenceAccumulatorImpl()
       let nudgeCount = 0
 
+      // Extract session ID from prompt for cross-stream detection
+      const sessionId = extractSessionId(args.prompt)
+
       async function* wrappedStream(): AsyncGenerator<LanguageModelV3StreamPart, void, unknown> {
         let chunkCount = 0
         let currentArgs: LanguageModelV3CallOptions = args
 
         while (true) {
           try {
-            for await (const chunk of streamWithDetection(model, detector, config, currentArgs)) {
+            for await (const chunk of streamWithDetection(model, detector, config, currentArgs, crossStreamManager)) {
               chunkCount++
               yield chunk
             }
@@ -371,6 +439,11 @@ export function wrapWithLoopDetection(
             evidence.clear()
             detector.clear()
             log.debug("evidence and detector cleared for nudge attempt")
+
+            // Reset cross-stream manager for this session on nudge intervention
+            if (crossStreamManager && sessionId) {
+              crossStreamManager.resetSession(sessionId)
+            }
 
             // Loop back to top — restart with nudged messages
             currentArgs = { ...currentArgs, prompt: nudgedMessages as any }

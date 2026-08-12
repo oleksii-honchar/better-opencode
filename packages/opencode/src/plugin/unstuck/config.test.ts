@@ -253,6 +253,60 @@ describe("UnstuckConfig — Task 15: Validation", () => {
   })
 })
 
+describe("UnstuckConfig — Task 2: cross-stream doom-loop config fields", () => {
+  test("UnstuckConfig exposes enableCrossStreamDoomLoopDetection and crossStreamDoomLoopThreshold", () => {
+    const config: UnstuckConfig = defaultConfig
+    expect("enableCrossStreamDoomLoopDetection" in config).toBe(true)
+    expect("crossStreamDoomLoopThreshold" in config).toBe(true)
+  })
+
+  test("defaultConfig.enableCrossStreamDoomLoopDetection === true", () => {
+    expect(defaultConfig.enableCrossStreamDoomLoopDetection).toBe(true)
+  })
+
+  test("defaultConfig.crossStreamDoomLoopThreshold === 3", () => {
+    expect(defaultConfig.crossStreamDoomLoopThreshold).toBe(3)
+  })
+
+  test("mergeConfig({}) retains cross-stream doom-loop defaults", () => {
+    const merged = mergeConfig({})
+    expect(merged.enableCrossStreamDoomLoopDetection).toBe(true)
+    expect(merged.crossStreamDoomLoopThreshold).toBe(3)
+  })
+
+  test("mergeConfig({ crossStreamDoomLoopThreshold: 5 }) overrides threshold", () => {
+    const merged = mergeConfig({ crossStreamDoomLoopThreshold: 5 })
+    expect(merged.crossStreamDoomLoopThreshold).toBe(5)
+    expect(merged.enableCrossStreamDoomLoopDetection).toBe(true)
+  })
+
+  test("mergeConfig({ enableCrossStreamDoomLoopDetection: false }) overrides the switch", () => {
+    const merged = mergeConfig({ enableCrossStreamDoomLoopDetection: false })
+    expect(merged.enableCrossStreamDoomLoopDetection).toBe(false)
+    expect(merged.crossStreamDoomLoopThreshold).toBe(3)
+  })
+
+  test("mergeConfig with both cross-stream fields overrides both", () => {
+    const merged = mergeConfig({
+      enableCrossStreamDoomLoopDetection: false,
+      crossStreamDoomLoopThreshold: 7,
+    })
+    expect(merged.enableCrossStreamDoomLoopDetection).toBe(false)
+    expect(merged.crossStreamDoomLoopThreshold).toBe(7)
+  })
+
+  test("validateUnstuckConfig preserves cross-stream doom-loop fields", () => {
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      enableCrossStreamDoomLoopDetection: false,
+      crossStreamDoomLoopThreshold: 7,
+    }
+    const validated = validateUnstuckConfig(config)
+    expect(validated.enableCrossStreamDoomLoopDetection).toBe(false)
+    expect(validated.crossStreamDoomLoopThreshold).toBe(7)
+  })
+})
+
 describe("UnstuckConfig — Task 2: doom_loop flags", () => {
   test("UnstuckConfig exposes enableDoomLoopDetection and doomLoopThreshold", () => {
     const config: UnstuckConfig = defaultConfig

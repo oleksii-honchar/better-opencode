@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import type { LanguageModelV3, LanguageModelV3StreamPart, LanguageModelV3CallOptions, LanguageModelV3StreamResult } from "@ai-sdk/provider"
-import { wrapWithLoopDetection } from "./wrapper"
+import { wrapWithLoopDetection, extractSessionId } from "./wrapper"
 import { defaultConfig, type UnstuckConfig } from "./config"
 import { LoopDetectedError } from "./error"
+import type { CrossStreamDoomLoopManager } from "./cross-stream-doom-loop"
 
 function createMockStream(chunks: LanguageModelV3StreamPart[]): ReadableStream<LanguageModelV3StreamPart> {
   let index = 0
@@ -1146,5 +1147,333 @@ describe("wrapWithLoopDetection — doom_loop nudge and logs", () => {
 describe("defaultConfig", () => {
   test("maxNudges defaults to 10", () => {
     expect(defaultConfig.maxNudges).toBe(10)
+  })
+})
+
+describe("extractSessionId", () => {
+  test("extracts session ID from string system message containing <env> block", () => {
+    const prompt = [
+      { role: "system", content: "You are an AI assistant.\n<env>\nSession ID: ses_abc123\n</env>" },
+      { role: "user", content: "Hello" },
+    ]
+    expect(extractSessionId(prompt as any)).toBe("ses_abc123")
+  })
+
+  test("extracts session ID from content as array of parts", () => {
+    const prompt = [
+      {
+        role: "system",
+        content: [
+          { type: "text" as const, text: "You are an AI assistant.\n<env>\nSession ID: ses_xyz789\n</env>" },
+        ],
+      },
+      { role: "user", content: "Hello" },
+    ]
+    expect(extractSessionId(prompt as any)).toBe("ses_xyz789")
+  })
+
+  test("returns empty string when no session ID found", () => {
+    const prompt = [
+      { role: "system", content: "You are an AI assistant." },
+      { role: "user", content: "Hello" },
+    ]
+    expect(extractSessionId(prompt as any)).toBe("")
+  })
+
+  test("returns empty string when prompt is empty", () => {
+    expect(extractSessionId([] as any)).toBe("")
+  })
+
+  test("returns empty string for non-array prompt", () => {
+    expect(extractSessionId("just a string" as any)).toBe("")
+  })
+
+  test("returns empty string for null/undefined prompt", () => {
+    expect(extractSessionId(null as any)).toBe("")
+    expect(extractSessionId(undefined as any)).toBe("")
+  })
+
+  test("extracts session ID from middle of a larger system message", () => {
+    const prompt = [
+      {
+        role: "system",
+        content: "Some prefix text\n<env>\nWorking directory: /foo\nSession ID: ses_middle456\nPlatform: darwin\n</env>\nSome suffix text",
+      },
+    ]
+    expect(extractSessionId(prompt as any)).toBe("ses_middle456")
+  })
+})
+
+describe("wrapWithLoopDetection — cross-stream doom-loop with manager", () => {
+  function createMockManager(): CrossStreamDoomLoopManager & { recordCallCalls: Array<{ sessionId: string; toolName: string; inputFingerprint: string; threshold: number }>; resetSessionCalls: string[] } {
+    const manager: CrossStreamDoomLoopManager & { recordCallCalls: Array<{ sessionId: string; toolName: string; inputFingerprint: string; threshold: number }>; resetSessionCalls: string[] } = {
+      recordCallCalls: [],
+      resetSessionCalls: [],
+      recordCall(sessionId: string, toolName: string, inputFingerprint: string, threshold: number): boolean {
+        manager.recordCallCalls.push({ sessionId, toolName, inputFingerprint, threshold })
+        // Simulate threshold reached on 3rd call with same params
+        const matchingCalls = manager.recordCallCalls.filter(
+          (c) => c.sessionId === sessionId && c.toolName === toolName && c.inputFingerprint === inputFingerprint,
+        )
+        return matchingCalls.length >= threshold
+      },
+      resetSession(sessionId: string): void {
+        manager.resetSessionCalls.push(sessionId)
+      },
+      clearAll(): void {},
+    }
+    return manager
+  }
+
+  const crossStreamConfig: UnstuckConfig = {
+    ...defaultConfig,
+    maxNudges: 2,
+    strategy: "nudge-and-prune",
+    loopThreshold: 100,
+    detectToolOnlyLoops: false,
+    enablePatternLoopDetection: false,
+    enableSentenceLoopDetection: false,
+    enableSelfDiagnosisDetection: false,
+    enableXmlRepetitionGuard: false,
+    enableDoomLoopDetection: false, // Disable per-stream doom-loop so cross-stream is the only one that fires
+    enableCrossStreamDoomLoopDetection: true,
+    crossStreamDoomLoopThreshold: 3,
+    nudgeMessage: undefined,
+  }
+
+  test("manager.recordCall is called on tool-input-end when cross-stream detection is enabled", async () => {
+    const manager = createMockManager()
+    const chunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-1", toolName: "bash" },
+      {
+        type: "tool-input-end",
+        id: "call-1",
+        input: { command: "ls -la" },
+        providerMetadata: undefined,
+      } as any,
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model = createMockModel(chunks)
+    const wrapped = wrapWithLoopDetection(model, crossStreamConfig, manager)
+
+    const prompt = [
+      { role: "system", content: "<env>\nSession ID: ses_test123\n</env>" },
+      { role: "user", content: "Hello" },
+    ]
+    await collectStream(wrapped, prompt)
+
+    // recordCall should have been called once for the tool-input-end
+    expect(manager.recordCallCalls.length).toBe(1)
+    expect(manager.recordCallCalls[0].sessionId).toBe("ses_test123")
+    expect(manager.recordCallCalls[0].toolName).toBe("bash")
+    expect(manager.recordCallCalls[0].threshold).toBe(3)
+  })
+
+  test("manager.recordCall is NOT called when cross-stream detection is disabled", async () => {
+    const manager = createMockManager()
+    const chunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-1", toolName: "bash" },
+      {
+        type: "tool-input-end",
+        id: "call-1",
+        input: { command: "ls -la" },
+        providerMetadata: undefined,
+      } as any,
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model = createMockModel(chunks)
+    const config: UnstuckConfig = {
+      ...crossStreamConfig,
+      enableCrossStreamDoomLoopDetection: false,
+    }
+    const wrapped = wrapWithLoopDetection(model, config, manager)
+
+    const prompt = [
+      { role: "system", content: "<env>\nSession ID: ses_test123\n</env>" },
+      { role: "user", content: "Hello" },
+    ]
+    await collectStream(wrapped, prompt)
+
+    // recordCall should NOT have been called
+    expect(manager.recordCallCalls.length).toBe(0)
+  })
+
+  test("manager.recordCall is NOT called when no manager is provided", async () => {
+    const chunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-1", toolName: "bash" },
+      {
+        type: "tool-input-end",
+        id: "call-1",
+        input: { command: "ls -la" },
+        providerMetadata: undefined,
+      } as any,
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model = createMockModel(chunks)
+    // No manager passed — should not throw
+    const wrapped = wrapWithLoopDetection(model, crossStreamConfig)
+
+    const prompt = [
+      { role: "system", content: "<env>\nSession ID: ses_test123\n</env>" },
+      { role: "user", content: "Hello" },
+    ]
+    await collectStream(wrapped, prompt)
+    // Should complete without error — no manager = no cross-stream check
+  })
+
+  test("cross-stream threshold reached triggers nudge-and-prune intervention", async () => {
+    const manager = createMockManager()
+    let callCount = 0
+    let receivedPrompt: any[] = []
+
+    // Each stream has 1 identical tool call — per-stream detector won't fire (disabled),
+    // but cross-stream manager will accumulate and trigger on 3rd call
+    const singleToolChunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-1", toolName: "bash" },
+      {
+        type: "tool-input-end",
+        id: "call-1",
+        input: { command: "ls -la" },
+        providerMetadata: undefined,
+      } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+    ]
+
+    const recoveryChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "recovery", delta: "Recovery" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() {
+        throw new Error("not implemented")
+      },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        receivedPrompt = args.prompt as any[]
+        // Calls 1-3: each produces one identical tool call (cross-stream threshold=3 triggers on 3rd)
+        // After nudge: recovery
+        if (callCount <= 3) {
+          return { stream: createMockStream(singleToolChunks) }
+        }
+        return { stream: createMockStream(recoveryChunks) }
+      },
+    }
+
+    const wrapped = wrapWithLoopDetection(model, crossStreamConfig, manager)
+    const prompt = [
+      { role: "system", content: "<env>\nSession ID: ses_cross123\n</env>" },
+      { role: "user", content: "Hello" },
+    ]
+
+    // Simulate 3 separate doStream calls (as would happen across agent steps)
+    // Stream 1: recordCall count=1, no threshold → stream finishes normally
+    const result1 = await collectStream(wrapped, prompt)
+    expect(result1.length).toBe(singleToolChunks.length)
+    expect(callCount).toBe(1)
+
+    // Stream 2: recordCall count=2, no threshold → stream finishes normally
+    const result2 = await collectStream(wrapped, prompt)
+    expect(result2.length).toBe(singleToolChunks.length)
+    expect(callCount).toBe(2)
+
+    // Stream 3: recordCall count=3, threshold reached → throws → nudge → recovery
+    // The nudge-and-prune path restarts the stream within the same doStream call
+    const result3 = await collectStream(wrapped, prompt)
+    expect(result3.length).toBeGreaterThan(0)
+    // 3rd call triggers cross-stream → nudge restart → 4th call returns recovery
+    expect(callCount).toBe(4)
+
+    // Nudge should have been injected on the 4th call
+    const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>
+    expect(receivedPrompt[receivedPrompt.length - 1]._unstuckNudge).toBe(true)
+    expect(lastContent[0]?.text).toContain("doom loop")
+  })
+
+  test("manager.resetSession is called on nudge intervention", async () => {
+    const manager = createMockManager()
+    let callCount = 0
+
+    const singleToolChunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-1", toolName: "bash" },
+      {
+        type: "tool-input-end",
+        id: "call-1",
+        input: { command: "ls -la" },
+        providerMetadata: undefined,
+      } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+    ]
+
+    const recoveryChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "recovery", delta: "Recovery" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() {
+        throw new Error("not implemented")
+      },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        if (callCount <= 3) {
+          return { stream: createMockStream(singleToolChunks) }
+        }
+        return { stream: createMockStream(recoveryChunks) }
+      },
+    }
+
+    const wrapped = wrapWithLoopDetection(model, crossStreamConfig, manager)
+    const prompt = [
+      { role: "system", content: "<env>\nSession ID: ses_reset456\n</env>" },
+      { role: "user", content: "Hello" },
+    ]
+
+    // 3 separate doStream calls, 3rd triggers cross-stream → nudge → resetSession
+    await collectStream(wrapped, prompt)
+    await collectStream(wrapped, prompt)
+    await collectStream(wrapped, prompt)
+
+    // resetSession should have been called when nudge was applied
+    expect(manager.resetSessionCalls.length).toBe(1)
+    expect(manager.resetSessionCalls[0]).toBe("ses_reset456")
+  })
+
+  test("provider-executed tool-input-end skips cross-stream recordCall", async () => {
+    const manager = createMockManager()
+    const chunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-1", toolName: "bash" },
+      {
+        type: "tool-input-end",
+        id: "call-1",
+        input: { command: "ls -la" },
+        providerExecuted: true,
+        providerMetadata: undefined,
+      } as any,
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model = createMockModel(chunks)
+    const wrapped = wrapWithLoopDetection(model, crossStreamConfig, manager)
+
+    const prompt = [
+      { role: "system", content: "<env>\nSession ID: ses_test123\n</env>" },
+      { role: "user", content: "Hello" },
+    ]
+    await collectStream(wrapped, prompt)
+
+    // provider-executed tools should be skipped
+    expect(manager.recordCallCalls.length).toBe(0)
   })
 })

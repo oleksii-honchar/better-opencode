@@ -28,7 +28,7 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { wrapWithLoopDetection, mergeConfig } from "../plugin/unstuck"
+import { wrapWithLoopDetection, mergeConfig, CrossStreamDoomLoopManagerImpl } from "../plugin/unstuck"
 
 const log = Log.create({ service: "provider" })
 
@@ -1743,7 +1743,10 @@ export const layer = Layer.effect(
             : sdk.languageModel(model.api.id)
 
           // Wrap with loop detection (UnstuckPlugin)
-          const wrapped = wrapWithLoopDetection(language, unstuckConfig)
+          // CrossStreamDoomLoopManager is cached at getLanguage level so it persists
+          // across doStream calls for the same model (same session).
+          const crossStreamDoomLoopManager = new CrossStreamDoomLoopManagerImpl()
+          const wrapped = wrapWithLoopDetection(language, unstuckConfig, crossStreamDoomLoopManager)
 
           s.models.set(key, wrapped)
           log.debug("getLanguage — model wrapped with unstuck", { modelKey: key })

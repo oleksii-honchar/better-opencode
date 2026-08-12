@@ -40,6 +40,10 @@ export interface UnstuckConfig {
   enableDoomLoopDetection: boolean
   // Number of identical tool+input calls in a row to declare a doom loop (matches DOOM_LOOP_THRESHOLD)
   doomLoopThreshold: number
+  // Enable cross-stream doom-loop detection (tracks identical tool+input across separate doStream calls)
+  enableCrossStreamDoomLoopDetection: boolean
+  // Threshold for cross-stream doom-loop detection (number of identical calls across streams to trigger)
+  crossStreamDoomLoopThreshold: number
   maxToolInputTokens: number
   maxTotalToolInputTokens: number
   // Model ID for model-specific threshold overrides (e.g. qwen gets more sensitive detection)
@@ -102,6 +106,10 @@ export const defaultConfig: UnstuckConfig = {
   enableDoomLoopDetection: true,
   // Number of identical tool+input calls in a row to declare a doom loop (matches DOOM_LOOP_THRESHOLD)
   doomLoopThreshold: 3,
+  // Enable cross-stream doom-loop detection (tracks identical tool+input across separate doStream calls)
+  enableCrossStreamDoomLoopDetection: true,
+  // Threshold for cross-stream doom-loop detection (number of identical calls across streams to trigger)
+  crossStreamDoomLoopThreshold: 3,
   // Maximum estimated tokens per single tool input before triggering a token-limit XML loop
   maxToolInputTokens: 4000,
   // Maximum estimated total tokens across all tool inputs in the current stream before triggering a token-limit XML loop
