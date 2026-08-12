@@ -11,7 +11,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
-import { MCP } from "../../src/mcp"
+import { MCP, mcpFilteringDiagnostic } from "../../src/mcp"
 import { Agent } from "../../src/agent/agent"
 import { Config } from "@/config/config"
 import { provideInstance, tmpdir } from "../fixture/fixture"
@@ -77,6 +77,24 @@ function createMockMcpLayer(config: Record<string, { tools: any[]; category?: st
 }
 
 describe("mcp.category-filtering", () => {
+  test("builds session-correlated exclusion diagnostics without changing filtering inputs", () => {
+    expect(mcpFilteringDiagnostic({
+      sessionId: "ses_filter",
+      agent: "generalist",
+      allowedCategories: ["session"],
+      serverCategory: "observability",
+      excludedServerCount: 1,
+      excludedToolCount: 3,
+    })).toEqual({
+      sessionId: "ses_filter",
+      agent: "generalist",
+      allowedCategories: ["session"],
+      serverCategory: "observability",
+      excludedServerCount: 1,
+      excludedToolCount: 3,
+    })
+  })
+
   test("MCP.tools() returns all tools when agent has no allowedMcpCategories", async () => {
     await using tmp = await tmpdir({ git: true })
 

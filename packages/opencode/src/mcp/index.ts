@@ -382,10 +382,33 @@ interface State {
   defs: Record<string, MCPToolDef[]>
 }
 
+export interface McpToolsCorrelation {
+  readonly sessionId?: string
+}
+
+export interface McpFilteringDiagnosticInput extends McpToolsCorrelation {
+  readonly agent?: string
+  readonly allowedCategories?: readonly string[]
+  readonly serverCategory?: string
+  readonly excludedServerCount: number
+  readonly excludedToolCount: number
+}
+
+export function mcpFilteringDiagnostic(input: McpFilteringDiagnosticInput): Record<string, unknown> {
+  return {
+    sessionId: input.sessionId,
+    agent: input.agent,
+    allowedCategories: input.allowedCategories,
+    serverCategory: input.serverCategory,
+    excludedServerCount: input.excludedServerCount,
+    excludedToolCount: input.excludedToolCount,
+  }
+}
+
 export interface Interface {
   readonly status: () => Effect.Effect<Record<string, Status>>
   readonly clients: () => Effect.Effect<Record<string, MCPClient>>
-  readonly tools: (agent?: Agent.Info) => Effect.Effect<Record<string, Tool>>
+  readonly tools: (agent?: Agent.Info, correlation?: McpToolsCorrelation) => Effect.Effect<Record<string, Tool>>
   readonly prompts: () => Effect.Effect<Record<string, PromptInfo & { client: string }>>
   readonly resources: () => Effect.Effect<Record<string, ResourceInfo & { client: string }>>
   readonly add: (name: string, mcp: ConfigMCP.Info) => Effect.Effect<{ status: Record<string, Status> | Status }>
@@ -793,6 +816,7 @@ export const layer = Layer.effect(
     const connect = Effect.fn("MCP.connect")(function* (name: string) {
       const mcp = yield* requireMcpConfig(name)
       yield* createAndStore(name, { ...mcp, enabled: true })
+      yield* bus.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
     })
 
     const disconnect = Effect.fn("MCP.disconnect")(function* (name: string) {
@@ -801,11 +825,17 @@ export const layer = Layer.effect(
       yield* closeClient(s, name)
       delete s.clients[name]
       s.status[name] = { status: "disabled" }
+      yield* bus.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
     })
 
-    const tools = Effect.fn("MCP.tools")(function* (agent?: Agent.Info) {
+    const tools = Effect.fn("MCP.tools")(function* (agent?: Agent.Info, correlation?: McpToolsCorrelation) {
       const result: Record<string, Tool> = {}
       const s = yield* InstanceState.get(state)
+      const filterContext = {
+        sessionId: correlation?.sessionId,
+        agent: agent?.name,
+        allowedCategories: agent?.allowedMcpCategories,
+      }
 
       const cfg = yield* cfgSvc.get()
       const config = cfg.mcp ?? {}
@@ -840,7 +870,12 @@ export const layer = Layer.effect(
                 server: clientName,
                 category: serverCategory,
                 allowed: allowedCategories,
-                agent: agent?.name,
+                ...mcpFilteringDiagnostic({
+                  ...filterContext,
+                  serverCategory,
+                  excludedServerCount: 1,
+                  excludedToolCount: listed.length,
+                }),
               })
               return
             }
@@ -877,6 +912,12 @@ export const layer = Layer.effect(
                   filter: isWhitelist ? "enabledTools" : "disabledTools",
                   expectedToolNames: toolFilter,
                   receivedToolNames: listedNames,
+                  ...mcpFilteringDiagnostic({
+                    ...filterContext,
+                    serverCategory,
+                    excludedServerCount: 0,
+                    excludedToolCount: listed.length,
+                  }),
                   hint: isWhitelist
                     ? `enabledTools names must match the tool names returned by the server. For remote servers proxied through LiteLLM (/mcp/<server>), tools are prefixed with "<server>-" (e.g. paperless-list_documents, hugging_kreuzberg-extract_bytes)`
                     : "disabledTools names must match the tool names returned by the server",
@@ -900,6 +941,12 @@ export const layer = Layer.effect(
                 filtered: filteredTools.length,
                 filter: isWhitelist ? "enabledTools" : "disabledTools",
                 count: filteredTools.length,
+                ...mcpFilteringDiagnostic({
+                  ...filterContext,
+                  serverCategory,
+                  excludedServerCount: 0,
+                  excludedToolCount: listed.length - filteredTools.length,
+                }),
               })
             } else {
               // No tool filtering — use original listed tools

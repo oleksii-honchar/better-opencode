@@ -1,5 +1,20 @@
 import { describe, expect, test } from "bun:test"
-import type { Hooks, Model } from "../src/index.js"
+import type { Hooks, Model, PluginInput, ToolCatalogRefreshRequest } from "../src/index.js"
+
+describe("tool catalog refresh contract", () => {
+  test("PluginInput accepts an optional session-scoped refresh callback", () => {
+    const request: ToolCatalogRefreshRequest = {
+      sessionId: "ses_test",
+      expectedGeneration: 3,
+      requestedTool: "data_dog_search_logs",
+      reason: "catalog-generation-mismatch",
+    }
+    const input = { refreshTools: async (_request: ToolCatalogRefreshRequest) => {} } as Partial<PluginInput>
+
+    expect(typeof input.refreshTools).toBe("function")
+    void request
+  })
+})
 
 describe("experimental.tools.transform hook", () => {
   test('"experimental.tools.transform" is a valid key on Hooks interface', () => {

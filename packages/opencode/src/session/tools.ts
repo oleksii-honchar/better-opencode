@@ -192,7 +192,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     ;(tools[item.id] as any).server = "built-in"
   }
 
-  for (const [key, item] of Object.entries(yield* mcp.tools(input.agent))) {
+  for (const [key, item] of Object.entries(yield* mcp.tools(input.agent, { sessionId: input.session.id }))) {
     const execute = item.execute
     if (!execute) continue
 

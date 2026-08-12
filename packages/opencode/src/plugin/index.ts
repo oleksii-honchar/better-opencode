@@ -45,6 +45,7 @@ const log = Log.create({ service: "plugin" })
 
 type State = {
   hooks: Hooks[]
+  refreshers: Map<string, NonNullable<PluginInput["refreshTools"]>>
 }
 
 // Hook names that follow the (input, output) => Promise<void> trigger pattern
@@ -64,6 +65,10 @@ export interface Interface {
   ) => Effect.Effect<Output>
   readonly list: () => Effect.Effect<Hooks[]>
   readonly init: () => Effect.Effect<void>
+  readonly setToolCatalogRefresher?: (
+    sessionID: string,
+    refresher: NonNullable<PluginInput["refreshTools"]>,
+  ) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Plugin") { }
@@ -131,6 +136,7 @@ export const layer = Layer.effect(
     const state = yield* InstanceState.make<State>(
       Effect.fn("Plugin.state")(function* (ctx) {
         const hooks: Hooks[] = []
+        const refreshers = new Map<string, NonNullable<PluginInput["refreshTools"]>>()
         const bridge = yield* EffectBridge.make()
 
         function publishPluginError(message: string) {
@@ -211,6 +217,9 @@ export const layer = Layer.effect(
           fetch: async (...args) => Server.Default().app.fetch(...args),
         })
         const cfg = yield* config.get()
+        const refreshTools = async (request: Parameters<NonNullable<PluginInput["refreshTools"]>>[0]): Promise<void> => {
+          await refreshers.get(request.sessionId)?.(request)
+        }
         const input: PluginInput = {
           // @ts-expect-error — v2 SDK client type differs from v1 PluginInput.client type; client not used for skill_search anymore
           client,
@@ -228,6 +237,7 @@ export const layer = Layer.effect(
           // @ts-expect-error
           $: typeof Bun === "undefined" ? undefined : Bun.$,
           llm: pluginLlm,
+          refreshTools,
           getDynamicSkills: async () => {
             // Read dynamic skills via EffectBridge — no HTTP needed
             // Uses Skill.Service.allIncludingDynamic() which returns startup + dynamic skills
@@ -344,7 +354,7 @@ export const layer = Layer.effect(
           Effect.forkScoped,
         )
 
-        return { hooks }
+        return { hooks, refreshers }
       }),
     )
 
@@ -391,7 +401,15 @@ export const layer = Layer.effect(
       yield* InstanceState.get(state)
     })
 
-    return Service.of({ trigger, list, init })
+    const setToolCatalogRefresher = Effect.fn("Plugin.setToolCatalogRefresher")(function* (
+      sessionID: string,
+      refresher: NonNullable<PluginInput["refreshTools"]>,
+    ) {
+      const s = yield* InstanceState.get(state)
+      s.refreshers.set(sessionID, refresher)
+    })
+
+    return Service.of({ trigger, list, init, setToolCatalogRefresher })
   }),
 )
 

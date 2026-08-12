@@ -53,6 +53,15 @@ export type WorkspaceAdapter = {
   target(config: WorkspaceInfo): WorkspaceTarget | Promise<WorkspaceTarget>
 }
 
+export interface ToolCatalogRefreshRequest {
+  readonly sessionId: string
+  readonly expectedGeneration: number
+  readonly requestedTool: string
+  readonly reason: "tool-not-found" | "catalog-generation-mismatch"
+}
+
+export type ToolCatalogRefresher = (request: ToolCatalogRefreshRequest) => Promise<void>
+
 export type PluginInput = {
   client: ReturnType<typeof createOpencodeClient>
   project: Project
@@ -69,6 +78,8 @@ export type PluginInput = {
   sessionId?: string
   /** Direct access to dynamic skills (startup + dynamic) — per-call freshness */
   getDynamicSkills?: () => Promise<Array<{ name: string; description?: string; location: string }>>
+  /** Optional bounded refresh of the session's filtered MCP catalog. */
+  refreshTools?: ToolCatalogRefresher
 }
 
 export type PluginOptions = Record<string, unknown>

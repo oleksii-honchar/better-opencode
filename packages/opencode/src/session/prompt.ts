@@ -1554,6 +1554,20 @@ export const layer = Layer.effect(
               })
             }
 
+            if (plugin.setToolCatalogRefresher) {
+              yield* plugin.setToolCatalogRefresher(sessionID, async (request) => {
+                if (request.sessionId !== sessionID) return
+                const refreshedTools = await Effect.runPromise(mcp.tools(agent, { sessionId: sessionID }))
+                await Effect.runPromise(
+                  plugin.trigger(
+                    "experimental.tools.transform",
+                    { sessionID, model },
+                    { tools: refreshedTools },
+                  ),
+                )
+              })
+            }
+
             // Allow plugins to transform the tools list before LLM send
             const toolsResult = yield* plugin.trigger(
               "experimental.tools.transform",
