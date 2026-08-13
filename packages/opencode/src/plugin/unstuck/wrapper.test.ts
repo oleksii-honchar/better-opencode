@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { LanguageModelV3, LanguageModelV3StreamPart, LanguageModelV3CallOptions, LanguageModelV3StreamResult } from "@ai-sdk/provider"
-import { wrapWithLoopDetection, extractSessionId } from "./wrapper"
+import { wrapWithLoopDetection, extractSessionId, pruneLoopingMessages } from "./wrapper"
 import { defaultConfig, type UnstuckConfig } from "./config"
 import { LoopDetectedError } from "./error"
 import type { CrossStreamDoomLoopManager } from "./cross-stream-doom-loop"
@@ -1475,5 +1475,168 @@ describe("wrapWithLoopDetection — cross-stream doom-loop with manager", () => 
 
     // provider-executed tools should be skipped
     expect(manager.recordCallCalls.length).toBe(0)
+  })
+})
+
+describe("pruneLoopingMessages", () => {
+  function tc(toolCallId: string) {
+    return { type: "tool-call" as const, toolCallId }
+  }
+  function tr(toolCallId: string) {
+    return { type: "tool-result" as const, toolCallId }
+  }
+  function textPart(text: string) {
+    return { type: "text" as const, text }
+  }
+
+  test("prunes assistant with tool-call parts and corresponding tool messages", () => {
+    const messages = [
+      { role: "user" as const, content: "Hello" },
+      { role: "assistant" as const, content: [textPart("I'll read the file"), tc("call_1")] },
+      { role: "tool" as const, content: [tr("call_1")] },
+      { role: "assistant" as const, content: [textPart("Looping..."), tc("call_2")] },
+      { role: "tool" as const, content: [tr("call_2")] },
+    ]
+
+    const result = pruneLoopingMessages(messages, 1)
+
+    // The last assistant (index 3) and its tool result (index 4) should be pruned
+    expect(result.length).toBe(3)
+    expect(result[0].role).toBe("user")
+    expect(result[1].role).toBe("assistant")
+    expect(result[2].role).toBe("tool")
+  })
+
+  test("pruning assistant without tool-call parts does not affect tool messages", () => {
+    const messages = [
+      { role: "user" as const, content: "Hello" },
+      { role: "assistant" as const, content: "Plain text response" },
+      { role: "tool" as const, content: [tr("call_1")] },
+      { role: "assistant" as const, content: "Another plain response" },
+    ]
+
+    const result = pruneLoopingMessages(messages, 1)
+
+    // Only the last assistant (index 3) should be pruned; tool message stays
+    expect(result.length).toBe(3)
+    expect(result[0].role).toBe("user")
+    expect(result[1].role).toBe("assistant")
+    expect(result[2].role).toBe("tool")
+  })
+
+  test("prunes mixed assistant messages — only corresponding orphaned tool messages", () => {
+    const messages = [
+      { role: "user" as const, content: "Hello" },
+      { role: "assistant" as const, content: [textPart("First"), tc("call_1")] },
+      { role: "tool" as const, content: [tr("call_1")] },
+      { role: "assistant" as const, content: "Plain text" },
+      { role: "assistant" as const, content: [textPart("Looping"), tc("call_2")] },
+      { role: "tool" as const, content: [tr("call_2")] },
+    ]
+
+    const result = pruneLoopingMessages(messages, 2)
+
+    // Last 2 assistants: index 4 (has call_2) and index 3 (plain text)
+    // Tool at index 5 (call_2) should be pruned; tool at index 2 (call_1) stays
+    expect(result.length).toBe(3)
+    expect(result[0].role).toBe("user")
+    expect(result[1].role).toBe("assistant")
+    expect(result[2].role).toBe("tool")
+  })
+
+  test("prunes assistant with multiple tool-call parts and all corresponding tool messages", () => {
+    const messages = [
+      { role: "user" as const, content: "Hello" },
+      { role: "assistant" as const, content: [textPart("I'll do two things"), tc("call_1"), tc("call_2")] },
+      { role: "tool" as const, content: [tr("call_1")] },
+      { role: "tool" as const, content: [tr("call_2")] },
+    ]
+
+    const result = pruneLoopingMessages(messages, 1)
+
+    // The assistant with two tool-calls and both tool results should be pruned
+    expect(result.length).toBe(1)
+    expect(result[0].role).toBe("user")
+  })
+
+  test("existing behavior — plain assistant messages pruned unchanged", () => {
+    const messages = [
+      { role: "user" as const, content: "Hello" },
+      { role: "assistant" as const, content: "First" },
+      { role: "user" as const, content: "Continue" },
+      { role: "assistant" as const, content: "Second" },
+      { role: "assistant" as const, content: "Third" },
+    ]
+
+    const result = pruneLoopingMessages(messages, 2)
+
+    // Last 2 assistants pruned
+    expect(result.length).toBe(3)
+    expect(result[0].role).toBe("user")
+    expect(result[1].role).toBe("assistant")
+    expect(result[2].role).toBe("user")
+  })
+
+  test("prunes only last N assistant messages — respects pruneCount", () => {
+    const messages = [
+      { role: "user" as const, content: "Hello" },
+      { role: "assistant" as const, content: [tc("call_1")] },
+      { role: "tool" as const, content: [tr("call_1")] },
+      { role: "assistant" as const, content: [tc("call_2")] },
+      { role: "tool" as const, content: [tr("call_2")] },
+      { role: "assistant" as const, content: [tc("call_3")] },
+      { role: "tool" as const, content: [tr("call_3")] },
+    ]
+
+    const result = pruneLoopingMessages(messages, 1)
+
+    // Only the last assistant (call_3) and its tool result pruned
+    expect(result.length).toBe(5)
+    expect(result[1].role).toBe("assistant")
+    expect(result[2].role).toBe("tool")
+    expect(result[3].role).toBe("assistant")
+    expect(result[4].role).toBe("tool")
+  })
+
+  test("prunes nothing when pruneCount is 0", () => {
+    const messages = [
+      { role: "user" as const, content: "Hello" },
+      { role: "assistant" as const, content: [tc("call_1")] },
+      { role: "tool" as const, content: [tr("call_1")] },
+    ]
+
+    const result = pruneLoopingMessages(messages, 0)
+
+    expect(result.length).toBe(3)
+  })
+
+  test("prunes nothing when no assistant messages exist", () => {
+    const messages = [
+      { role: "user" as const, content: "Hello" },
+      { role: "tool" as const, content: [tr("call_1")] },
+    ]
+
+    const result = pruneLoopingMessages(messages, 5)
+
+    expect(result.length).toBe(2)
+  })
+
+  test("tool message with multiple tool-result parts — pruned if any references pruned ID", () => {
+    const messages = [
+      { role: "user" as const, content: "Hello" },
+      { role: "assistant" as const, content: [tc("call_1")] },
+      { role: "tool" as const, content: [tr("call_1")] },
+      { role: "assistant" as const, content: [tc("call_2")] },
+      { role: "tool" as const, content: [tr("call_2"), tr("call_1")] },
+    ]
+
+    const result = pruneLoopingMessages(messages, 1)
+
+    // Last assistant (call_2) pruned; tool at index 4 has tr(call_2) → pruned
+    // Tool at index 2 (call_1) stays because call_1 was not pruned
+    expect(result.length).toBe(3)
+    expect(result[0].role).toBe("user")
+    expect(result[1].role).toBe("assistant")
+    expect(result[2].role).toBe("tool")
   })
 })

@@ -47,7 +47,7 @@ function defaultNudgeMessage(info: LoopDetectedInfo): string {
   return "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction."
 }
 
-function pruneLoopingMessages(
+export function pruneLoopingMessages(
   messages: Message[],
   pruneCount: number,
 ): Message[] {
@@ -60,8 +60,36 @@ function pruneLoopingMessages(
   }
 
   const toRemove = Math.min(pruneCount, assistantIndices.length)
-  const indicesToRemove = new Set(assistantIndices.slice(-toRemove))
+  const assistantIndicesToRemove = toRemove === 0 ? new Set<number>() : new Set(assistantIndices.slice(-toRemove))
 
+  // Collect tool-call IDs from pruned assistant messages
+  const prunedToolCallIds = new Set<string>()
+  for (const idx of assistantIndicesToRemove) {
+    const msg = messages[idx]
+    if (Array.isArray(msg.content)) {
+      for (const part of msg.content as Array<{ type?: string; toolCallId?: string }>) {
+        if (part.type === "tool-call" && part.toolCallId) {
+          prunedToolCallIds.add(part.toolCallId)
+        }
+      }
+    }
+  }
+
+  // Collect indices of tool messages to prune
+  const toolIndicesToRemove = new Set<number>()
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]
+    if (msg.role !== "tool" || !Array.isArray(msg.content)) continue
+    for (const part of msg.content as Array<{ type?: string; toolCallId?: string }>) {
+      if (part.type === "tool-result" && part.toolCallId && prunedToolCallIds.has(part.toolCallId)) {
+        toolIndicesToRemove.add(i)
+        break
+      }
+    }
+  }
+
+  // Filter out both assistant and tool messages
+  const indicesToRemove = new Set([...assistantIndicesToRemove, ...toolIndicesToRemove])
   return messages.filter((_, i) => !indicesToRemove.has(i))
 }
 
