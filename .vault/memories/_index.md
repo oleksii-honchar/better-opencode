@@ -2,7 +2,7 @@
 type: index
 title: "Atomic Memories"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-12T20:00:00Z"
+updatedAt: "2026-08-13T18:00:00Z"
 tags: []
 ---
 
@@ -28,3 +28,4 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0014-env-marker-persona-boundary.memory.md]] — Env-Block Marker "You are powered by the model named" is the Deterministic Persona Boundary
 - [[0015-cross-stream-detection-gap.memory.md]] — Cross-Stream Doom-Loop Detection Gap (Per-Stream Isolation)
 - [[0016-self-diagnosis-regex-gap.memory.md]] — Self-Diagnosis Regex Gap — 'Stuck on X' Pattern Not Detected
+- [[0017-prune-looping-messages-orphan.memory.md]] — pruneLoopingMessages Creates Orphaned Tool-Results

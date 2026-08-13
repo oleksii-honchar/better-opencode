@@ -2,7 +2,7 @@
 type: index
 title: "Specifications"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-13T10:35:00Z"
+updatedAt: "2026-08-13T18:00:00Z"
 tags: []
 ---
 
@@ -28,3 +28,5 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 - [[0014-rules-inject-position.spec.md]] — rules-inject: Opt-in "after persona" Injection Position (kind: feature, status: completed)
 - [[0015-fix-false-self-diagnosis-loop.spec.md]] — Fix False self_diagnosis_loop Triggers (kind: feature, status: completed)
 - [[0016-fix-orphaned-tool-call-output.spec.md]] — Fix Codex & DeepSeek Orphaned Tool-Call Output Error (kind: refactor, status: completed)
+- [[0017-fix-prune-looping-messages.spec.md]] — Fix pruneLoopingMessages to Preserve Tool-Call/Tool-Result Pairs (kind: refactor, status: accepted)
+- [[0017-fix-prune-looping-messages.spec.md]] — Fix pruneLoopingMessages to Preserve Tool-Call/Tool-Result Pairs (kind: refactor, status: accepted)
