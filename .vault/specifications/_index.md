@@ -2,7 +2,7 @@
 type: index
 title: "Specifications"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-10T18:45:00Z"
+updatedAt: "2026-08-13T10:35:00Z"
 tags: []
 ---
 
@@ -27,3 +27,4 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 - [[0013-dynamic-skill-loading-fix.spec.md]] — Dynamic Skill Loading Fix — Visibility, Per-Session Injection, Cache TTL (kind: feature, status: implemented)
 - [[0014-rules-inject-position.spec.md]] — rules-inject: Opt-in "after persona" Injection Position (kind: feature, status: completed)
 - [[0015-fix-false-self-diagnosis-loop.spec.md]] — Fix False self_diagnosis_loop Triggers (kind: feature, status: completed)
+- [[0016-fix-orphaned-tool-call-output.spec.md]] — Fix Codex & DeepSeek Orphaned Tool-Call Output Error (kind: refactor, status: completed)

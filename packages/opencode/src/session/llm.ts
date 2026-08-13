@@ -56,6 +56,56 @@ function repairDoubleBraces(input: string): string | null {
   return null
 }
 
+/**
+ * Defense-in-depth scan for orphan tool-result messages at the LLM-adapter
+ * boundary. Walks the message array once, collects every `tool-call` part's
+ * `toolCallId` from `assistant` messages, then classifies each `tool` message
+ * as either kept or orphan. A `tool` message is considered an orphan when
+ * ANY of its `tool-result` parts has a `toolCallId` not present in the set.
+ *
+ * Mirrors the conservative semantics of `MessageV2.repairOrphanedToolResults`:
+ * drop the whole tool message if any part is orphan. Order is preserved and
+ * the input array is not mutated.
+ *
+ * Pure helper — no logging, no Effect. Returns the cleaned array and the
+ * list of orphan `toolCallId`s so the caller can emit one log per drop.
+ */
+function findOrphanedToolResults(messages: ModelMessage[]): {
+  result: ModelMessage[]
+  orphanToolCallIds: string[]
+} {
+  const toolCallIds = new Set<string>()
+  for (const msg of messages) {
+    if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue
+    for (const part of msg.content) {
+      if (part.type === "tool-call" && part.toolCallId) {
+        toolCallIds.add(part.toolCallId)
+      }
+    }
+  }
+  const orphanToolCallIds: string[] = []
+  const result: ModelMessage[] = []
+  for (const msg of messages) {
+    if (msg.role !== "tool" || !Array.isArray(msg.content)) {
+      result.push(msg)
+      continue
+    }
+    let orphanId: string | undefined
+    for (const part of msg.content) {
+      if (part.type === "tool-result" && part.toolCallId && !toolCallIds.has(part.toolCallId)) {
+        orphanId = part.toolCallId
+        break
+      }
+    }
+    if (orphanId !== undefined) {
+      orphanToolCallIds.push(orphanId)
+    } else {
+      result.push(msg)
+    }
+  }
+  return { result, orphanToolCallIds }
+}
+
 export const validateMessages = (messages: ModelMessage[]): Effect.Effect<ModelMessage[], LLMError, never> => {
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]
@@ -81,7 +131,30 @@ export const validateMessages = (messages: ModelMessage[]): Effect.Effect<ModelM
       }
     }
   }
-  return Effect.succeed(messages)
+
+  // Phase 2: defense-in-depth orphan tool-result detection. The primary fix
+  // lives in `MessageV2.repairOrphanedToolResults` (upstream of the LLM
+  // adapter). This second pass protects against any orphan that slips through
+  // — e.g. a future AI SDK upgrade, a new provider adapter that bypasses the
+  // upstream repair, or DB corruption on session resume. We never fail the
+  // request here: session continuity wins over a missing tool-result, so we
+  // log a warning per orphan and return the cleaned array.
+  const { result, orphanToolCallIds } = findOrphanedToolResults(messages)
+  if (orphanToolCallIds.length === 0) {
+    return Effect.succeed(messages)
+  }
+
+  let effect: Effect.Effect<ModelMessage[], LLMError, never> = Effect.succeed(result)
+  for (const id of orphanToolCallIds) {
+    effect = effect.pipe(
+      Effect.tap(() =>
+        Effect.logWarning(
+          `Orphan tool-result "${id}" detected at LLM-adapter boundary; dropping message to avoid provider rejection`,
+        ),
+      ),
+    )
+  }
+  return effect
 }
 
 export type StreamInput = {

@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-10T18:45:00Z"
+updatedAt: "2026-08-13T10:35:00Z"
 tags: []
 ---
 
@@ -85,3 +85,7 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0071-rules-inject-after-persona-placement.adr.md]] — "After Persona" = Between Persona and Env Block, Split on Env Marker (ADR-0071, status: accepted)
 - [[0072-per-stream-loop-detector.adr.md]] — Per-Stream Loop Detector Instead of Global Singleton (ADR-0072, status: accepted, supersedes ADR-0020)
 - [[0073-self-diagnosis-threshold-2.adr.md]] — Increase Self-Diagnosis Evidence Threshold to 2 (ADR-0073, status: accepted, supersedes ADR-0019)
+- [[0074-cross-stream-doom-loop-detection.adr.md]] — Cross-Stream Doom Loop Detection (ADR-0074, status: accepted)
+- [[0075-fix-at-assembly-layer.adr.md]] — Fix Orphaned Tool-Call Output at the Assembly Layer, Not the Provider Adapter (ADR-0075, status: accepted)
+- [[0076-drop-orphan-tool-results.adr.md]] — Drop Orphan Tool-Results (Do Not Re-Attach Synthetic Tool-Call Parts) (ADR-0076, status: accepted)
+- [[0077-defense-in-depth-validate-messages.adr.md]] — Add Defense-in-Depth in LLM.validateMessages for Orphan Tool-Results (ADR-0077, status: accepted)

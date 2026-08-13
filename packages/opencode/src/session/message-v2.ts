@@ -663,6 +663,92 @@ export const toModelMessagesValidation = (
   return Effect.succeed(input)
 }
 
+/**
+ * Drop `tool` messages whose `tool-result` parts have no matching `tool-call`
+ * part in any preceding assistant message. Pure helper — does not mutate input.
+ *
+ * Rationale: `MessageV2.toModelMessagesEffect` converts opencode's internal
+ * `parts[]` to the AI SDK's `ModelMessage[]`. In rare cases (compaction,
+ * streaming edge cases, future regressions) the assembly can drop an
+ * assistant `tool-call` part while preserving its paired `tool-result` part.
+ * Sending an orphan tool-result to OpenAI Responses / DeepSeek causes:
+ *   - codex:  "No tool call found for function call output with call_id X"
+ *   - deepseek: "Messages with role 'tool' must be a response to a preceding
+ *               message with 'tool_calls'"
+ *
+ * The helper preserves all other messages, leaves non-orphan tool messages
+ * intact, and never reorders. It is intentionally separate from
+ * `toModelMessagesEffect` so it can be unit-tested with hand-built fixtures.
+ *
+ * @param messages - Input `ModelMessage[]` (typically the result of
+ *   `convertToModelMessages`). Not mutated.
+ * @returns A new `ModelMessage[]` with orphan tool messages removed.
+ */
+export function repairOrphanedToolResults(messages: ModelMessage[]): ModelMessage[] {
+  const toolCallIds = new Set<string>()
+  for (const msg of messages) {
+    if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue
+    for (const part of msg.content) {
+      if (part.type === "tool-call" && part.toolCallId) {
+        toolCallIds.add(part.toolCallId)
+      }
+    }
+  }
+  return messages.filter((msg) => {
+    if (msg.role !== "tool" || !Array.isArray(msg.content)) return true
+    for (const part of msg.content) {
+      if (part.type === "tool-result" && part.toolCallId && !toolCallIds.has(part.toolCallId)) {
+        return false
+      }
+    }
+    return true
+  })
+}
+
+/**
+ * Diagnostic counter for the env-gated debug log inside
+ * `toModelMessagesEffect`. Pure — does not mutate input.
+ *
+ * Counts the three quantities that the assembly-step debug log records:
+ *   - `toolCallCount`  — total `tool-call` parts across all `assistant`
+ *                        messages with array content.
+ *   - `toolResultCount` — total `tool-result` parts across all `tool`
+ *                        messages with array content. Includes orphan parts
+ *                        (these are the ones the repair step will drop).
+ *   - `orphanCount` — number of `tool` messages that `repairOrphanedToolResults`
+ *                     would remove on the same input. Derived as
+ *                     `input.length - repaired.length`.
+ *
+ * @param messages - The pre-repair `ModelMessage[]` (typically the output of
+ *   `convertToModelMessages`). Not mutated.
+ */
+export function countAssemblyParts(messages: ModelMessage[]): {
+  toolCallCount: number
+  toolResultCount: number
+  orphanCount: number
+} {
+  let toolCallCount = 0
+  let toolResultCount = 0
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue
+    if (msg.role === "assistant") {
+      for (const part of msg.content) {
+        if (part.type === "tool-call" && part.toolCallId) {
+          toolCallCount++
+        }
+      }
+    } else if (msg.role === "tool") {
+      for (const part of msg.content) {
+        if (part.type === "tool-result" && part.toolCallId) {
+          toolResultCount++
+        }
+      }
+    }
+  }
+  const orphanCount = messages.length - repairOrphanedToolResults(messages).length
+  return { toolCallCount, toolResultCount, orphanCount }
+}
+
 export const toModelMessagesEffect = Effect.fnUntraced(function* (
   input: WithParts[],
   model: Provider.Model,
@@ -942,7 +1028,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 
   const tools = Object.fromEntries(Array.from(toolNames).map((toolName) => [toolName, { toModelOutput }]))
 
-  return yield* Effect.promise(() =>
+  const converted = yield* Effect.promise(() =>
     convertToModelMessages(
       result.filter((msg) => msg.parts.some((part) => part.type !== "step-start")),
       {
@@ -951,6 +1037,52 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       },
     ),
   )
+
+  // Preserve layer: drop orphan tool-result messages whose toolCallId has no
+  // matching tool-call part in any preceding assistant message. Defends both
+  // codex ("No tool call found for function call output with call_id X") and
+  // DeepSeek ("Messages with role 'tool' must be a response to a preceding
+  // message with 'tool_calls'") with a single upstream-of-adapter repair.
+  //
+  // 1. Run the pure helper to get the repaired array (single source of truth
+  //    for the orphan-detection logic, covered by unit tests).
+  // 2. Diff `converted` vs `repaired` to enumerate dropped tool messages and
+  //    emit one `Effect.logWarning` per orphan with `toolCallId`, index, and
+  //    `reason: "orphan"` annotations for ops visibility.
+  const repaired = repairOrphanedToolResults(converted)
+  const repairedSet = new Set(repaired)
+  for (let i = 0; i < converted.length; i++) {
+    const msg = converted[i]
+    if (repairedSet.has(msg)) continue
+    if (msg.role !== "tool" || !Array.isArray(msg.content)) continue
+    for (const part of msg.content) {
+      if (part.type === "tool-result" && part.toolCallId) {
+        yield* Effect.logWarning("dropping orphan tool-result", {
+          toolCallId: part.toolCallId,
+          messageIndex: i,
+          reason: "orphan",
+        })
+      }
+    }
+  }
+
+  // Diagnostic log: gated by `OPENCODE_DEBUG_MSG_ASSEMBLY=1`. When the flag
+  // is unset or any other value, no `Effect.logDebug` call is emitted — the
+  // local boolean short-circuits the entire block (including the count pass).
+  // Lets the developer confirm the fix during manual testing without
+  // flooding production logs. Counts are derived from `converted` (pre-repair)
+  // for toolCallCount/toolResultCount, and from the repair step's drop count
+  // for orphanCount.
+  if (process.env.OPENCODE_DEBUG_MSG_ASSEMBLY === "1") {
+    const counts = countAssemblyParts(converted)
+    yield* Effect.logDebug("message assembly counts", {
+      toolCallCount: counts.toolCallCount,
+      toolResultCount: counts.toolResultCount,
+      orphanCount: counts.orphanCount,
+    })
+  }
+
+  return repaired
 })
 
 export function toModelMessages(

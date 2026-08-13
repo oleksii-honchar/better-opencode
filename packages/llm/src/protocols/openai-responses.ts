@@ -325,6 +325,32 @@ const lowerToolResultOutput = Effect.fn("OpenAIResponses.lowerToolResultOutput")
   return yield* Effect.forEach(part.result.value, lowerToolResultContentItem)
 })
 
+// Removes orphaned `function_call_output` items whose `call_id` does not have
+// a matching `function_call` item. This can happen when a tool result is
+// replayed from history without its corresponding tool call.
+export const repairOrphanedInputItems = (
+  items: OpenAIResponsesInputItem[],
+): OpenAIResponsesInputItem[] => {
+  const toolCallIds = new Set<string>()
+
+  for (const item of items) {
+    if ("type" in item && item.type === "function_call") {
+      toolCallIds.add(item.call_id)
+    }
+  }
+
+  const repaired: OpenAIResponsesInputItem[] = []
+  for (const item of items) {
+    if ("type" in item && item.type === "function_call_output" && !toolCallIds.has(item.call_id)) {
+      Effect.logWarning(`Removed orphaned tool call output: call_id=${item.call_id}`)
+      continue
+    }
+    repaired.push(item)
+  }
+
+  return repaired
+}
+
 const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (request: LLMRequest) {
   const system: OpenAIResponsesInputItem[] =
     request.system.length === 0 ? [] : [{ role: "system", content: ProviderShared.joinText(request.system) }]
@@ -397,14 +423,17 @@ const lowerMessages = Effect.fn("OpenAIResponses.lowerMessages")(function* (requ
     }
   }
 
+  // Repair orphaned function_call_output items before the store:false filter.
+  const repaired = repairOrphanedInputItems(input)
+
   // With store:false, OpenAI only accepts previous reasoning items when the
   // complete item has encrypted state. Summary blocks for one item may carry
   // that state only on the last block, so filter after they have been joined.
   return store === false
-    ? input.filter(
+    ? repaired.filter(
         (item) => !("type" in item) || item.type !== "reasoning" || typeof item.encrypted_content === "string",
       )
-    : input
+    : repaired
 })
 
 const lowerOptions = Effect.fn("OpenAIResponses.lowerOptions")(function* (request: LLMRequest) {

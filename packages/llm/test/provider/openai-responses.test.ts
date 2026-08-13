@@ -1295,4 +1295,102 @@ describe("OpenAI Responses route", () => {
       expect(error.message).toContain("HTTP 400")
     }),
   )
+
+  it.effect("removes orphaned function_call_output with no matching function_call", () =>
+    Effect.gen(function* () {
+      // Tool result references call_id "call_orphan" but no function_call
+      // exists with that call_id — it should be stripped from the input.
+      const prepared = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(
+        LLM.request({
+          id: "req_orphan",
+          model,
+          messages: [
+            Message.user("What is the weather?"),
+            Message.tool({ id: "call_orphan", name: "lookup", result: { forecast: "sunny" } }),
+          ],
+        }),
+      )
+
+      const outputItems = prepared.body.input.filter(
+        (item): item is Extract<typeof item, { readonly type: "function_call_output" }> =>
+          "type" in item && item.type === "function_call_output",
+      )
+      expect(outputItems).toHaveLength(0)
+    }),
+  )
+
+  it.effect("preserves matched function_call + function_call_output pair", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(
+        LLM.request({
+          id: "req_matched",
+          model,
+          messages: [
+            Message.user("What is the weather?"),
+            Message.assistant([ToolCallPart.make({ id: "call_1", name: "lookup", input: { query: "weather" } })]),
+            Message.tool({ id: "call_1", name: "lookup", result: { forecast: "sunny" } }),
+          ],
+        }),
+      )
+
+      const outputs = prepared.body.input.filter(
+        (item): item is Extract<typeof item, { readonly type: "function_call_output" }> =>
+          "type" in item && item.type === "function_call_output",
+      )
+      expect(outputs).toHaveLength(1)
+      expect(outputs[0].call_id).toBe("call_1")
+    }),
+  )
+
+  it.effect("removes multiple orphaned function_call_outputs while keeping matched pairs", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(
+        LLM.request({
+          id: "req_multi_orphan",
+          model,
+          messages: [
+            Message.user("Query."),
+            Message.assistant([ToolCallPart.make({ id: "call_1", name: "lookup", input: { q: "a" } })]),
+            Message.tool({ id: "call_1", name: "lookup", result: { a: 1 } }),
+            Message.tool({ id: "call_orphan_1", name: "orphan", result: { x: 1 } }),
+            Message.tool({ id: "call_orphan_2", name: "orphan", result: { y: 2 } }),
+          ],
+        }),
+      )
+
+      const outputs = prepared.body.input.filter(
+        (item): item is Extract<typeof item, { readonly type: "function_call_output" }> =>
+          "type" in item && item.type === "function_call_output",
+      )
+      expect(outputs).toHaveLength(1)
+      expect(outputs[0].call_id).toBe("call_1")
+    }),
+  )
+
+  it.effect("no-op when all function_call_outputs have matching function_calls", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(
+        LLM.request({
+          id: "req_all_matched",
+          model,
+          messages: [
+            Message.user("Query."),
+            Message.assistant([
+              ToolCallPart.make({ id: "call_a", name: "tool_a", input: {} }),
+              ToolCallPart.make({ id: "call_b", name: "tool_b", input: {} }),
+            ]),
+            Message.tool({ id: "call_a", name: "tool_a", result: { a: 1 } }),
+            Message.tool({ id: "call_b", name: "tool_b", result: { b: 2 } }),
+          ],
+        }),
+      )
+
+      const outputs = prepared.body.input.filter(
+        (item): item is Extract<typeof item, { readonly type: "function_call_output" }> =>
+          "type" in item && item.type === "function_call_output",
+      )
+      expect(outputs).toHaveLength(2)
+      expect(outputs.map((o) => o.call_id)).toEqual(["call_a", "call_b"])
+    }),
+  )
 })
