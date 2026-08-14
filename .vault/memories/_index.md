@@ -2,7 +2,7 @@
 type: index
 title: "Atomic Memories"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-13T18:00:00Z"
+updatedAt: "2026-08-14T13:00:00Z"
 tags: []
 ---
 
@@ -29,3 +29,4 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0015-cross-stream-detection-gap.memory.md]] — Cross-Stream Doom-Loop Detection Gap (Per-Stream Isolation)
 - [[0016-self-diagnosis-regex-gap.memory.md]] — Self-Diagnosis Regex Gap — 'Stuck on X' Pattern Not Detected
 - [[0017-prune-looping-messages-orphan.memory.md]] — pruneLoopingMessages Creates Orphaned Tool-Results
+- [[0018-unstuck-trim-bug-root-cause.memory.md]] — Commit 04c1e08c78 Extended Pruning to Tool-Result Messages

@@ -2,22 +2,23 @@
 type: adr
 id: ADR-0078
 title: "Fix pruneLoopingMessages to Preserve Tool-Call/Tool-Result Pairs"
-status: accepted
+status: superseded
 createdAt: "2026-08-13T18:00:00Z"
-updatedAt: "2026-08-13T18:00:00Z"
+updatedAt: "2026-08-14T13:00:00Z"
 tags: [tool-calls, prune, unstuck, loop-detection, orphan, message-integrity]
 supersedes: []
-superseded_by: []
+superseded_by: ["ADR-0080"]
 see_also:
   - "adrs/0075-fix-at-assembly-layer.adr.md"
   - "adrs/0076-drop-orphan-tool-results.adr.md"
   - "adrs/0077-defense-in-depth-validate-messages.adr.md"
+  - "adrs/0080-nudge-only-intervention.adr.md"
   - "specifications/0017-fix-prune-looping-messages.spec.md"
   - "memories/0017-prune-looping-messages-orphan.memory.md"
 deprecated:
-  date: null
-  reason: null
-  superseded_by: null
+  date: "2026-08-14"
+  reason: "The prune function (pruneLoopingMessages) has been removed entirely. ADR-0078's fix was for a function that no longer exists. Its defense-in-depth repair layer in message-v2.ts remains as a general safety net."
+  superseded_by: "ADR-0080"
 ---
 
 # ADR-0078: Fix pruneLoopingMessages to Preserve Tool-Call/Tool-Result Pairs
