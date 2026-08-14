@@ -377,7 +377,7 @@ The plugin uses **evidence accumulation** before intervening. A single detection
 
 ```
 Detect → evidence++ → if evidence < threshold: continue stream (model may self-correct)
-                        else: inject nudge + prune + restart
+                        else: append nudge user message and restart with unchanged messages
 ```
 
 #### Evidence Data Model
@@ -403,8 +403,8 @@ Evidence is **scoped by loop type** — a `step_loop` detection doesn't count to
 1. **Detection** — The detector returns `LoopDetectedInfo`. The wrapper converts it to an `EvidenceRecord` and appends it to the accumulator.
 2. **Threshold check** — `evidence.countByType(type) >= evidenceThresholds[type]`?
    - **Below threshold**: Call `detector.reset()` (clears streaming state, preserves history), restart the stream with original args. The model may self-correct.
-   - **Threshold met**: Proceed to nudge-and-prune (step 3).
-3. **Nudge-and-prune** — Abort the current stream, prune looping assistant messages, inject a nudge user message, restart the stream with modified messages.
+    - **Threshold met**: Proceed to nudge (step 3).
+3. **Nudge** — Abort the current stream, append nudge user message, restart the stream with unchanged messages plus the nudge.
 4. **Clear** — After nudge fires, call `detector.clear()` and `evidence.clear()` — both start fresh for the next episode.
 5. **Fallback** — If `maxNudges` (default: 2) is exceeded across the session, fall back to abort.
 
@@ -484,10 +484,9 @@ interface UnstuckConfig {
   // Maximum evidence records to retain per episode (default: Infinity — no windowing)
   evidenceWindow?: number
 
-  // Nudge-and-prune settings
-  strategy: "nudge-and-prune" | "abort" | "warn"  // default: "nudge-and-prune"
+  // Nudge settings
+  strategy: "nudge" | "nudge-and-prune" | "abort" | "warn"  // default: "nudge"
   maxNudges: number  // default: 2
-  pruneCount: number  // default: 3
   nudgeMessage?: string  // default: "You appear to be stuck in a loop..."
   logLevel: "debug" | "info" | "warn"  // default: "info"
 }
@@ -517,14 +516,14 @@ interface UnstuckConfig {
 | | | | - **`doomLoop`** (default: 1): Doom loops are very strong signals — the detector already requires `doomLoopThreshold` identical calls, so a single detection already proves 3 identical calls occurred. |
 | | | | To restore the old immediate-nudge behavior, set all to `1`. |
 | `evidenceWindow` | number | `Infinity` | Maximum evidence records to retain per episode (stream between nudges). Older records are evicted when new ones are added. Default `Infinity` means no windowing — all evidence persists until cleared by a nudge or clean finish. Set a finite value (e.g., `10`) for memory bounds in very long sessions. |
-| `strategy` | `"nudge-and-prune" \| "abort" \| "warn"` | `"nudge-and-prune"` | What to do when a loop is detected: |
-| | | | - **`nudge-and-prune`** (default): Abort the stream, prune the last N looping assistant messages from the conversation, inject a nudge user message telling the model to break the loop, and restart the stream. |
+| `strategy` | `"nudge" \| "nudge-and-prune" \| "abort" \| "warn"` | `"nudge"` | What to do when a loop is detected: |
+| | | | - **`nudge`** (default): Abort the stream, append a nudge user message to the unchanged conversation, and restart the stream. No messages are removed. |
+| | | | - **`nudge-and-prune`** (deprecated alias for `nudge`): Same as `nudge`. This alias is kept for backward compatibility. |
 | | | | - **`abort`**: Abort the stream immediately. No recovery attempt. The session turns red with an error. |
 | | | | - **`warn`**: Log a warning about the loop but do **not** abort or nudge. Useful for debugging or when you want manual review before intervention. |
-| `maxNudges` | number | `2` | Maximum number of nudge-and-prune recovery attempts before falling back to abort. If the model re-enters the same loop after a nudge, the plugin will try again up to this limit. After `maxNudges` failures, the stream is aborted. |
-| `pruneCount` | number | `3` | Number of recent assistant messages to remove from the conversation when performing nudge-and-prune. These are the looping messages that are likely causing the model to repeat. |
+| `maxNudges` | number | `2` | Maximum number of nudge recovery attempts before falling back to abort. If the model re-enters the same loop after a nudge, the plugin will try again up to this limit. After `maxNudges` failures, the stream is aborted. |
 | `nudgeMessage` | string | auto-generated | Custom nudge message injected as a synthetic user message when a loop is detected. The auto-generated message is: "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction." Set a custom value to match your team's communication style. |
-| `logLevel` | `"debug" \| "info" \| "warn"` | `"info"` | Log level for unstuck plugin events. Use `debug` for per-chunk state tracking (text accumulated, fingerprints computed, sentence splits) — useful for diagnosing false positives. Use `info` for loop detection events and nudge-and-prune actions. Use `warn` to only see warnings (max nudges reached). |
+| `logLevel` | `"debug" \| "info" \| "warn"` | `"info"` | Log level for unstuck plugin events. Use `debug` for per-chunk state tracking (text accumulated, fingerprints computed, sentence splits) — useful for diagnosing false positives. Use `info` for loop detection events and nudge actions. Use `warn` to only see warnings (max nudges reached). |
 
 ### Configuration via opencode config
 
@@ -549,9 +548,8 @@ interface UnstuckConfig {
       "doomLoop": 1
     },
     "evidenceWindow": 10,
-    "strategy": "nudge-and-prune",
-    "maxNudges": 2,
-    "pruneCount": 3
+    "strategy": "nudge",
+    "maxNudges": 2
   }
 }
 ```
@@ -615,14 +613,14 @@ The unstuck plugin emits structured logs tagged with `service: "unstuck"`. Use `
 | DEBUG | Per-chunk state: text accumulated, tool call received, sentence split result, fingerprint value | `log.debug("chunk processed", { type: "text-delta", accumulatedLen: 234 })` |
 | DEBUG | Sentence-level detection: sentence added to history, periodic pattern check | `log.debug("sentence tracked", { index: 5, hash: "a1b2c3", window: 7 })` |
 | INFO | Loop detected: type, threshold, fingerprint (or repeating sentence for sentence_loop) | `log.info("loop detected", { type: "step_loop", threshold: 3, fingerprint: "..." })` or `log.info("loop detected", { type: "sentence_loop", threshold: 3, sentence: "Let me check..." })` |
-| INFO | Nudge-and-prune event: nudge number, messages pruned, restart | `log.info("nudge applied", { nudgeCount: 1, prunedMsgs: 3, strategy: "nudge-and-prune" })` |
+| INFO | Nudge event: nudge number, restart | `log.info("nudge applied", { nudgeCount: 1, strategy: "nudge" })` |
 | WARN | Max nudges reached, falling back to abort | `log.warn("max nudges reached", { maxNudges: 2, fallback: "abort" })` |
 | ERROR | Unexpected error during stream interception | `log.error("stream wrap error", { error: e.message })` |
 | DEBUG | **L1 — doom_loop candidate tracked**: each `tool-input-end` matching the current doom-loop run (tool name + exact input) | `log.debug("doom_loop candidate tracked", { toolName: "bash", candidateCount: 2, inputFingerprint: "a1b2c3d4e5f6a1b2", currentRun: 1 })` |
 | INFO | **L2 — doom_loop detected**: 3rd identical call seen and the evidence threshold is met | `log.info("doom_loop detected", { type: "doom_loop", threshold: 3, toolName: "bash", inputFingerprint: "a1b2c3d4e5f6a1b2", chunkCount: 42 })` |
 | DEBUG | **L3 — doom_loop input equality mismatch**: a later call in the run differs → run broken (false-negative diagnostic) | `log.debug("doom_loop input equality mismatch", { toolName: "bash", expectedInputFingerprint: "a1b2c3d4e5f6a1b2", actualInputFingerprint: "c3d4e5f6a7b8c9d0" })` |
 | DEBUG | **L4 — doom_loop skipped**: input resolution failed / `_missing` / provider-executed | `log.debug("doom_loop skipped", { toolName: "bash", reason: "missing-input" })` |
-| INFO | **L5 — nudge applied** (doom_loop): nudge fired for the detected doom loop | `log.info("nudge applied", { nudgeCount: 1, loopType: "doom_loop", toolName: "bash", prunedMsgs: 3 })` |
+| INFO | **L5 — nudge applied** (doom_loop): nudge fired for the detected doom loop | `log.info("nudge applied", { nudgeCount: 1, loopType: "doom_loop", toolName: "bash" })` |
 | WARN | **L6 — max nudges reached, aborting**: the doom loop still recurs after `maxNudges` nudges | `log.warn("max nudges reached, aborting", { maxNudges: 2, type: "doom_loop", toolName: "bash" })` |
 | DEBUG | **L7 — doom_loop config**: emitted once on wrapper init | `log.debug("doom_loop config", { enableDoomLoopDetection: true, doomLoopThreshold: 3, evidenceDoomLoop: 1 })` |
 
@@ -638,7 +636,7 @@ grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null || \
 grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
   grep -i "loop detected"
 
-# Show only nudge-and-prune events
+# Show only nudge events
 grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
   grep -i "nudge"
 
@@ -663,7 +661,7 @@ Set `logLevel` in the `unstuck` config section of `opencode.json`:
 }
 ```
 
-- **`info`** (default): Only loop detection events and nudge-and-prune actions. Quiet in production.
+- **`info`** (default): Only loop detection events and nudge actions. Quiet in production.
 - **`debug`**: Per-chunk state tracking (text accumulated, fingerprints computed, sentence splits). Useful for diagnosing false positives.
 - **`warn`**: Only warnings (max nudges reached). Most quiet.
 
@@ -703,7 +701,7 @@ grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
 # Increase `loopThreshold` (e.g., from 3 to 4) or increase `minThinkingLength` to require more thinking text.
 ```
 
-**Scenario 3: Nudge-and-prune not recovering**
+**Scenario 3: Nudge not recovering**
 
 ```bash
 # Check nudge events
@@ -713,8 +711,6 @@ grep -i "service.*unstuck" ~/.opencode/logs/* 2>/dev/null | \
 # Check: how many nudge attempts were made?
 # If `maxNudges` was reached, the model is not recovering.
 # Consider: increasing `maxNudges`, or switching `strategy` to "abort" to fail fast.
-
-# Check: what message was pruned?
 # The nudge message is injected as a synthetic user message in the conversation.
 # Look for `"_unstuckNudge": true` in the conversation history to see what was injected.
 ```
@@ -821,8 +817,7 @@ The global log level is controlled via opencode config (`logLevel: "DEBUG" | "IN
 - [ ] Implement `UnstuckConfig` service and configuration loading
 - [ ] Write integration tests with mock `LanguageModelV3`
 
-#### Phase 3: Nudge-and-Prune Integration
-- [ ] Implement `pruneLoopingMessages` function
+#### Phase 3: Nudge Integration
 - [ ] Implement nudge message injection
 - [ ] Implement `doStream` restart logic with modified messages
 - [ ] Implement `maxNudges` fallback to abort
@@ -852,7 +847,7 @@ The global log level is controlled via opencode config (`logLevel: "DEBUG" | "IN
 2. **Multi-level detection** — Step-level, sentence-level, and tool-only modes cover different loop patterns
 3. **Fingerprint-based comparison over exact matching** — Handles slight model output variations via normalization + SHA-256 hash
 4. **Tool signature uses normalized key=value pairs** — Avoids false positives where different commands/files matched the same signature (e.g., `bash:command=./script.sh` vs `bash:command=ls -la`). Values are normalized (lowercase, collapsed whitespace, stripped quotes).
-5. **Evidence-based nudge-and-prune over immediate nudge** — A single detection is not enough to trigger a nudge. Evidence accumulates across detections; nudge only fires when per-type threshold is met. This prevents false positives from consuming the nudge budget. `maxNudges` remains as the ultimate safety net.
+5. **Evidence-based nudge over immediate nudge** — A single detection is not enough to trigger a nudge. Evidence accumulates across detections; nudge only fires when per-type threshold is met. The nudge appends a guidance message to the unchanged conversation — no pruning. This prevents false positives from consuming the nudge budget. `maxNudges` remains as the ultimate safety net.
 6. **`reset()` vs `clear()` distinction** — `reset()` only clears streaming state (preserves history for evidence accumulation within a stream). `clear()` wipes everything (used after nudge fires or clean finish).
 7. **Separate plugin over modifying existing `doom_loop`** — Different detection levels, complementary mechanisms, no risk of breaking existing behavior
 8. **`provider.ts` integration over V2 plugin hook** — The V2 `aisdk.language` hook is not wired up in the current codebase. `provider.ts` is the active hot path. The V2 plugin module remains as a library of utilities (config types, LoopDetectorImpl, wrapWithLoopDetection, etc.) that can be reused if the V2 system gets wired up in the future.

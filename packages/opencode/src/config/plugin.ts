@@ -9,7 +9,7 @@ export type Options = Schema.Schema.Type<typeof Options>
 
 // Spec is the user-config value: either just a plugin identifier, or the identifier plus inline options.
 // It answers "what should we load?" but says nothing about where that value came from.
-export const Spec = Schema.Union([Schema.String, Schema.mutable(Schema.Tuple([Schema.String, Options]))])
+export const Spec = Schema.Union([Schema.String, Schema.Tuple([Schema.String, Options])])
 export type Spec = Schema.Schema.Type<typeof Spec>
 
 export type Scope = "global" | "local"
@@ -38,7 +38,7 @@ export async function load(dir: string) {
 }
 
 export function pluginSpecifier(plugin: Spec): string {
-  return Array.isArray(plugin) ? plugin[0] : plugin
+  return Array.isArray(plugin) ? plugin[0] : (plugin as string)
 }
 
 export function pluginOptions(plugin: Spec): Options | undefined {

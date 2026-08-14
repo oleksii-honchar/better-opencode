@@ -358,14 +358,14 @@ describe("UnstuckConfig — Task 2: pruneCount removal and strategy rename", () 
   })
 
   test("mergeConfig ignores pruneCount in input — output has no pruneCount", () => {
-    const merged = mergeConfig({ pruneCount: 5 as any })
-    expect((merged as any).pruneCount).toBeUndefined()
+    const merged = mergeConfig({ pruneCount: 5 } as unknown as Partial<UnstuckConfig>)
+    expect((merged as unknown as Record<string, unknown>).pruneCount).toBeUndefined()
   })
 
   test("validateUnstuckConfig ignores pruneCount in input — output has no pruneCount", () => {
-    const config: UnstuckConfig = { ...defaultConfig, pruneCount: 5 as any }
+    const config = { ...defaultConfig, pruneCount: 5 } as unknown as UnstuckConfig
     const validated = validateUnstuckConfig(config)
-    expect((validated as any).pruneCount).toBeUndefined()
+    expect((validated as unknown as Record<string, unknown>).pruneCount).toBeUndefined()
   })
 })
 

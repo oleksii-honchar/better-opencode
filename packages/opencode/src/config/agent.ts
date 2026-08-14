@@ -2,7 +2,7 @@ export * as ConfigAgent from "./agent"
 
 import path from "path"
 import { Exit, Schema, SchemaGetter } from "effect"
-import { PositiveInt, type DeepMutable } from "@opencode-ai/core/schema"
+import { PositiveInt, withStatics, type DeepMutable } from "@opencode-ai/core/schema"
 import { Bus } from "@/bus"
 import * as Log from "@opencode-ai/core/util/log"
 import { Glob } from "@opencode-ai/core/util/glob"
@@ -38,7 +38,7 @@ const AgentSchema = Schema.StructWithRest(
     disable: Schema.optional(Schema.Boolean),
     description: Schema.optional(Schema.String).annotate({ description: "Description of when to use the agent" }),
     mode: Schema.optional(Schema.Literals(["subagent", "primary", "all"])),
-    allowedMcpCategories: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+    allowedMcpCategories: Schema.optional(Schema.Array(Schema.String)).annotate({
       description: "MCP server categories this agent can access",
     }),
     hidden: Schema.optional(Schema.Boolean).annotate({
@@ -115,7 +115,9 @@ export const Info = AgentSchema.pipe(
     decode: SchemaGetter.transform(normalize),
     encode: SchemaGetter.passthrough({ strict: false }),
   }),
-).annotate({ identifier: "AgentConfig" })
+)
+  .annotate({ identifier: "AgentConfig" })
+  .pipe(withStatics((s) => ({ zod: zod(s) })))
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
 export async function load(dir: string) {
