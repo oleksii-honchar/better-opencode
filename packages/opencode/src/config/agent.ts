@@ -2,7 +2,7 @@ export * as ConfigAgent from "./agent"
 
 import path from "path"
 import { Exit, Schema, SchemaGetter } from "effect"
-import { PositiveInt, withStatics, type DeepMutable } from "@opencode-ai/core/schema"
+import { PositiveInt, type DeepMutable } from "@opencode-ai/core/schema"
 import { Bus } from "@/bus"
 import * as Log from "@opencode-ai/core/util/log"
 import { Glob } from "@opencode-ai/core/util/glob"
@@ -115,9 +115,7 @@ export const Info = AgentSchema.pipe(
     decode: SchemaGetter.transform(normalize),
     encode: SchemaGetter.passthrough({ strict: false }),
   }),
-)
-  .annotate({ identifier: "AgentConfig" })
-  .pipe(withStatics((s) => ({ zod: zod(s) })))
+).annotate({ identifier: "AgentConfig" })
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
 export async function load(dir: string) {
