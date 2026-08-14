@@ -60,7 +60,7 @@ async function collectStream(
 const crossStreamConfig: UnstuckConfig = {
   ...defaultConfig,
   maxNudges: 2,
-  strategy: "nudge-and-prune",
+  strategy: "nudge",
   loopThreshold: 100,
   detectToolOnlyLoops: false,
   enablePatternLoopDetection: false,

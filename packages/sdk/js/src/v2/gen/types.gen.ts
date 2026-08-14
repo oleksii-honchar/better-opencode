@@ -1352,9 +1352,8 @@ export type Config = {
     enableSentenceLoopDetection?: boolean
     sentenceLoopThreshold?: number
     minSentenceLength?: number
-    strategy?: "nudge-and-prune" | "abort" | "warn"
+    strategy?: "nudge" | "nudge-and-prune" | "abort" | "warn"
     maxNudges?: number
-    pruneCount?: number
     nudgeMessage?: string
     logLevel?: "debug" | "info" | "warn"
     evidenceThresholds?: {

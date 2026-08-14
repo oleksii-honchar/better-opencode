@@ -161,7 +161,7 @@ describe("wrapWithLoopDetection — 2-param API and per-stream isolation", () =>
     }
 
     // 2-param API: no detector argument
-    const config: UnstuckConfig = { ...defaultConfig, maxNudges: 2, pruneCount: 2, strategy: "nudge-and-prune" }
+    const config: UnstuckConfig = { ...defaultConfig, maxNudges: 2, strategy: "nudge" }
     const wrapped = wrapWithLoopDetection(model, config)
 
     const initialMessages = [
@@ -178,7 +178,7 @@ describe("wrapWithLoopDetection — 2-param API and per-stream isolation", () =>
     expect(callCount).toBe(3)
 
     // Third call should have pruned 2 assistant messages and injected nudge
-    expect(receivedPrompt.length).toBe(initialMessages.length - 2 + 1)
+    expect(receivedPrompt.length).toBe(initialMessages.length + 1)
     expect(receivedPrompt[receivedPrompt.length - 1].role).toBe("user")
     const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>
     expect(lastContent[0]?.text).toContain("stuck in a loop")

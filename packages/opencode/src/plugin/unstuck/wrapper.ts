@@ -14,11 +14,6 @@ type Message = {
   [key: string]: unknown
 }
 
-type DoStreamArgs = {
-  messages: Message[]
-  [key: string]: unknown
-}
-
 function defaultNudgeMessage(info: LoopDetectedInfo): string {
   if (info.type === "sentence_loop") {
     return `You are repeating the sentence "${info.sentence}" — this is a loop. Break out and take a different direction.`
@@ -45,52 +40,6 @@ function defaultNudgeMessage(info: LoopDetectedInfo): string {
     return `You keep calling the same tool${toolInfo} with the identical input repeatedly — this is a doom loop. Stop and change your approach: fix the input or try a different tool.`
   }
   return "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction."
-}
-
-export function pruneLoopingMessages(
-  messages: Message[],
-  pruneCount: number,
-): Message[] {
-  const assistantIndices: number[] = []
-
-  for (let i = 0; i < messages.length; i++) {
-    if (messages[i].role === "assistant") {
-      assistantIndices.push(i)
-    }
-  }
-
-  const toRemove = Math.min(pruneCount, assistantIndices.length)
-  const assistantIndicesToRemove = toRemove === 0 ? new Set<number>() : new Set(assistantIndices.slice(-toRemove))
-
-  // Collect tool-call IDs from pruned assistant messages
-  const prunedToolCallIds = new Set<string>()
-  for (const idx of assistantIndicesToRemove) {
-    const msg = messages[idx]
-    if (Array.isArray(msg.content)) {
-      for (const part of msg.content as Array<{ type?: string; toolCallId?: string }>) {
-        if (part.type === "tool-call" && part.toolCallId) {
-          prunedToolCallIds.add(part.toolCallId)
-        }
-      }
-    }
-  }
-
-  // Collect indices of tool messages to prune
-  const toolIndicesToRemove = new Set<number>()
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i]
-    if (msg.role !== "tool" || !Array.isArray(msg.content)) continue
-    for (const part of msg.content as Array<{ type?: string; toolCallId?: string }>) {
-      if (part.type === "tool-result" && part.toolCallId && prunedToolCallIds.has(part.toolCallId)) {
-        toolIndicesToRemove.add(i)
-        break
-      }
-    }
-  }
-
-  // Filter out both assistant and tool messages
-  const indicesToRemove = new Set([...assistantIndicesToRemove, ...toolIndicesToRemove])
-  return messages.filter((_, i) => !indicesToRemove.has(i))
 }
 
 function mapStreamChunk(chunk: LanguageModelV3StreamPart, toolNameMap: Map<string, string>): StreamChunk | undefined {
@@ -438,14 +387,11 @@ export function wrapWithLoopDetection(
             nudgeCount++
             log.debug("applying nudge", { nudgeCount, maxNudges: config.maxNudges })
 
-            // Prune looping assistant messages
-            const originalPrompt = currentArgs.prompt as Message[]
-            const prunedMessages = pruneLoopingMessages(originalPrompt, config.pruneCount)
-
-           // Inject nudge user message
+            // Inject nudge user message
             const nudgeMessage = config.nudgeMessage ?? defaultNudgeMessage(error.info)
+            const originalPrompt = currentArgs.prompt as Message[]
             const nudgedMessages: Message[] = [
-              ...prunedMessages,
+              ...originalPrompt,
               {
                 role: "user",
                 content: [{ type: "text" as const, text: nudgeMessage }],
@@ -456,9 +402,7 @@ export function wrapWithLoopDetection(
             log.info("nudge applied", {
               nudgeCount,
               originalPromptLen: originalPrompt.length,
-              prunedPromptLen: prunedMessages.length,
-              prunedMsgs: originalPrompt.length - prunedMessages.length,
-              strategy: "nudge-and-prune",
+              strategy: "nudge",
               loopType: error.info.type,
               toolName: error.info.toolName,
             })

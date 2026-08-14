@@ -290,3 +290,136 @@ describe("Config Schema — toolFilter", () => {
     expect(parsed.toolFilter).toBeUndefined()
   })
 })
+
+describe("Config Schema — unstuck nudge strategy and pruneCount removal", () => {
+  test('"nudge" strategy parses successfully', () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { strategy: "nudge" },
+    })
+    expect(parsed.unstuck?.strategy).toBe("nudge")
+  })
+
+  test('"nudge-and-prune" strategy still parses (legacy alias)', () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { strategy: "nudge-and-prune" },
+    })
+    expect(parsed.unstuck?.strategy).toBe("nudge-and-prune")
+  })
+
+  test('"abort" strategy parses successfully', () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { strategy: "abort" },
+    })
+    expect(parsed.unstuck?.strategy).toBe("abort")
+  })
+
+  test('"warn" strategy parses successfully', () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { strategy: "warn" },
+    })
+    expect(parsed.unstuck?.strategy).toBe("warn")
+  })
+
+  test('invalid strategy is rejected', () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Info)({ unstuck: { strategy: "invalid" } }),
+    ).toThrow()
+  })
+
+  test("pruneCount in input is ignored — dropped from output (Effect drops unknown keys)", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: {
+        enabled: true,
+        strategy: "nudge",
+        pruneCount: 5,
+      },
+    })
+    expect(parsed.unstuck?.enabled).toBe(true)
+    expect(parsed.unstuck?.strategy).toBe("nudge")
+    expect(parsed.unstuck?.pruneCount).toBeUndefined()
+  })
+
+  test("backward compatible — config with pruneCount and nudge-and-prune still parses", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: {
+        enabled: true,
+        loopThreshold: 3,
+        strategy: "nudge-and-prune",
+        pruneCount: 3,
+      },
+    })
+    expect(parsed.unstuck?.enabled).toBe(true)
+    expect(parsed.unstuck?.loopThreshold).toBe(3)
+    expect(parsed.unstuck?.strategy).toBe("nudge-and-prune")
+    expect(parsed.unstuck?.pruneCount).toBeUndefined()
+  })
+})
+
+describe("Config Schema — unstuck nudge strategy and pruneCount removal", () => {
+  test("'nudge' strategy parses successfully", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { strategy: "nudge" },
+    })
+    expect(parsed.unstuck?.strategy).toBe("nudge")
+  })
+
+  test("'nudge-and-prune' strategy still parses (legacy alias)", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { strategy: "nudge-and-prune" },
+    })
+    expect(parsed.unstuck?.strategy).toBe("nudge-and-prune")
+  })
+
+  test("'abort' strategy still parses", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { strategy: "abort" },
+    })
+    expect(parsed.unstuck?.strategy).toBe("abort")
+  })
+
+  test("'warn' strategy still parses", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { strategy: "warn" },
+    })
+    expect(parsed.unstuck?.strategy).toBe("warn")
+  })
+
+  test("invalid strategy is rejected", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Info)({ unstuck: { strategy: "invalid" } }),
+    ).toThrow()
+  })
+
+  test("pruneCount in input config is ignored — not present in output", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: {
+        enabled: true,
+        strategy: "nudge",
+        pruneCount: 5,
+      },
+    })
+    expect(parsed.unstuck?.enabled).toBe(true)
+    expect(parsed.unstuck?.strategy).toBe("nudge")
+    // pruneCount should be dropped by Effect Schema (unknown key)
+    expect((parsed.unstuck as Record<string, unknown>)?.pruneCount).toBeUndefined()
+  })
+
+  test("pruneCount in input config is ignored — with nudge-and-prune strategy", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: {
+        strategy: "nudge-and-prune",
+        pruneCount: 3,
+      },
+    })
+    expect(parsed.unstuck?.strategy).toBe("nudge-and-prune")
+    expect((parsed.unstuck as Record<string, unknown>)?.pruneCount).toBeUndefined()
+  })
+
+  test("config without strategy or pruneCount still parses", () => {
+    const parsed = Schema.decodeSync(Info)({
+      unstuck: { enabled: true },
+    })
+    expect(parsed.unstuck?.enabled).toBe(true)
+    expect(parsed.unstuck?.strategy).toBeUndefined()
+  })
+})

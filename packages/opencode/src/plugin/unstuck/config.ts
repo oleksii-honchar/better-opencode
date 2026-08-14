@@ -58,9 +58,8 @@ export interface UnstuckConfig {
   xmlPartialTagDetection: boolean
   // Multiplier for XML content token estimation (maps to XmlRepetitionConfig.xmlTokenEstimationMultiplier)
   xmlTokenEstimationMultiplier: number
-  strategy: "nudge-and-prune" | "abort" | "warn"
+  strategy: "nudge" | "nudge-and-prune" | "abort" | "warn"
   maxNudges: number
-  pruneCount: number
   nudgeMessage?: string
   logLevel: "debug" | "info" | "warn"
   evidenceThresholds: EvidenceThresholds
@@ -122,12 +121,10 @@ export const defaultConfig: UnstuckConfig = {
   xmlPartialTagDetection: true,
   // Multiplier for XML content token estimation (1.5 = 50% more conservative than plain text; triggers earlier interruption)
   xmlTokenEstimationMultiplier: 1.5,
-  // Intervention strategy: "nudge-and-prune" (inject recovery prompt + prune old messages), "abort" (throw immediately), "warn" (log and throw)
-  strategy: "nudge-and-prune",
+  // Intervention strategy: "nudge" (inject recovery prompt only), "nudge-and-prune" (legacy alias), "abort" (throw immediately), "warn" (log and throw)
+  strategy: "nudge",
   // Maximum number of nudge attempts before giving up and aborting (increased to 10 for XML repetition recovery)
   maxNudges: 10,
-  // Number of recent assistant messages to prune when applying a nudge (removes looping context)
-  pruneCount: 3,
   // Custom nudge message (overrides the default context-aware nudge generator)
   nudgeMessage: "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction.",
   // Log verbosity: "debug" (all), "info" (detections + interventions), "warn" (interventions only)
@@ -139,7 +136,9 @@ export const defaultConfig: UnstuckConfig = {
 }
 
 export function validateUnstuckConfig(config: UnstuckConfig): UnstuckConfig {
-  const result = { ...config }
+  let result = { ...config }
+  // pruneCount was removed — strip it if present in input
+  delete (result as any).pruneCount
 
   if (result.xmlPartialTagThreshold < 1) {
     result.xmlPartialTagThreshold = defaultConfig.xmlPartialTagThreshold
@@ -157,12 +156,14 @@ export function validateUnstuckConfig(config: UnstuckConfig): UnstuckConfig {
 }
 
 export function mergeConfig(partial: Partial<UnstuckConfig>): UnstuckConfig {
-  const merged = {
+  let merged = {
     ...defaultConfig,
     ...partial,
     evidenceThresholds: partial.evidenceThresholds
       ? { ...defaultConfig.evidenceThresholds, ...partial.evidenceThresholds }
       : defaultConfig.evidenceThresholds,
   }
+  // pruneCount was removed — strip it if present in input
+  delete (merged as any).pruneCount
   return validateUnstuckConfig(merged)
 }

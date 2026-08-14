@@ -88,7 +88,7 @@ const recoveryChunks: LanguageModelV3StreamPart[] = [
 const doomConfig: UnstuckConfig = {
   ...defaultConfig,
   maxNudges: 2,
-  strategy: "nudge-and-prune",
+  strategy: "nudge",
   loopThreshold: 100,
   detectToolOnlyLoops: false,
   enablePatternLoopDetection: false,

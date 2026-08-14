@@ -1625,7 +1625,7 @@ describe("UnstuckConfig — new xml_repetition fields", () => {
     expect(defaultConfig.loopThreshold).toBe(3)
     expect(defaultConfig.detectToolOnlyLoops).toBe(true)
     expect(defaultConfig.historySize).toBe(10)
-    expect(defaultConfig.strategy).toBe("nudge-and-prune")
+    expect(defaultConfig.strategy).toBe("nudge")
   })
 })
 

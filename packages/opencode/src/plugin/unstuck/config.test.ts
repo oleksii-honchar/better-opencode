@@ -307,6 +307,68 @@ describe("UnstuckConfig — Task 2: cross-stream doom-loop config fields", () =>
   })
 })
 
+describe("UnstuckConfig — Task 2: pruneCount removal and strategy rename", () => {
+  test("UnstuckConfig does not have pruneCount field", () => {
+    const config: UnstuckConfig = defaultConfig
+    expect("pruneCount" in config).toBe(false)
+  })
+
+  test("defaultConfig has no pruneCount property", () => {
+    expect((defaultConfig as any).pruneCount).toBeUndefined()
+  })
+
+  test("default strategy is nudge", () => {
+    expect(defaultConfig.strategy).toBe("nudge")
+  })
+
+  test("strategy union accepts nudge as a value", () => {
+    const config: UnstuckConfig = { ...defaultConfig, strategy: "nudge" }
+    expect(config.strategy).toBe("nudge")
+  })
+
+  test("strategy union accepts nudge-and-prune as a legacy alias", () => {
+    const config: UnstuckConfig = { ...defaultConfig, strategy: "nudge-and-prune" }
+    expect(config.strategy).toBe("nudge-and-prune")
+  })
+
+  test("mergeConfig with legacy nudge-and-prune strategy is accepted", () => {
+    const merged = mergeConfig({ strategy: "nudge-and-prune" })
+    expect(merged.strategy).toBe("nudge-and-prune")
+  })
+
+  test("mergeConfig with nudge strategy is accepted", () => {
+    const merged = mergeConfig({ strategy: "nudge" })
+    expect(merged.strategy).toBe("nudge")
+  })
+
+  test("nudge strategy parses successfully from input config", () => {
+    const merged = mergeConfig({ strategy: "nudge", enabled: true })
+    expect(merged.strategy).toBe("nudge")
+    expect(merged.enabled).toBe(true)
+  })
+
+  test("pruneCount in input config is ignored and undefined in output", () => {
+    const merged = mergeConfig({ pruneCount: 5 } as Partial<UnstuckConfig>)
+    expect((merged as any).pruneCount).toBeUndefined()
+  })
+
+  test("mergeConfig with empty partial retains nudge default", () => {
+    const merged = mergeConfig({})
+    expect(merged.strategy).toBe("nudge")
+  })
+
+  test("mergeConfig ignores pruneCount in input — output has no pruneCount", () => {
+    const merged = mergeConfig({ pruneCount: 5 as any })
+    expect((merged as any).pruneCount).toBeUndefined()
+  })
+
+  test("validateUnstuckConfig ignores pruneCount in input — output has no pruneCount", () => {
+    const config: UnstuckConfig = { ...defaultConfig, pruneCount: 5 as any }
+    const validated = validateUnstuckConfig(config)
+    expect((validated as any).pruneCount).toBeUndefined()
+  })
+})
+
 describe("UnstuckConfig — Task 2: doom_loop flags", () => {
   test("UnstuckConfig exposes enableDoomLoopDetection and doomLoopThreshold", () => {
     const config: UnstuckConfig = defaultConfig

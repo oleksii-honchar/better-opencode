@@ -314,7 +314,7 @@ export const Info = Schema.Struct({
       }),
     }),
   ),
-  unstuck: Schema.optional(
+   unstuck: Schema.optional(
     Schema.Struct({
       enabled: Schema.optional(Schema.Boolean).annotate({
         description: "Enable loop detection (default: true)",
@@ -350,15 +350,12 @@ export const Info = Schema.Struct({
         description: "Minimum sentence length to consider for loop detection (default: 15)",
       }),
       strategy: Schema.optional(
-        Schema.Literals(["nudge-and-prune", "abort", "warn"]),
+        Schema.Literals(["nudge", "nudge-and-prune", "abort", "warn"]),
       ).annotate({
-        description: "Strategy when a loop is detected: 'nudge-and-prune' sends a break prompt, 'abort' stops the stream, 'warn' logs and stops (default: 'nudge-and-prune')",
+        description: "nudge (default) — inject break prompt without trimming; 'nudge-and-prune' is a deprecated alias for 'nudge'",
       }),
       maxNudges: Schema.optional(PositiveInt).annotate({
         description: "Maximum nudge retries before falling back to abort (default: 2)",
-      }),
-      pruneCount: Schema.optional(PositiveInt).annotate({
-        description: "Number of recent assistant messages to prune when nudging (default: 3)",
       }),
       nudgeMessage: Schema.optional(Schema.String).annotate({
         description: "Custom nudge message to inject when a loop is detected (default: auto-generated)",
@@ -387,7 +384,7 @@ export const Info = Schema.Struct({
           }),
         }),
       ).annotate({
-        description: "Evidence thresholds for each loop type before nudge-and-prune intervention is triggered",
+        description: "Evidence thresholds for each loop type before nudge intervention is triggered",
       }),
       evidenceWindow: Schema.optional(PositiveInt).annotate({
         description: "Maximum age of evidence records before they expire (in seconds, default: Infinity — no eviction)",

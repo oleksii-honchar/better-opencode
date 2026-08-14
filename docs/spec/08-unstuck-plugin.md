@@ -23,9 +23,9 @@ The **Unstuck** V2 plugin detects and breaks model loops by wrapping the `Langua
 2. **Sentence-level**: Same sentence repeating every N sentences within a single step
 3. **Tool-only**: Same tool calls repeating across steps (regardless of thinking)
 
-When a loop is detected, the plugin accumulates **evidence** across detections. A single detection is not enough — the plugin only intervenes when per-type evidence crosses a configurable threshold (default: 2 for step/tool loops, 1 for sentence loops). Below threshold, the stream is restarted with original args (the model may self-correct). Threshold met, the plugin performs **nudge-and-prune**: aborts the current stream, prunes the looping assistant messages from the conversation, injects a nudge user message telling the model to break the loop, and restarts the stream with the modified conversation.
+When a loop is detected, the plugin accumulates **evidence** across detections. A single detection is not enough — the plugin only intervenes when per-type evidence crosses a configurable threshold (default: 2 for step/tool loops, 1 for sentence loops). Below threshold, the stream is restarted with original args (the model may self-correct). Threshold met, the plugin performs **nudge**: aborts the current stream, appends a nudge user message to the unchanged conversation, and restarts the stream with the modified conversation.
 
-> **Doom-loop recovery is now unstuck's domain (since 2026-08-01).** The built-in `doom_loop` permission default changed from `"ask"` to `"allow"` — the permission layer no longer hard-stops on a 3× same-tool-same-input pattern. Instead, unstuck detects the doom-loop at the stream level (on `tool-input-end`, before the processor's permission check runs) and routes it through the existing nudge-and-prune machinery (see the doom-loop detection, config, logging, and troubleshooting sections below).
+> **Doom-loop recovery is now unstuck's domain (since 2026-08-01).** The built-in `doom_loop` permission default changed from `"ask"` to `"allow"` — the permission layer no longer hard-stops on a 3× same-tool-same-input pattern. Instead, unstuck detects the doom-loop at the stream level (on `tool-input-end`, before the processor's permission check runs) and routes it through the existing nudge machinery (see the doom-loop detection, config, logging, and troubleshooting sections below).
 >
 > **Config migration required:** any explicit `doom_loop: deny` rule in a user's agent config **overrides** the new default and re-introduces the raw `Permission.DeniedError` ("Opencode failed to send message with error: …"). Users with explicit `deny` rules must **remove the `doom_loop:` line** from their agent source files (e.g. `~/Documents/agent-rules-n-skills/agents/`) and redeploy to the effective config (e.g. `~/.config/opencode/agents/`).
 
@@ -71,18 +71,16 @@ When a loop is detected, the plugin accumulates **evidence** across detections. 
 └─────────────────────────────────────────────────────────────┘
                                │
 ┌─────────────────────────────────────────────────────────────┐
-│                    Nudge-and-Prune path                      │
-│                                                             │
-│  LoopDetectedError ──→ Abort current stream                 │
-│                     └── Prune looping assistant msgs from   │
-│                         args.messages (AI SDK format)       │
-│                     └── Inject nudge user message:          │
-│                         "You are stuck in a loop —          │
-│                          break out and take a different     │
-│                          direction."                        │
-│                     └── Restart: call original doStream     │
-│                         with modified messages              │
-│                     └── If maxNudges exceeded → abort       │
+│                    Nudge path                                │
+ │                                                             │
+ │  LoopDetectedError ──→ Abort current stream                 │
+ │                     └── Append nudge user message:          │
+ │                         "You are stuck in a loop —          │
+ │                          break out and take a different     │
+ │                          direction."                        │
+ │                     └── Restart: call original doStream     │
+ │                         with unchanged messages + nudge     │
+ │                     └── If maxNudges exceeded → abort       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -104,7 +102,7 @@ The `LoopDetectorImpl` instance is cached per model (via `s.models.set(key, wrap
 
 #### 2. `wrapWithLoopDetection` — LanguageModelV3 Wrapper
 
-Wraps the original `LanguageModelV3` and intercepts `doStream` to observe every token. Uses **evidence accumulation**: on detection, adds evidence and checks per-type threshold. Below threshold: resets streaming state and restarts (model may self-correct). Threshold met: performs nudge-and-prune.
+Wraps the original `LanguageModelV3` and intercepts `doStream` to observe every token. Uses **evidence accumulation**: on detection, adds evidence and checks per-type threshold. Below threshold: resets streaming state and restarts (model may self-correct). Threshold met: performs nudge (appends guidance message, no pruning).
 
 ```typescript
 function wrapWithLoopDetection(model, detector, config) {
@@ -133,7 +131,7 @@ function wrapWithLoopDetection(model, detector, config) {
                 continue  // back to top of while loop
               }
 
-              // Threshold met — proceed to nudge-and-prune
+               // Threshold met — proceed to nudge
               throw new LoopDetectedError(loopInfo)
             }
             yield chunk
@@ -159,16 +157,12 @@ function wrapWithLoopDetection(model, detector, config) {
 
           nudgeCount++
 
-          // Prune looping assistant messages from args.messages
-          const prunedMessages = pruneLoopingMessages(
-            args.messages,
-            error.info,
-            config.pruneCount,
-          )
+          // Use original messages (no pruning)
+          const originalMessages = args.messages
 
           // Inject nudge user message
           const nudgedMessages = [
-            ...prunedMessages,
+            ...originalMessages,
             {
               role: "user",
               content: config.nudgeMessage ??
@@ -377,7 +371,7 @@ To handle slight variations in model output:
    - Threshold: configurable (default: 2)
    - Uses sentence splitter + ring buffer
 
-### Nudge-and-Prune Strategy (Evidence-Based)
+### Nudge Strategy (Evidence-Based)
 
 The plugin uses **evidence accumulation** before intervening. A single detection is not enough to trigger a nudge — the plugin accumulates `EvidenceRecord` observations across detections and only intervenes when per-type evidence crosses a confidence threshold. This prevents false positives from consuming the nudge budget.
 
