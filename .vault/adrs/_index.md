@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-14T13:00:00Z"
+updatedAt: "2026-08-14T19:00:00Z"
 tags: []
 ---
 
@@ -62,8 +62,8 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0048-manage-system-tools-through-meta-tool.adr.md]] — Manage System Tools Through Meta Tool (ADR-0048, status: accepted)
 - [[0049-line-count-log-rotation.adr.md]] — Line Count Log Rotation for tools.log (ADR-0049, status: accepted)
 - [[0050-pass-original-session-id.adr.md]] — Pass Original Session ID Through Plugin LLM Service (ADR-0050, status: accepted)
-- [[0051-xml-repetition-detection.adr.md]] — Real-time XML Repetition Detection in Tool Call Streaming (ADR-0051, status: accepted)
-- [[0052-enhanced-xml-detection.adr.md]] — Enhanced XML Repetition Detection — Partial/Malformed Tag Support (ADR-0052, status: accepted)
+- [[0051-xml-repetition-detection.adr.md]] — Real-time XML Repetition Detection in Tool Call Streaming (ADR-0051, status: superseded by ADR-0081)
+- [[0052-enhanced-xml-detection.adr.md]] — Enhanced XML Repetition Detection — Partial/Malformed Tag Support (ADR-0052, status: superseded by ADR-0081)
 - [[0053-lenient-json-schema-validator.adr.md]] — Lenient JSON Schema Validator for MCP Tool Output Validation (ADR-0053, status: accepted)
 - [[0054-inclusion-based-mcp-path-encoding.adr.md]] — Inclusion-Based Opt-In for MCP File Path Base64 Encoding (ADR-0054, status: accepted)
 - [[0055-dynamic-skill-registration.adr.md]] — Register Dynamic Skills in Skill.Service via Separate Storage (ADR-0055, status: accepted)
@@ -92,3 +92,12 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0078-fix-prune-preserve-pairs.adr.md]] — Fix pruneLoopingMessages to Preserve Tool-Call/Tool-Result Pairs (ADR-0078, status: superseded by ADR-0080)
 - [[0079-explicit-tool-response-file-handling.adr.md]] — Explicit tool_response_file Handling in MCP Tool Result Processing (ADR-0079, status: accepted)
 - [[0080-nudge-only-intervention.adr.md]] — Remove Message Pruning from Unstuck Nudge Path — Nudge-Only Intervention (ADR-0080, status: accepted)
+- [[0081-remove-xml-repetition-guard.adr.md]] — Remove XML Repetition Guard from Unstuck Plugin (ADR-0081, status: accepted, supersedes ADR-0051, ADR-0052)
+- [[0082-evidence-gated-throw.adr.md]] — Below-Threshold Detections Continue the Same Stream (ADR-0082, status: accepted)
+- [[0083-reasoning-delta-sentence-loop.adr.md]] — Exclude Reasoning-Delta from sentence_loop Detection by Default (ADR-0083, status: accepted)
+- [[0084-maxnudges-default-2.adr.md]] — Reconcile maxNudges: Default 2 (ADR-0084, status: accepted)
+- [[0085-tighten-self-diagnosis.adr.md]] — Tighten self_diagnosis Regex and Raise Evidence Threshold (ADR-0085, status: accepted)
+- [[0086-doom-loop-ignore-patterns.adr.md]] — Exclude Mandated Rule-File Reads from Doom-Loop Tracking (ADR-0086, status: accepted)
+- [[0087-cross-stream-opt-in.adr.md]] — Cross-Stream Doom-Loop Detection Opt-In by Default (ADR-0087, status: accepted)
+- [[0088-provider-cache-fingerprint.adr.md]] — Provider Cache Key Includes Unstuck Config Fingerprint (ADR-0088, status: accepted)
+- [[0089-re-focus-nudge-message.adr.md]] — Re-Focus the Default Nudge Message (ADR-0089, status: accepted)

@@ -3,6 +3,7 @@ import * as Log from "@opencode-ai/core/util/log"
 import type { UnstuckConfig } from "./config"
 import type { CrossStreamDoomLoopManager } from "./cross-stream-doom-loop"
 import { LoopDetectedError, type LoopDetectedInfo } from "./error"
+import { isIgnored } from "./cross-stream-doom-loop"
 import type { LoopDetector, StreamChunk } from "./loop-detector"
 import { LoopDetectorImpl, EvidenceAccumulatorImpl, computeInputFingerprint } from "./loop-detector"
 
@@ -16,24 +17,13 @@ type Message = {
 
 function defaultNudgeMessage(info: LoopDetectedInfo): string {
   if (info.type === "sentence_loop") {
-    return `You are repeating the sentence "${info.sentence}" — this is a loop. Break out and take a different direction.`
+    return `You are repeating the sentence "${info.sentence}" — this is a loop. Continue from your current task state instead of re-planning from scratch.`
   }
   if (info.type === "self_diagnosis_loop") {
     return "You've acknowledged being stuck. Break out of this pattern and take a fundamentally different approach."
   }
   if (info.type === "pattern_loop") {
     return "You are oscillating between two states — this is a pattern loop. Break out and take a fundamentally different approach."
-  }
-  if (info.type === "xml_repetition") {
-    if (info.exceedsTokenLimit) {
-      const toolInfo = info.toolName ? ` for tool '${info.toolName}'` : ""
-      return `Your tool input${toolInfo} has exceeded the token limit. You're generating too much content. Stop and provide a concise, complete tool input with only the required parameters.`
-    }
-    if (info.xmlTag) {
-      const toolInfo = info.toolName ? ` for tool '${info.toolName}'` : ""
-      return `You're repeating the XML tag '<${info.xmlTag}>'${toolInfo}. This indicates you're stuck in a loop producing incomplete parameters. Stop the repetition and compose a complete, valid tool call with all required parameters based on the tool schema provided.`
-    }
-    return "You're repeating XML tags while constructing a tool call. Stop the repetition and provide a complete, valid tool input with proper parameters."
   }
   if (info.type === "doom_loop") {
     const toolInfo = info.toolName ? ` '${info.toolName}'` : ""
@@ -111,6 +101,7 @@ async function* streamWithDetection(
   detector: LoopDetector,
   config: UnstuckConfig,
   args: LanguageModelV3CallOptions,
+  evidence: EvidenceAccumulatorImpl,
   crossStreamManager?: CrossStreamDoomLoopManager,
 ): AsyncGenerator<LanguageModelV3StreamPart, void, unknown> {
   // model.doStream returns Promise<LanguageModelV3StreamResult>.
@@ -152,46 +143,84 @@ async function* streamWithDetection(
         }
         const loopInfo = detector.consumeChunk(mappedChunk, config)
         if (loopInfo) {
-          const logLevel = loopInfo.type === "xml_repetition" ? log.info : log.debug
-          logLevel("loop detected by detector", {
+          log.debug("loop detected by detector", {
             type: loopInfo.type,
             threshold: loopInfo.threshold,
             chunkCount,
-            xmlTag: loopInfo.xmlTag,
             toolName: loopInfo.toolName,
-            exceedsTokenLimit: loopInfo.exceedsTokenLimit,
           })
-          throw new LoopDetectedError(loopInfo)
+
+          // Evidence-gated throw: accumulate evidence inline, throw only if threshold met
+          evidence.add(loopInfo, chunkCount, config)
+
+          const thresholdResult = evidence.isThresholdMet(config)
+          if (thresholdResult.met) {
+            throw new LoopDetectedError(loopInfo)
+          }
+
+          // Below threshold: reset detector and continue the SAME stream (no restart)
+          log.info("loop detected but evidence below threshold — continuing same stream", {
+            type: loopInfo.type,
+            evidenceCount: evidence.countByType(loopInfo.type),
+          })
+          detector.reset()
         }
 
         // Cross-stream doom-loop detection: after per-stream check, on tool-input-end,
         // call manager.recordCall if cross-stream detection is enabled and manager exists.
+        // Route through the SAME evidence gate as per-stream detections — never throw immediately.
+        // NOTE: enableCrossStreamDoomLoopDetection defaults to false (opt-in).
+        // Single-state design weakness (memory 0015): the cross-stream manager uses one
+        // DoomLoopRunState per session, so if the model calls tool A, then tool B, then
+        // tool A again with the same input, the run is broken — the count resets to 1
+        // instead of continuing. This means cross-stream detection only catches truly
+        // consecutive identical tool+input calls across streams, not interleaved patterns.
         if (mappedChunk.type === "tool-input-end" && !mappedChunk.providerExecuted) {
           if (config.enableCrossStreamDoomLoopDetection && crossStreamManager && sessionId) {
             const input = (mappedChunk as any).input ?? {}
             if (input._missing !== true) {
-              const inputFingerprint = computeInputFingerprint(input)
-              const threshold = config.crossStreamDoomLoopThreshold ?? 3
-              const thresholdReached = crossStreamManager.recordCall(
-                sessionId,
-                mappedChunk.toolName,
-                inputFingerprint,
-                threshold,
-              )
-              if (thresholdReached) {
-                log.info("cross-stream doom_loop detected", {
-                  type: "doom_loop",
-                  threshold,
-                  toolName: mappedChunk.toolName,
-                  inputFingerprint,
+              // Skip recordCall if the tool input matches any ignore pattern
+              const serialized = JSON.stringify(input)
+              const shouldIgnore = isIgnored(config.doomLoopIgnorePatterns)(serialized)
+              if (!shouldIgnore) {
+                const inputFingerprint = computeInputFingerprint(input)
+                const threshold = config.crossStreamDoomLoopThreshold ?? 3
+                const thresholdReached = crossStreamManager.recordCall(
                   sessionId,
-                })
-                throw new LoopDetectedError({
-                  type: "doom_loop",
+                  mappedChunk.toolName,
+                  inputFingerprint,
                   threshold,
-                  toolName: mappedChunk.toolName,
-                  fingerprint: inputFingerprint,
-                })
+                )
+                if (thresholdReached) {
+                  log.info("cross-stream doom_loop detected", {
+                    type: "doom_loop",
+                    threshold,
+                    toolName: mappedChunk.toolName,
+                    inputFingerprint,
+                    sessionId,
+                  })
+
+                  // Route through evidence gate — same as per-stream detections
+                  const loopInfo: LoopDetectedInfo = {
+                    type: "doom_loop",
+                    threshold,
+                    toolName: mappedChunk.toolName,
+                    fingerprint: inputFingerprint,
+                  }
+                  evidence.add(loopInfo, chunkCount, config)
+
+                  const thresholdResult = evidence.isThresholdMet(config)
+                  if (thresholdResult.met) {
+                    throw new LoopDetectedError(loopInfo)
+                  }
+
+                  // Below threshold: reset cross-stream run state and continue the same stream
+                  log.info("cross-stream loop detected but evidence below threshold — continuing same stream", {
+                    type: "doom_loop",
+                    evidenceCount: evidence.countByType("doom_loop"),
+                  })
+                  crossStreamManager.resetSession(sessionId)
+                }
               }
             }
           }
@@ -290,7 +319,7 @@ export function wrapWithLoopDetection(
 
         while (true) {
           try {
-            for await (const chunk of streamWithDetection(model, detector, config, currentArgs, crossStreamManager)) {
+            for await (const chunk of streamWithDetection(model, detector, config, currentArgs, evidence, crossStreamManager)) {
               chunkCount++
               yield chunk
             }
@@ -304,9 +333,7 @@ export function wrapWithLoopDetection(
               chunkCount,
               type: error.info.type,
               threshold: error.info.threshold,
-              xmlTag: error.info.xmlTag,
               toolName: error.info.toolName,
-              exceedsTokenLimit: error.info.exceedsTokenLimit,
               strategy: config.strategy,
               nudgeCount,
               evidenceCount: evidence.count,
@@ -332,46 +359,18 @@ export function wrapWithLoopDetection(
               throw error
             }
 
-            // --- Nudge-and-prune with evidence accumulation ---
+            // --- Nudge-and-prune (threshold already met — evidence accumulated in streamWithDetection) ---
 
-            // Record this detection as evidence
-            evidence.add(error.info, chunkCount, config)
-
-            log.debug("evidence accumulated", {
+            log.debug("evidence accumulated (threshold met)", {
               totalEvidence: evidence.count,
               byType: {
                 stepLoop: evidence.countByType("step_loop"),
                 toolLoop: evidence.countByType("tool_loop"),
                 sentenceLoop: evidence.countByType("sentence_loop"),
                 selfDiagnosis: evidence.countByType("self_diagnosis_loop"),
-                xmlRepetition: evidence.countByType("xml_repetition"),
+                doomLoop: evidence.countByType("doom_loop"),
               },
             })
-
-            // Check if threshold is met for intervention
-            const thresholdResult = evidence.isThresholdMet(config)
-            if (!thresholdResult.met) {
-              const thresholdKey =
-                error.info.type === "step_loop" ? "stepLoop"
-                : error.info.type === "tool_loop" ? "toolLoop"
-                : error.info.type === "sentence_loop" ? "sentenceLoop"
-                : error.info.type === "self_diagnosis_loop" ? "selfDiagnosis"
-                : error.info.type === "pattern_loop" ? "patternLoop"
-                : error.info.type === "xml_repetition" ? "xmlRepetition"
-                : error.info.type === "doom_loop" ? "doomLoop"
-                : "stepLoop"
-              log.info("loop detected but evidence below threshold — continuing stream", {
-                type: error.info.type,
-                evidenceCount: evidence.countByType(error.info.type),
-                threshold: config.evidenceThresholds[thresholdKey],
-              })
-
-              // Reset streaming state but keep evidence and history
-              detector.reset()
-
-              // Loop back to top — restart stream with original args
-              continue
-            }
 
             // Threshold met — intervene with nudge
             if (nudgeCount >= config.maxNudges) {

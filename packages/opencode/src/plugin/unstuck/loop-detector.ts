@@ -1,8 +1,8 @@
 import * as Log from "@opencode-ai/core/util/log"
 import { defaultEvidenceThresholds, type UnstuckConfig } from "./config"
-import { LoopDetectedError, type EvidenceAccumulator, type EvidenceRecord, type LoopDetectedInfo, type StepRecord } from "./error"
+import { LoopDetectedError, type EvidenceAccumulator, type EvidenceRecord, type EvidenceThresholds, type LoopDetectedInfo, type StepRecord } from "./error"
 import { SentenceTracker } from "./sentence-tracker"
-import { XmlRepetitionDetector, type RepetitionDetected } from "./xml-repetition-detector"
+import { isIgnored } from "./cross-stream-doom-loop"
 
 const log = Log.create({ service: "unstuck-plugin" })
 
@@ -21,13 +21,12 @@ export function detectSelfDiagnosis(text: string): boolean {
     /i['']m\s+stuck/i,
     /repeating\s+the\s+same/i,
     /going\s+in\s+circles/i,
-    /cannot\s+(progress|proceed|continue)/i,
   ]
   return patterns.some((p) => p.test(text))
 }
 
 // Synchronous hash function using FNV-1a — no external dependencies, no async
-function fnv1a(text: string): string {
+export function fnv1a(text: string): string {
   let hash = 0x811c9dc5
   for (let i = 0; i < text.length; i++) {
     hash ^= text.charCodeAt(i)
@@ -51,6 +50,28 @@ export function normalizeAndFingerprint(text: string): string {
 // existing sync fnv1a over the JSON string is used to stay sync and deterministic).
 export function computeInputFingerprint(input: Record<string, unknown>): string {
   return fnv1a(JSON.stringify(input))
+}
+
+// Fingerprint the subset of UnstuckConfig that affects model wrapping behavior.
+// Used to build cache keys so config changes invalidate the cache.
+export function computeUnstuckFingerprint(config: {
+  enabled: boolean
+  strategy: string
+  maxNudges: number
+  evidenceThresholds: EvidenceThresholds
+  sentenceLoopIncludeReasoning: boolean
+  doomLoopIgnorePatterns: string[]
+}): string {
+  return fnv1a(
+    JSON.stringify({
+      enabled: config.enabled,
+      strategy: config.strategy,
+      maxNudges: config.maxNudges,
+      evidenceThresholds: config.evidenceThresholds,
+      sentenceLoopIncludeReasoning: config.sentenceLoopIncludeReasoning,
+      doomLoopIgnorePatterns: config.doomLoopIgnorePatterns,
+    }),
+  )
 }
 
 export function computeToolSignature(
@@ -114,7 +135,6 @@ export class LoopDetectorImpl implements LoopDetector {
   private currentText = ""
   private currentTools: string[] = []
   private currentToolName = ""
-  private xmlRepetitionDetector?: XmlRepetitionDetector
   private history: StepRecord[] = []
   private inReasoning = false
   private sentenceTracker = new SentenceTracker()
@@ -132,7 +152,7 @@ export class LoopDetectorImpl implements LoopDetector {
         if (config.includeReasoning) {
           this.currentReasoning += chunk.text
         }
-        if (config.enableSentenceLoopDetection) {
+        if (config.enableSentenceLoopDetection && config.sentenceLoopIncludeReasoning) {
           const sentenceLoopInfo = this.sentenceTracker.consumeText(chunk.text, config)
           if (sentenceLoopInfo) {
             log.info("loop detected", { type: "sentence_loop", threshold: sentenceLoopInfo.threshold, sentence: sentenceLoopInfo.sentence })
@@ -161,36 +181,12 @@ export class LoopDetectorImpl implements LoopDetector {
 
       case "tool-input-start": {
         log.debug("consumeChunk", { type: "tool-input-start", id: chunk.id, toolName: chunk.toolName })
-        // Initialize xmlRepetitionDetector on first tool-input-start if enabled
-        if (config.enableXmlRepetitionGuard && !this.xmlRepetitionDetector) {
-          this.xmlRepetitionDetector = new XmlRepetitionDetector({
-            repetitionThreshold: config.xmlRepetitionThreshold,
-            windowSize: config.xmlRepetitionWindowSize,
-            maxToolInputTokens: config.maxToolInputTokens,
-            maxTotalTokens: config.maxTotalToolInputTokens,
-            modelId: config.modelId,
-            modelSpecificThresholds: config.modelSpecificThresholds,
-          })
-        }
         this.currentToolName = chunk.toolName
-        this.xmlRepetitionDetector?.reset()
         break
       }
 
       case "tool-input-delta": {
         this.currentToolInputAccum[chunk.id] = (this.currentToolInputAccum[chunk.id] ?? "") + chunk.text
-
-        // XML repetition detection — token estimation handled by XmlRepetitionDetector (XML-aware)
-        if (this.xmlRepetitionDetector && this.currentToolName) {
-          const repetition = this.xmlRepetitionDetector.consumeDelta(
-            this.currentToolName,
-            chunk.text,
-          )
-          if (repetition) {
-            log.info("loop detected", { type: "xml_repetition", tagName: repetition.tagName, repetitionCount: repetition.repetitionCount, exceedsTokenLimit: repetition.exceedsTokenLimit, toolName: this.currentToolName })
-            return this.mapRepetitionToLoopInfo(repetition, this.currentToolName)
-          }
-        }
         break
       }
 
@@ -234,35 +230,42 @@ export class LoopDetectorImpl implements LoopDetector {
           if (resolvedInput._missing === true) {
             log.debug("doom_loop skipped", { toolName: chunk.toolName, reason: "missing-input" })
           } else {
-            const threshold = config.doomLoopThreshold ?? 3
-            const current = this.currentDoomRun
-            if (current && current.toolName === chunk.toolName && current.inputFingerprint === inputFingerprint) {
-              // Matching the current run — increment candidate count
-              current.count += 1
-              this.logDoomCandidate(chunk.toolName, current.count, current.inputFingerprint)
-              if (current.count >= threshold) {
-                log.info("doom_loop detected", {
-                  type: "doom_loop",
-                  threshold,
-                  toolName: chunk.toolName,
-                  inputFingerprint,
-                  chunkCount: this.chunkCount,
-                })
-                return { type: "doom_loop", threshold, toolName: chunk.toolName, fingerprint: inputFingerprint }
-              }
-            } else if (current && current.toolName === chunk.toolName) {
-              // Same tool, differing input — run is broken (L3), start a new run at this call
-              log.debug("doom_loop input equality mismatch", {
-                toolName: chunk.toolName,
-                expectedInputFingerprint: current.inputFingerprint,
-                actualInputFingerprint: inputFingerprint,
-              })
-              this.currentDoomRun = { toolName: chunk.toolName, inputFingerprint, count: 1 }
-              this.logDoomCandidate(chunk.toolName, 1, inputFingerprint)
+            // Ignore pattern check: skip tracking if the serialized input matches any ignore pattern
+            const serialized = JSON.stringify(resolvedInput)
+            const shouldIgnore = isIgnored(config.doomLoopIgnorePatterns)(serialized)
+            if (shouldIgnore) {
+              log.debug("doom_loop skipped", { toolName: chunk.toolName, reason: "ignore-pattern" })
             } else {
-              // Different tool (or no current run) — start a new run
-              this.currentDoomRun = { toolName: chunk.toolName, inputFingerprint, count: 1 }
-              this.logDoomCandidate(chunk.toolName, 1, inputFingerprint)
+              const threshold = config.doomLoopThreshold ?? 3
+              const current = this.currentDoomRun
+              if (current && current.toolName === chunk.toolName && current.inputFingerprint === inputFingerprint) {
+                // Matching the current run — increment candidate count
+                current.count += 1
+                this.logDoomCandidate(chunk.toolName, current.count, current.inputFingerprint)
+                if (current.count >= threshold) {
+                  log.info("doom_loop detected", {
+                    type: "doom_loop",
+                    threshold,
+                    toolName: chunk.toolName,
+                    inputFingerprint,
+                    chunkCount: this.chunkCount,
+                  })
+                  return { type: "doom_loop", threshold, toolName: chunk.toolName, fingerprint: inputFingerprint }
+                }
+              } else if (current && current.toolName === chunk.toolName) {
+                // Same tool, differing input — run is broken (L3), start a new run at this call
+                log.debug("doom_loop input equality mismatch", {
+                  toolName: chunk.toolName,
+                  expectedInputFingerprint: current.inputFingerprint,
+                  actualInputFingerprint: inputFingerprint,
+                })
+                this.currentDoomRun = { toolName: chunk.toolName, inputFingerprint, count: 1 }
+                this.logDoomCandidate(chunk.toolName, 1, inputFingerprint)
+              } else {
+                // Different tool (or no current run) — start a new run
+                this.currentDoomRun = { toolName: chunk.toolName, inputFingerprint, count: 1 }
+                this.logDoomCandidate(chunk.toolName, 1, inputFingerprint)
+              }
             }
           }
         }
@@ -463,17 +466,6 @@ export class LoopDetectorImpl implements LoopDetector {
     return undefined
   }
 
-  private mapRepetitionToLoopInfo(repetition: RepetitionDetected, toolName: string): LoopDetectedInfo {
-    return {
-      type: "xml_repetition",
-      threshold: repetition.repetitionCount,
-      xmlTag: repetition.tagName !== "" ? repetition.tagName : undefined,
-      xmlRepetitionCount: repetition.repetitionCount > 0 ? repetition.repetitionCount : undefined,
-      toolName,
-      exceedsTokenLimit: repetition.exceedsTokenLimit,
-    }
-  }
-
   // L1 — doom_loop candidate tracked (per qualifying tool-input-end matching the run)
   private logDoomCandidate(toolName: string, candidateCount: number, inputFingerprint: string): void {
     log.debug("doom_loop candidate tracked", {
@@ -498,7 +490,6 @@ export class LoopDetectorImpl implements LoopDetector {
     // history is preserved for evidence accumulation within the same stream episode
     this.inReasoning = false
     this.sentenceTracker.reset()
-    this.xmlRepetitionDetector?.reset()
   }
 
   clear(): void {
@@ -512,7 +503,6 @@ export class LoopDetectorImpl implements LoopDetector {
     this.history = []
     this.inReasoning = false
     this.sentenceTracker.reset()
-    this.xmlRepetitionDetector?.clear()
   }
 
   getState(): DetectorState {
@@ -559,9 +549,6 @@ export class EvidenceAccumulatorImpl implements EvidenceAccumulator {
     }
     if (this.countByType("pattern_loop") >= (thresholds.patternLoop ?? 2)) {
       return { met: true, type: "pattern_loop" }
-    }
-    if (this.countByType("xml_repetition") >= (thresholds.xmlRepetition ?? 1)) {
-      return { met: true, type: "xml_repetition" }
     }
     if (this.countByType("doom_loop") >= (thresholds.doomLoop ?? 1)) {
       return { met: true, type: "doom_loop" }

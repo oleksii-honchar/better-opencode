@@ -23,7 +23,7 @@ The **Unstuck** V2 plugin detects and breaks model loops by wrapping the `Langua
 2. **Sentence-level**: Same sentence repeating every N sentences within a single step
 3. **Tool-only**: Same tool calls repeating across steps (regardless of thinking)
 
-When a loop is detected, the plugin accumulates **evidence** across detections. A single detection is not enough — the plugin only intervenes when per-type evidence crosses a configurable threshold (default: 2 for step/tool loops, 1 for sentence loops). Below threshold, the stream is restarted with original args (the model may self-correct). Threshold met, the plugin performs **nudge**: aborts the current stream, appends a nudge user message to the unchanged conversation, and restarts the stream with the modified conversation.
+When a loop is detected, the plugin accumulates **evidence** across detections. A single detection is not enough — the plugin only intervenes when per-type evidence crosses a configurable threshold (default: 2 for step/tool loops, 3 for sentence/self-diagnosis loops). Below threshold, the **same stream continues** (detector state is reset, no restart — the model may self-correct within the same stream). Threshold met, the plugin performs **nudge**: aborts the current stream, appends a nudge user message to the unchanged conversation, and restarts the stream with the modified conversation.
 
 > **Doom-loop recovery is now unstuck's domain (since 2026-08-01).** The built-in `doom_loop` permission default changed from `"ask"` to `"allow"` — the permission layer no longer hard-stops on a 3× same-tool-same-input pattern. Instead, unstuck detects the doom-loop at the stream level (on `tool-input-end`, before the processor's permission check runs) and routes it through the existing nudge machinery (see the doom-loop detection, config, logging, and troubleshooting sections below).
 >
@@ -102,7 +102,7 @@ The `LoopDetectorImpl` instance is cached per model (via `s.models.set(key, wrap
 
 #### 2. `wrapWithLoopDetection` — LanguageModelV3 Wrapper
 
-Wraps the original `LanguageModelV3` and intercepts `doStream` to observe every token. Uses **evidence accumulation**: on detection, adds evidence and checks per-type threshold. Below threshold: resets streaming state and restarts (model may self-correct). Threshold met: performs nudge (appends guidance message, no pruning).
+Wraps the original `LanguageModelV3` and intercepts `doStream` to observe every token. Uses **evidence accumulation**: on detection, adds evidence and checks per-type threshold. Below threshold: **continues the same stream** (detector state is reset inline, no restart — model may self-correct within the same stream). Threshold met: performs nudge (appends guidance message, no pruning).
 
 ```typescript
 function wrapWithLoopDetection(model, detector, config) {
@@ -125,10 +125,10 @@ function wrapWithLoopDetection(model, detector, config) {
 
               // Check threshold
               if (!shouldIntervene(evidence, config)) {
-                // Below threshold — reset streaming state, restart with original args
+                // Below threshold — reset detector state, CONTINUE SAME STREAM
                 detector.reset()  // clears currentThinking/tools, preserves history
-                yield* model.doStream(args)
-                continue  // back to top of while loop
+                // No restart — same stream continues, no duplicate output
+                continue  // next chunk from the SAME stream
               }
 
                // Threshold met — proceed to nudge
@@ -160,14 +160,12 @@ function wrapWithLoopDetection(model, detector, config) {
           // Use original messages (no pruning)
           const originalMessages = args.messages
 
-          // Inject nudge user message
+          // Inject nudge user message with context-aware default
           const nudgedMessages = [
             ...originalMessages,
             {
               role: "user",
-              content: config.nudgeMessage ??
-                "You appear to be stuck in a loop — repeating the same thinking or tool calls. " +
-                "Break out of the pattern and take a different direction.",
+              content: config.nudgeMessage ?? defaultNudgeMessage(error.info),
               _unstuckNudge: true,  // Marker for debugging
             },
           ]
@@ -376,7 +374,7 @@ To handle slight variations in model output:
 The plugin uses **evidence accumulation** before intervening. A single detection is not enough to trigger a nudge — the plugin accumulates `EvidenceRecord` observations across detections and only intervenes when per-type evidence crosses a confidence threshold. This prevents false positives from consuming the nudge budget.
 
 ```
-Detect → evidence++ → if evidence < threshold: continue stream (model may self-correct)
+Detect → evidence++ → if evidence < threshold: continue SAME stream (detector.reset(), no restart — model may self-correct)
                         else: append nudge user message and restart with unchanged messages
 ```
 
@@ -402,7 +400,7 @@ Evidence is **scoped by loop type** — a `step_loop` detection doesn't count to
 
 1. **Detection** — The detector returns `LoopDetectedInfo`. The wrapper converts it to an `EvidenceRecord` and appends it to the accumulator.
 2. **Threshold check** — `evidence.countByType(type) >= evidenceThresholds[type]`?
-   - **Below threshold**: Call `detector.reset()` (clears streaming state, preserves history), restart the stream with original args. The model may self-correct.
+   - **Below threshold**: Call `detector.reset()` (clears streaming state, preserves history), **continue the same stream** (no restart — model may self-correct within the same stream).
     - **Threshold met**: Proceed to nudge (step 3).
 3. **Nudge** — Abort the current stream, append nudge user message, restart the stream with unchanged messages plus the nudge.
 4. **Clear** — After nudge fires, call `detector.clear()` and `evidence.clear()` — both start fresh for the next episode.
@@ -412,7 +410,7 @@ Evidence is **scoped by loop type** — a `step_loop` detection doesn't count to
 
 | Method | When Called | Clears History? |
 |--------|-------------|-----------------|
-| `reset()` | After detection below threshold (continue stream) | No — keeps history for evidence within the same stream |
+| `reset()` | After detection below threshold (continue same stream) | No — keeps history for evidence within the same stream |
 | `clear()` | After nudge fires OR after clean stream finish | Yes — starts fresh |
 
 #### Interaction with `maxNudges`
@@ -455,7 +453,8 @@ To preserve the old immediate-nudge behavior, set all thresholds to `1`:
 interface EvidenceThresholds {
   stepLoop: number       // default: 2 — two step_loop detections before nudge
   toolLoop: number       // default: 2 — two tool_loop detections before nudge
-  sentenceLoop: number   // default: 1 — one sentence_loop detection triggers nudge
+  sentenceLoop: number   // default: 3 — three sentence_loop detections before nudge (was 1)
+  selfDiagnosis: number  // default: 3 — three self_diagnosis_loop detections before nudge (was 2)
   doomLoop?: number      // default: 1 — one doom_loop detection triggers nudge
 }
 
@@ -478,16 +477,25 @@ interface UnstuckConfig {
   sentenceLoopThreshold: number         // default: 3
   minSentenceLength: number             // default: 15
 
+  // Reasoning-delta exclusion from sentence_loop (default: false — reasoning-delta excluded)
+  sentenceLoopIncludeReasoning: boolean  // default: false
+
+  // Doom-loop ignore patterns (exempt mandated rule-file reads)
+  doomLoopIgnorePatterns: string[]  // default: ["/\\.rules\\//", "\\.mdc$"]
+
+  // Cross-stream doom-loop detection (opt-in)
+  enableCrossStreamDoomLoopDetection: boolean  // default: false (was true)
+
   // Evidence-based intervention thresholds (per loop type)
-  evidenceThresholds?: EvidenceThresholds  // default: { stepLoop: 2, toolLoop: 2, sentenceLoop: 1 }
+  evidenceThresholds?: EvidenceThresholds  // default: { stepLoop: 2, toolLoop: 2, sentenceLoop: 3, selfDiagnosis: 3 }
 
   // Maximum evidence records to retain per episode (default: Infinity — no windowing)
   evidenceWindow?: number
 
   // Nudge settings
   strategy: "nudge" | "nudge-and-prune" | "abort" | "warn"  // default: "nudge"
-  maxNudges: number  // default: 2
-  nudgeMessage?: string  // default: "You appear to be stuck in a loop..."
+  maxNudges: number  // default: 2 (was 10)
+  nudgeMessage?: string  // default: context-aware message referencing detected context
   logLevel: "debug" | "info" | "warn"  // default: "info"
 }
 ```
@@ -507,12 +515,16 @@ interface UnstuckConfig {
 | `enableSentenceLoopDetection` | boolean | `true` | When `true`, detect **sentence_loop** events where the same sentence repeats every 1–5 sentences within a single step (e.g., "Let me check the file" appearing 3+ times with periodic spacing). Set to `false` to disable sentence-level detection. |
 | `sentenceLoopThreshold` | number | `3` | Number of periodic repetitions of the same sentence that triggers a **sentence_loop** detection. The sentence must repeat with consistent spacing (within ±1 sentence of the previous gap). |
 | `minSentenceLength` | number | `15` | Minimum number of characters in a sentence before it is considered for loop detection. Short fragments (e.g., "OK", "Hmm") are excluded to avoid false positives from common words. |
+| `sentenceLoopIncludeReasoning` | boolean | `false` | When `false` (default), reasoning-delta chunks are **excluded** from sentence_loop detection — only text-delta is fed to the sentence tracker. This prevents false positives from CoT repetition in frontier models. Set to `true` to include reasoning-delta in sentence detection (opt-in for users who want CoT repetition detection). |
 | `enableDoomLoopDetection` | boolean | `true` | When `true`, unstuck also detects **doom_loop** events: the same tool called with the exact same input `doomLoopThreshold` consecutive times within the current step (mirroring the processor's built-in `doom_loop` check, `DOOM_LOOP_THRESHOLD = 3`). Detection fires at the stream level on `tool-input-end`, **before** the processor's `doom_loop` permission check runs. Set to `false` to disable doom-loop detection (the processor's `doom_loop` permission then governs — default `allow`). |
 | `doomLoopThreshold` | number | `3` | Number of consecutive identical (tool name + exact `JSON.stringify(input)`) calls within the current step that trigger a single `doom_loop` detection. Matches the built-in `DOOM_LOOP_THRESHOLD`. **Distinct from `evidenceThresholds.doomLoop`**: `doomLoopThreshold` controls *detection* (how many identical calls to flag as a loop); `evidenceThresholds.doomLoop` controls *intervention* (how many detected doom loops before nudging). |
-| `evidenceThresholds` | object | `{ stepLoop: 2, toolLoop: 2, sentenceLoop: 1, doomLoop: 1 }` | Per-type evidence accumulation thresholds. Each detection adds one `EvidenceRecord`; the nudge only fires when `countByType(type) >= evidenceThresholds[type]`. **Why different from `toolLoopThreshold`**: `toolLoopThreshold` controls *detection* (how many matching steps to flag as a loop); `evidenceThresholds.toolLoop` controls *intervention* (how many detected loops before nudging). Example: `toolLoopThreshold: 8` means 8 consecutive matching tool steps trigger one detection; `evidenceThresholds.toolLoop: 2` means you need 2 such detections before a nudge fires. This two-stage gating prevents false positives from consuming the nudge budget. |
+| `doomLoopIgnorePatterns` | string\[\] | `["/\\.rules\\//", "\\.mdc$"]` | Array of regex patterns that, when matched against the serialized tool input, **skip doom-loop tracking** for that call. Default patterns exempt mandated rule-file reads (paths containing `/.rules/` or ending in `.mdc`), preventing false positives from required `.rules/olho/always-apply/*.mdc` reads. Patterns are matched against the full `JSON.stringify(input)` output of the tool call. |
+| `enableCrossStreamDoomLoopDetection` | boolean | `false` | When `true`, detect doom-loops that span across multiple stream episodes (cross-stream). Default is `false` (opt-in) because the single-state design has known weaknesses (memory 0015). |
+| `evidenceThresholds` | object | `{ stepLoop: 2, toolLoop: 2, sentenceLoop: 3, selfDiagnosis: 3, doomLoop: 1 }` | Per-type evidence accumulation thresholds. Each detection adds one `EvidenceRecord`; the nudge only fires when `countByType(type) >= evidenceThresholds[type]`. **Why different from `toolLoopThreshold`**: `toolLoopThreshold` controls *detection* (how many matching steps to flag as a loop); `evidenceThresholds.toolLoop` controls *intervention* (how many detected loops before nudging). Example: `toolLoopThreshold: 8` means 8 consecutive matching tool steps trigger one detection; `evidenceThresholds.toolLoop: 2` means you need 2 such detections before a nudge fires. This two-stage gating prevents false positives from consuming the nudge budget. |
 | | | | - **`stepLoop`** (default: 2): Step loops are strong signals (same thinking + same tools), but one false positive can happen if the model legitimately revisits a pattern. Two confirms it's stuck. |
 | | | | - **`toolLoop`** (default: 2): Same reasoning as step loops. |
-| | | | - **`sentenceLoop`** (default: 1): Sentence loops are very strong signals — the detector already requires `sentenceLoopThreshold` repetitions within the stream, so by the time it fires, confidence is high. |
+| | | | - **`sentenceLoop`** (default: 3): Sentence loops are strong signals but with reasoning-delta excluded by default, false positives from CoT repetition are reduced. Three detections required before nudge. |
+| | | | - **`selfDiagnosis`** (default: 3): Self-diagnosis loops (phrases like "stuck in a loop", "i'm stuck", "going in circles") are strong signals but can occur legitimately. Three detections required before nudge. |
 | | | | - **`doomLoop`** (default: 1): Doom loops are very strong signals — the detector already requires `doomLoopThreshold` identical calls, so a single detection already proves 3 identical calls occurred. |
 | | | | To restore the old immediate-nudge behavior, set all to `1`. |
 | `evidenceWindow` | number | `Infinity` | Maximum evidence records to retain per episode (stream between nudges). Older records are evicted when new ones are added. Default `Infinity` means no windowing — all evidence persists until cleared by a nudge or clean finish. Set a finite value (e.g., `10`) for memory bounds in very long sessions. |
@@ -521,8 +533,8 @@ interface UnstuckConfig {
 | | | | - **`nudge-and-prune`** (deprecated alias for `nudge`): Same as `nudge`. This alias is kept for backward compatibility. |
 | | | | - **`abort`**: Abort the stream immediately. No recovery attempt. The session turns red with an error. |
 | | | | - **`warn`**: Log a warning about the loop but do **not** abort or nudge. Useful for debugging or when you want manual review before intervention. |
-| `maxNudges` | number | `2` | Maximum number of nudge recovery attempts before falling back to abort. If the model re-enters the same loop after a nudge, the plugin will try again up to this limit. After `maxNudges` failures, the stream is aborted. |
-| `nudgeMessage` | string | auto-generated | Custom nudge message injected as a synthetic user message when a loop is detected. The auto-generated message is: "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction." Set a custom value to match your team's communication style. |
+| `maxNudges` | number | `2` | Maximum number of nudge recovery attempts before falling back to abort. If the model re-enters the same loop after a nudge, the plugin will try again up to this limit. After `maxNudges` failures, the stream is aborted. **Was 10, reduced to 2** to prevent excessive nudge cycles when the model is truly stuck. |
+| `nudgeMessage` | string | context-aware | Custom nudge message injected as a synthetic user message when a loop is detected. The auto-generated message is **context-aware**, referencing the detected loop type and detected context (e.g., the repeated sentence for `sentence_loop`, the tool name for `doom_loop`) and instructing continuation from the current task state — not re-reading or re-planning from scratch. Set a custom value to match your team's communication style. |
 | `logLevel` | `"debug" \| "info" \| "warn"` | `"info"` | Log level for unstuck plugin events. Use `debug` for per-chunk state tracking (text accumulated, fingerprints computed, sentence splits) — useful for diagnosing false positives. Use `info` for loop detection events and nudge actions. Use `warn` to only see warnings (max nudges reached). |
 
 ### Configuration via opencode config
@@ -536,15 +548,19 @@ interface UnstuckConfig {
     "toolLoopThreshold": 6,
     "historySize": 10,
     "minThinkingLength": 50,
+    "sentenceLoopIncludeReasoning": false,
     "enableSentenceLoopDetection": true,
     "sentenceLoopThreshold": 3,
     "minSentenceLength": 15,
     "enableDoomLoopDetection": true,
     "doomLoopThreshold": 3,
+    "doomLoopIgnorePatterns": ["/\\.rules\\//", "\\.mdc$"],
+    "enableCrossStreamDoomLoopDetection": false,
     "evidenceThresholds": {
       "stepLoop": 2,
       "toolLoop": 2,
-      "sentenceLoop": 1,
+      "sentenceLoop": 3,
+      "selfDiagnosis": 3,
       "doomLoop": 1
     },
     "evidenceWindow": 10,
@@ -601,6 +617,28 @@ Steps 12-17: model continues looping (6 more steps → detection #2, evidence=2 
   }
 }
 ```
+
+### Provider Cache Key with Unstuck Config Fingerprint
+
+The provider cache key in `provider.ts` includes a fingerprint of the relevant unstuck config fields. This means:
+
+- **Config changes apply without restart** — changing any unstuck config field produces a different cache key, which triggers a fresh wrapped/unwrapped model instance.
+- **Deterministic** — same config always produces the same hash, so repeated calls with the same config reuse the cached model.
+- **Relevant fields fingerprinted**: `enabled`, `strategy`, `maxNudges`, `evidenceThresholds`, `sentenceLoopIncludeReasoning`, `doomLoopIgnorePatterns`.
+- **Disabling unstuck** (`enabled: false`) produces a different key (unwrapped model path).
+
+The fingerprint uses a simple FNV-1a hash on the JSON string of the relevant fields, computed at `getLanguage()` time.
+
+### Re-Focused Nudge Messages
+
+The default nudge messages are **context-aware** — they reference the detected context and instruct continuation from the current task state, rather than generic "break out and take a different direction" which pushes the model to re-plan from scratch (exactly the circling behavior observed):
+
+- **`sentence_loop`**: References the repeated sentence and instructs to continue from current task state
+- **`self_diagnosis_loop`**: Instructs to take a fundamentally different approach (keeps existing direction)
+- **`pattern_loop`**: Instructs to break out (keeps existing direction)
+- **`doom_loop`**: References the tool name and instructs to fix the input or try a different tool, without re-reading
+
+The config `nudgeMessage` override still works for users who want a custom message.
 
 ### Log Filtering
 

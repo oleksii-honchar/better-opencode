@@ -121,9 +121,9 @@ describe("wrapWithLoopDetection — 2-param API and per-stream isolation", () =>
     let callCount = 0
     let receivedPrompt: any[] = []
 
-    // Looping chunks that trigger step_loop (3 identical steps)
+    // 6 identical steps: first 3 trigger detection (below threshold, reset), next 3 trigger second detection (threshold met, throw → nudge)
     const loopingChunks: LanguageModelV3StreamPart[] = []
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
       loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
@@ -150,10 +150,9 @@ describe("wrapWithLoopDetection — 2-param API and per-stream isolation", () =>
       async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
         callCount++
         receivedPrompt = args.prompt as any[]
-        // Call 1: loop → evidence=1, below threshold → restart
-        // Call 2: loop → evidence=2, threshold met → nudge
-        // Call 3: recovery
-        if (callCount <= 2) {
+        // Call 1: two detections in same stream → second meets threshold → throw → nudge
+        // Call 2: recovery
+        if (callCount === 1) {
           return { stream: createMockStream(loopingChunks) }
         }
         return { stream: createMockStream(recoveryChunks) }
@@ -175,9 +174,10 @@ describe("wrapWithLoopDetection — 2-param API and per-stream isolation", () =>
     const result = await collectStream(wrapped, initialMessages)
 
     expect(result.length).toBeGreaterThan(0)
-    expect(callCount).toBe(3)
+    // 2 doStream calls: original (with inline evidence gating) + nudge
+    expect(callCount).toBe(2)
 
-    // Third call should have pruned 2 assistant messages and injected nudge
+    // Second call should have all original messages plus the nudge (nothing pruned)
     expect(receivedPrompt.length).toBe(initialMessages.length + 1)
     expect(receivedPrompt[receivedPrompt.length - 1].role).toBe("user")
     const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>

@@ -177,6 +177,47 @@ describe("CrossStreamDoomLoopManager — clearAll", () => {
   })
 })
 
+describe("isIgnored helper", () => {
+  test("returns false when no ignore patterns configured", () => {
+    const { isIgnored } = require("./cross-stream-doom-loop")
+    const compiled = isIgnored([])
+    expect(compiled(JSON.stringify({ path: "/.rules/test.mdc" }))).toBe(false)
+  })
+
+  test("returns true when input matches /\\.rules\\/ pattern", () => {
+    const { isIgnored } = require("./cross-stream-doom-loop")
+    const compiled = isIgnored(["/\\.rules\\/"])
+    expect(compiled(JSON.stringify({ filePath: "/home/user/.rules/olho/always-apply/rules.mdc" }))).toBe(true)
+  })
+
+  test("returns true when input matches \\.mdc pattern", () => {
+    const { isIgnored } = require("./cross-stream-doom-loop")
+    const compiled = isIgnored(["\\.mdc"])
+    expect(compiled(JSON.stringify({ filePath: "/some/path/file.mdc" }))).toBe(true)
+  })
+
+  test("returns false when input does not match any pattern", () => {
+    const { isIgnored } = require("./cross-stream-doom-loop")
+    const compiled = isIgnored(["/\\.rules\\/", "\\.mdc"])
+    expect(compiled(JSON.stringify({ filePath: "/some/path/file.ts" }))).toBe(false)
+  })
+
+  test("returns false when input is empty string", () => {
+    const { isIgnored } = require("./cross-stream-doom-loop")
+    const compiled = isIgnored(["/\\.rules\\/"])
+    expect(compiled("")).toBe(false)
+  })
+
+  test("compiled function is reused across calls (same instance)", () => {
+    const { isIgnored } = require("./cross-stream-doom-loop")
+    const compiled = isIgnored(["/\\.rules\\/"])
+    const r1 = compiled(JSON.stringify({ path: "/.rules/test.mdc" }))
+    const r2 = compiled(JSON.stringify({ path: "/.rules/test.mdc" }))
+    expect(r1).toBe(true)
+    expect(r2).toBe(true)
+  })
+})
+
 describe("DoomLoopRunState interface", () => {
   test("state contains required fields", () => {
     // Verify the interface shape by checking that recordCall creates proper state

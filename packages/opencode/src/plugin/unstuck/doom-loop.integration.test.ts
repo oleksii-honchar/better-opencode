@@ -94,7 +94,6 @@ const doomConfig: UnstuckConfig = {
   enablePatternLoopDetection: false,
   enableSentenceLoopDetection: false,
   enableSelfDiagnosisDetection: false,
-  enableXmlRepetitionGuard: false,
   nudgeMessage: undefined,
 }
 

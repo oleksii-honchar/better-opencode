@@ -2,12 +2,13 @@
 type: adr
 id: ADR-0052
 title: "Enhanced XML Repetition Detection — Partial/Malformed Tag Support"
-status: accepted
+status: superseded
 createdAt: "2026-07-15T15:00:00Z"
-updatedAt: "2026-07-15T15:00:00Z"
+updatedAt: "2026-08-14T16:30:00Z"
 tags: [unstuck, loop-detection, xml-repetition, qwen, partial-tags, bugfix]
 supersedes: []
-superseded_by: []
+superseded_by:
+  - "0081-remove-xml-repetition-guard.adr.md"
 see_also:
   - "0051-xml-repetition-detection.adr.md"
   - "0016-clear-detector-history.adr.md"
@@ -152,3 +153,5 @@ Added 4 new fields to `UnstuckConfig`:
 | False positives on legitimate partial XML | LOW | Separate partialTagThreshold (2), higher than prefix threshold |
 | Performance degradation | LOW | Minimal overhead — simple regex additions |
 | Edge cases in pattern matching | LOW | 121 comprehensive malformed XML tests |
+
+⚠️ **SUPERSEDED:** This ADR is superseded by [ADR-0081](0081-remove-xml-repetition-guard.adr.md) (2026-08-14). The XML repetition guard (including all enhancements) has been removed due to high false-positive rate causing sluggishness and looping in frontier models.

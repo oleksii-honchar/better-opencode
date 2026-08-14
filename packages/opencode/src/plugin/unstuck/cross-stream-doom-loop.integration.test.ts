@@ -66,7 +66,6 @@ const crossStreamConfig: UnstuckConfig = {
   enablePatternLoopDetection: false,
   enableSentenceLoopDetection: false,
   enableSelfDiagnosisDetection: false,
-  enableXmlRepetitionGuard: false,
   enableCrossStreamDoomLoopDetection: true,
   crossStreamDoomLoopThreshold: 3,
   nudgeMessage: undefined,

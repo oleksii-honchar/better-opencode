@@ -1,3 +1,12 @@
+// Compile ignore patterns once and return a function that checks if a serialized
+// tool input matches any pattern. Patterns are regex strings from config.doomLoopIgnorePatterns.
+// Match against the JSON.stringify(input) string used for fingerprinting.
+export function isIgnored(patterns: string[]): (serialized: string) => boolean {
+  const regexes = patterns.map((p) => new RegExp(p))
+  if (regexes.length === 0) return () => false
+  return (serialized: string) => regexes.some((re) => re.test(serialized))
+}
+
 export interface DoomLoopRunState {
   toolName: string;
   inputFingerprint: string;
@@ -11,6 +20,10 @@ export interface CrossStreamDoomLoopManager {
 }
 
 export class CrossStreamDoomLoopManagerImpl implements CrossStreamDoomLoopManager {
+  // Single-state design: one DoomLoopRunState per session.
+  // Weakness (memory 0015): if the model calls tool A, then tool B, then tool A again
+  // with the same input, the count resets to 1 instead of continuing. Only truly
+  // consecutive identical tool+input calls across streams are caught.
   private sessions = new Map<string, DoomLoopRunState>();
 
   recordCall(sessionId: string, toolName: string, inputFingerprint: string, threshold: number): boolean {

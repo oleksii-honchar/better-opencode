@@ -346,6 +346,9 @@ export const Info = Schema.Struct({
       sentenceLoopThreshold: Schema.optional(PositiveInt).annotate({
         description: "Number of periodic sentence repetitions to trigger detection (default: 3)",
       }),
+      sentenceLoopIncludeReasoning: Schema.optional(Schema.Boolean).annotate({
+        description: "Include reasoning-delta content in sentence_loop detection (default: false — excludes reasoning to avoid CoT false positives)",
+      }),
       minSentenceLength: Schema.optional(PositiveInt).annotate({
         description: "Minimum sentence length to consider for loop detection (default: 15)",
       }),
@@ -374,10 +377,10 @@ export const Info = Schema.Struct({
             description: "Number of tool_loop detections before intervention (default: 2)",
           }),
           sentenceLoop: Schema.optional(PositiveInt).annotate({
-            description: "Number of sentence_loop detections before intervention (default: 1)",
+            description: "Number of sentence_loop detections before intervention (default: 3)",
           }),
-          xmlRepetition: Schema.optional(PositiveInt).annotate({
-            description: "Number of xml_repetition detections before intervention (default: 1)",
+          selfDiagnosis: Schema.optional(PositiveInt).annotate({
+            description: "Number of self_diagnosis_loop detections before intervention (default: 3)",
           }),
           doomLoop: Schema.optional(PositiveInt).annotate({
             description: "Number of doom_loop detections before intervention (default: 1)",
@@ -389,26 +392,14 @@ export const Info = Schema.Struct({
       evidenceWindow: Schema.optional(PositiveInt).annotate({
         description: "Maximum age of evidence records before they expire (in seconds, default: Infinity — no eviction)",
       }),
-      enableXmlRepetitionGuard: Schema.optional(Schema.Boolean).annotate({
-        description: "Enable XML tag repetition detection during tool input streaming (default: false)",
-      }),
-      xmlRepetitionThreshold: Schema.optional(PositiveInt).annotate({
-        description: "Number of identical XML tags to trigger repetition detection (default: 4)",
-      }),
-      xmlRepetitionWindowSize: Schema.optional(PositiveInt).annotate({
-        description: "Lookback window size for XML tag repetition (default: 10)",
-      }),
-      maxToolInputTokens: Schema.optional(PositiveInt).annotate({
-        description: "Maximum tokens per tool call before interruption (default: 4000)",
-      }),
-      maxTotalToolInputTokens: Schema.optional(PositiveInt).annotate({
-        description: "Maximum total tokens across all tool calls before interruption (default: 16000)",
-      }),
       enableDoomLoopDetection: Schema.optional(Schema.Boolean).annotate({
         description: "Enable doom loop detection (3x identical tool call with identical input) (default: true)",
       }),
       doomLoopThreshold: Schema.optional(PositiveInt).annotate({
         description: "Number of identical tool calls with identical input before a doom_loop is detected (default: 3)",
+      }),
+      doomLoopIgnorePatterns: Schema.optional(Schema.Array(Schema.String)).annotate({
+        description: "Regex patterns to ignore in doom_loop detection (e.g., rule-file paths like ~/.rules/ and .mdc files)",
       }),
     }),
   ).annotate({

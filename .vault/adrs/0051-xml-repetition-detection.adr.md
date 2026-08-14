@@ -2,12 +2,13 @@
 type: adr
 id: ADR-0051
 title: "Real-time XML Repetition Detection in Tool Call Streaming"
-status: accepted
+status: superseded
 createdAt: "2026-07-15T09:00:00Z"
-updatedAt: "2026-07-15T09:00:00Z"
+updatedAt: "2026-08-14T16:30:00Z"
 tags: [unstuck, loop-detection, xml-repetition, qwen, streaming]
 supersedes: []
-superseded_by: []
+superseded_by:
+  - "0081-remove-xml-repetition-guard.adr.md"
 see_also:
   - "concepts/0007-unstuck-loop-detection.concept.md"
   - "specifications/0009-xml-repetition-detection.spec.md"
@@ -68,3 +69,5 @@ Implement real-time XML tag repetition detection within the existing unstuck plu
 - **Negative:** Risk of false positives on legitimate long tool calls (mitigated by generous limits)
 - **Risk:** Interrupted tool calls may cause model to re-attempt with nudged message
 - **Risk:** Detector may miss problematic patterns — token limits serve as ultimate fallback
+
+⚠️ **SUPERSEDED:** This ADR is superseded by [ADR-0081](0081-remove-xml-repetition-guard.adr.md) (2026-08-14). The XML repetition guard has been removed due to high false-positive rate causing sluggishness and looping in frontier models.

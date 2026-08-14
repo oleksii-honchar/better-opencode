@@ -87,10 +87,11 @@ describe("wrapWithLoopDetection — no loop", () => {
 })
 
 describe("wrapWithLoopDetection — step-level loop", () => {
-  test("throws LoopDetectedError on step-level loop", async () => {
+  test("throws LoopDetectedError on step-level loop (two detections meet threshold)", async () => {
+    // 6 identical steps: 2 step_loop detections needed for threshold (stepLoop=2)
     const chunks: LanguageModelV3StreamPart[] = []
 
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       chunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
       chunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       chunks.push({
@@ -111,9 +112,10 @@ describe("wrapWithLoopDetection — step-level loop", () => {
 
 describe("wrapWithLoopDetection — strategy: warn", () => {
   test("rethrows LoopDetectedError without nudge-and-prune", async () => {
+    // 6 identical steps: 2 detections needed for threshold (stepLoop=2)
     const chunks: LanguageModelV3StreamPart[] = []
 
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       chunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
       chunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       chunks.push({
@@ -134,9 +136,10 @@ describe("wrapWithLoopDetection — strategy: warn", () => {
 
 describe("wrapWithLoopDetection — strategy: abort", () => {
   test("rethrows LoopDetectedError without nudge-and-prune", async () => {
+    // 6 identical steps: 2 detections needed for threshold (stepLoop=2)
     const chunks: LanguageModelV3StreamPart[] = []
 
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       chunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
       chunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       chunks.push({
@@ -180,12 +183,14 @@ describe("wrapWithLoopDetection — disabled", () => {
 })
 
 describe("wrapWithLoopDetection — nudge-and-prune", () => {
-  test("appends nudge without pruning after evidence threshold", async () => {
+  test("appends nudge without pruning after evidence threshold (two detections in same stream)", async () => {
     let callCount = 0
     let receivedPrompt: any[] = []
 
+    // 6 identical steps: first 3 trigger detection (evidence=1, below threshold), detector resets,
+    // next 3 trigger another detection (evidence=2, threshold met) → throw → nudge
     const loopingChunks: LanguageModelV3StreamPart[] = []
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
       loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
@@ -212,10 +217,9 @@ describe("wrapWithLoopDetection — nudge-and-prune", () => {
       async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
         callCount++
         receivedPrompt = args.prompt
-        // Call 1: loop → evidence=1, below threshold → restart with same args
-        // Call 2: loop → evidence=2, threshold met → nudge
-        // Call 3: recovery
-        if (callCount <= 2) {
+        // Call 1: two detections in same stream → second meets threshold → throw → nudge
+        // Call 2: recovery
+        if (callCount === 1) {
           return { stream: createMockStream(loopingChunks) }
         }
         return { stream: createMockStream(recoveryChunks) }
@@ -235,13 +239,13 @@ describe("wrapWithLoopDetection — nudge-and-prune", () => {
 
     const result = await collectStream(wrapped, initialMessages)
 
-    // Should have yielded chunks from all 3 streams
+    // Should have yielded chunks from stream 1 (before throw) + recovery
     expect(result.length).toBeGreaterThan(0)
 
-    // Should have called doStream 3 times (original + below-threshold restart + nudge)
-    expect(callCount).toBe(3)
+    // Should have called doStream 2 times (original with inline evidence gating + nudge)
+    expect(callCount).toBe(2)
 
-    // Third call should have all original messages plus the nudge (nothing pruned)
+    // Second call should have all original messages plus the nudge (nothing pruned)
     expect(receivedPrompt.length).toBe(initialMessages.length + 1)
     expect(receivedPrompt[receivedPrompt.length - 1].role).toBe("user")
     expect(receivedPrompt[receivedPrompt.length - 1]._unstuckNudge).toBe(true)
@@ -254,8 +258,9 @@ describe("wrapWithLoopDetection — max nudges exceeded", () => {
   test("falls back to abort after max nudges", async () => {
     let callCount = 0
 
+    // 6 identical steps: 2 detections per stream (first below threshold, second meets threshold)
     const loopingChunks: LanguageModelV3StreamPart[] = []
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
       loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
@@ -285,172 +290,34 @@ describe("wrapWithLoopDetection — max nudges exceeded", () => {
 
     await expectThrowsLoopDetected(() => collectStream(wrapped, [{ role: "user", content: "Hello" }]))
 
-    // With evidence accumulation:
-    // Stream 1: detection → ev=1, below threshold → restart
-    // Stream 2: detection → ev=2, threshold met → nudge #1 → evidence cleared
-    // Stream 3: detection → ev=1, below threshold → restart
-    // Stream 4: detection → ev=2, threshold met → would nudge but maxNudges reached → abort
-    expect(callCount).toBe(4)
-  })
-})
-
-describe("defaultNudgeMessage — xml_repetition", () => {
-  test("produces context-aware nudge with tag name and tool name", async () => {
-    // When xml_repetition is detected with xmlTag and toolName,
-    // the nudge message should reference the specific tag and tool
-    let callCount = 0
-    let receivedPrompt: any[] = []
-
-    // Simulate xml_repetition detection via tool-input-delta with repeated XML tags
-    const xmlRepetitionChunks: LanguageModelV3StreamPart[] = [
-      { type: "tool-input-start", id: "call-0", toolName: "ReadFile" },
-    ]
-    // Feed enough identical XML tags to trigger xml_repetition (threshold=4)
-    for (let i = 0; i < 5; i++) {
-      xmlRepetitionChunks.push({ type: "tool-input-delta", id: "call-0", delta: "<parameter>value</parameter>" })
-    }
-
-    const recoveryChunks: LanguageModelV3StreamPart[] = [
-      { type: "text-delta", id: "recovery-text", delta: "Recovery response" },
-      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
-    ]
-
-    const model: LanguageModelV3 = {
-      modelId: "test-model",
-      provider: "test",
-      specificationVersion: "v3",
-      supportedUrls: {},
-      async doGenerate() {
-        throw new Error("not implemented")
-      },
-      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
-        callCount++
-        receivedPrompt = args.prompt as any[]
-        if (callCount === 1) {
-          return { stream: createMockStream(xmlRepetitionChunks) }
-        }
-        return { stream: createMockStream(recoveryChunks) }
-      },
-    }
-
-    const config: UnstuckConfig = {
-      ...defaultConfig,
-      maxNudges: 2,
-      strategy: "nudge-and-prune",
-      enableXmlRepetitionGuard: true,
-      xmlRepetitionThreshold: 4,
-      xmlRepetitionWindowSize: 10,
-      maxToolInputTokens: 4000,
-      maxTotalToolInputTokens: 16000,
-      detectToolOnlyLoops: false,
-      loopThreshold: 10,
-      nudgeMessage: undefined,
-    }
-    const wrapped = wrapWithLoopDetection(model, config)
-
-    await collectStream(wrapped, [{ role: "user", content: "Hello" }])
-
-    // Should have called doStream twice (original + nudge)
+    // With evidence-gated throw inside streamWithDetection:
+    // Stream 1: detection 1 (ev=1, below threshold, continue) → detection 2 (ev=2, threshold met) → nudge #1 → evidence cleared
+    // Stream 2: detection 1 (ev=1, below threshold, continue) → detection 2 (ev=2, threshold met) → would nudge but maxNudges=1 → abort
     expect(callCount).toBe(2)
-
-    // The nudge message should reference the specific tag and tool
-    const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>
-    expect(lastContent[0]?.text).toContain("parameter")
-    expect(lastContent[0]?.text).toContain("ReadFile")
-    expect(lastContent[0]?.text).toContain("schema")
-  })
-})
-
-describe("wrapWithLoopDetection — xml_repetition thresholdKey mapping", () => {
-  test("xml_repetition uses xmlRepetition thresholdKey when below threshold", async () => {
-    let callCount = 0
-    let receivedPrompt: any[] = []
-
-    // Simulate xml_repetition detection via tool-input-delta with repeated XML tags
-    const xmlRepetitionChunks: LanguageModelV3StreamPart[] = [
-      { type: "tool-input-start", id: "call-0", toolName: "ReadFile" },
-    ]
-    // Feed enough identical XML tags to trigger xml_repetition (threshold=4)
-    for (let i = 0; i < 5; i++) {
-      xmlRepetitionChunks.push({ type: "tool-input-delta", id: "call-0", delta: "<parameter>value</parameter>" })
-    }
-
-    // Recovery chunks — clean finish
-    const recoveryChunks: LanguageModelV3StreamPart[] = [
-      { type: "text-delta", id: "recovery-text", delta: "Recovery response" },
-      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
-    ]
-
-    const model: LanguageModelV3 = {
-      modelId: "test-model",
-      provider: "test",
-      specificationVersion: "v3",
-      supportedUrls: {},
-      async doGenerate() {
-        throw new Error("not implemented")
-      },
-      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
-        callCount++
-        receivedPrompt = args.prompt as any[]
-        // Call 1: xml_repetition detected, evidence=1, below custom threshold=2 → restart
-        // Call 2: recovery (no loop)
-        if (callCount === 1) {
-          return { stream: createMockStream(xmlRepetitionChunks) }
-        }
-        return { stream: createMockStream(recoveryChunks) }
-      },
-    }
-
-    // Set xmlRepetition threshold to 2 so 1 detection is below threshold
-    const config: UnstuckConfig = {
-      ...defaultConfig,
-      maxNudges: 2,
-      strategy: "nudge-and-prune",
-      enableXmlRepetitionGuard: true,
-      xmlRepetitionThreshold: 4,
-      xmlRepetitionWindowSize: 10,
-      maxToolInputTokens: 4000,
-      maxTotalToolInputTokens: 16000,
-      detectToolOnlyLoops: false,
-      loopThreshold: 10,
-      evidenceThresholds: { ...defaultConfig.evidenceThresholds, xmlRepetition: 2 },
-    }
-    const wrapped = wrapWithLoopDetection(model, config)
-
-    const initialMessages = [{ role: "user", content: "Hello" }]
-    await collectStream(wrapped, initialMessages)
-
-    // Should have called doStream twice (original + restart below threshold)
-    expect(callCount).toBe(2)
-
-    // Second call should use original args (no nudge injected — below threshold)
-    expect(receivedPrompt).toEqual(initialMessages)
   })
 })
 
 describe("wrapWithLoopDetection — evidence accumulation", () => {
-  test("below threshold — continues stream without nudge", async () => {
+  test("below threshold — continues same stream without nudge (no restart)", async () => {
     let callCount = 0
     let receivedPrompt: any[] = []
 
-    // First call: produces loop detection
-    const loopingChunks: LanguageModelV3StreamPart[] = []
+    // Stream produces one step_loop detection (3 identical steps), then continues with clean chunks
+    // After below-threshold detection, detector resets and same stream continues
+    const chunks: LanguageModelV3StreamPart[] = []
     for (let i = 0; i < 3; i++) {
-      loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
-      loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
-      loopingChunks.push({
+      chunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
+      chunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
+      chunks.push({
         type: "tool-input-end",
         id: `call-${i}`,
         providerMetadata: undefined,
       } as any)
-      loopingChunks.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage })
+      chunks.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage })
     }
-
-    // Second call (after restart below threshold): finishes normally
-    const recoveryChunks: LanguageModelV3StreamPart[] = [
-      { type: "text-delta", id: "recovery-text", delta: "Recovery response" },
-      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
-    ]
+    // After detection + reset: clean chunks
+    chunks.push({ type: "text-delta", id: "recovery-text", delta: "Recovery response" })
+    chunks.push({ type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage })
 
     const model: LanguageModelV3 = {
       modelId: "test-model",
@@ -463,7 +330,6 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
       async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
         callCount++
         receivedPrompt = args.prompt as any[]
-        const chunks = callCount === 1 ? loopingChunks : recoveryChunks
         return { stream: createMockStream(chunks) }
       },
     }
@@ -476,23 +342,22 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
 
     const result = await collectStream(wrapped, initialMessages)
 
-    // Should have looping chunks + recovery chunks (looping chunks yielded before detection)
-    expect(result.length).toBe(loopingChunks.length + recoveryChunks.length - 1)
+    // Only ONE doStream call — below-threshold detection continues the same stream
+    expect(callCount).toBe(1)
 
-    // Should have called doStream twice (original + restart below threshold)
-    expect(callCount).toBe(2)
-
-    // Second call should use original args (no nudge injected)
-    expect(receivedPrompt).toEqual(initialMessages)
+    // Stream yielded all chunks (looping + recovery) from the single stream
+    expect(result.length).toBeGreaterThan(0)
   })
 
-  test("threshold met — nudge fires on second detection", async () => {
+  test("threshold met — nudge fires on second detection within same stream", async () => {
     let callCount = 0
     let receivedPrompt: any[] = []
 
-    // First call: produces loop detection (evidence=1, below threshold=2)
+    // A single stream that produces TWO step_loop detections:
+    // - 3 identical steps → first detection (evidence=1, below threshold=2) → detector.reset() → continue
+    // - 3 more identical steps → second detection (evidence=2, threshold met) → throw → nudge
     const loopingChunks: LanguageModelV3StreamPart[] = []
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
       loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
@@ -503,8 +368,7 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
       loopingChunks.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage })
     }
 
-    // Second call (after restart below threshold): also produces loop detection (evidence=2, threshold met)
-    // Third call (after nudge): finishes normally
+    // After nudge: recovery
     const recoveryChunks: LanguageModelV3StreamPart[] = [
       { type: "text-delta", id: "recovery-text", delta: "Recovery response" },
       { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
@@ -521,10 +385,9 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
       async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
         callCount++
         receivedPrompt = args.prompt as any[]
-        // Call 1: loop → evidence=1, below threshold → restart
-        // Call 2: loop → evidence=2, threshold met → nudge
-        // Call 3: recovery
-        if (callCount <= 2) {
+        // Call 1: two detections in same stream → second meets threshold → throw → nudge
+        // Call 2: recovery
+        if (callCount === 1) {
           return { stream: createMockStream(loopingChunks) }
         }
         return { stream: createMockStream(recoveryChunks) }
@@ -541,22 +404,24 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
 
     const result = await collectStream(wrapped, initialMessages)
 
-    // Should have yielded chunks from all 3 streams
+    // Should have yielded chunks from stream 1 (before throw) + recovery
     expect(result.length).toBeGreaterThan(0)
 
-    // Should have called doStream 3 times
-    expect(callCount).toBe(3)
+    // Should have called doStream 2 times: original (with inline evidence gating) + nudge
+    expect(callCount).toBe(2)
 
-    // Third call should have all original messages plus the nudge (nothing pruned)
+    // Second call should have all original messages plus the nudge (nothing pruned)
     expect(receivedPrompt.length).toBe(initialMessages.length + 1)
     const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>
     expect(lastContent[0]?.text).toContain("stuck in a loop")
   })
 
-  test("sentence loop triggers immediately (threshold=1)", async () => {
+  test("sentence loop triggers nudge after evidence threshold met", async () => {
     let callCount = 0
 
     // Sentence loop chunks — the sentence tracker detects repetition within a single stream
+    // 3 repetitions trigger sentence_loop detection. With evidenceThresholds.sentenceLoop=1,
+    // 1 detection meets threshold → throw → nudge.
     const sentenceLoopChunks: LanguageModelV3StreamPart[] = [
       { type: "text-delta", id: "1", delta: "This is a repeated sentence that appears multiple times. " },
       { type: "text-delta", id: "1", delta: "Some other text in between to separate the sentences. " },
@@ -576,7 +441,7 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
       },
       async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
         callCount++
-        // First call: sentence loop detected, threshold=1 → immediate nudge
+        // First call: sentence loop detected, evidence threshold=1 → throw → nudge
         // Second call: recovery
         if (callCount === 1) {
           return { stream: createMockStream(sentenceLoopChunks) }
@@ -585,7 +450,17 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
       },
     }
 
-    const config: UnstuckConfig = { ...defaultConfig, maxNudges: 2, strategy: "nudge-and-prune", sentenceLoopThreshold: 3, minSentenceLength: 10 }
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      maxNudges: 2,
+      strategy: "nudge-and-prune",
+      sentenceLoopThreshold: 3,
+      minSentenceLength: 10,
+      evidenceThresholds: {
+        ...defaultConfig.evidenceThresholds,
+        sentenceLoop: 1,
+      },
+    }
     const wrapped = wrapWithLoopDetection(model, config)
 
     await collectStream(wrapped, [{ role: "user", content: "Hello" }])
@@ -597,8 +472,9 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
   test("max nudges aborts after evidence threshold nudges fail", async () => {
     let callCount = 0
 
+    // 6 identical steps: 2 detections per stream
     const loopingChunks: LanguageModelV3StreamPart[] = []
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
       loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
@@ -624,21 +500,21 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
     }
 
     // maxNudges=1, stepLoop threshold=2
-    // Stream 1: detection → ev=1, continue → detection → ev=2, nudge #1 → evidence cleared, detector cleared
-    // Stream 2: detection → ev=1, continue → detection → ev=2, would nudge but maxNudges reached → abort
+    // Stream 1: detection 1 (ev=1, below threshold, continue) → detection 2 (ev=2, threshold met) → nudge #1 → evidence cleared
+    // Stream 2: detection 1 (ev=1, below threshold, continue) → detection 2 (ev=2, threshold met) → would nudge but maxNudges=1 → abort
     const config: UnstuckConfig = { ...defaultConfig, maxNudges: 1, strategy: "nudge-and-prune" }
     const wrapped = wrapWithLoopDetection(model, config)
 
     await expectThrowsLoopDetected(() => collectStream(wrapped, [{ role: "user", content: "Hello" }]))
 
-    // Should have tried multiple streams before aborting
-    expect(callCount).toBeGreaterThan(1)
+    // Should have tried 2 streams before aborting
+    expect(callCount).toBe(2)
   })
 
   test("evidence is cleared on clean finish — second doStream starts fresh", async () => {
     let callCount = 0
 
-    // First call: produces loop detection (evidence=1, below threshold=2)
+    // First call: produces loop detection (evidence=1, below threshold=2) — continues same stream, then finishes
     const loopingChunks: LanguageModelV3StreamPart[] = []
     for (let i = 0; i < 3; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
@@ -651,7 +527,7 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
       loopingChunks.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage })
     }
 
-    // Second call (after restart below threshold): finishes normally
+    // Second call: a separate doStream — should have a fresh detector (not inheriting evidence)
     const recoveryChunks: LanguageModelV3StreamPart[] = [
       { type: "text-delta", id: "recovery-text", delta: "Recovery response" },
       { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
@@ -675,10 +551,14 @@ describe("wrapWithLoopDetection — evidence accumulation", () => {
     const config: UnstuckConfig = { ...defaultConfig, maxNudges: 2, strategy: "nudge-and-prune" }
     const wrapped = wrapWithLoopDetection(model, config)
 
-    const result = await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+    // First doStream: below-threshold detection, stream continues and finishes normally
+    const result1 = await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+    expect(result1.length).toBe(loopingChunks.length)
+    expect(callCount).toBe(1)
 
-    // Stream completes normally — no nudge fired
-    expect(result.length).toBe(loopingChunks.length + recoveryChunks.length - 1)
+    // Second doStream: fresh detector, clean stream
+    const result2 = await collectStream(wrapped, [{ role: "user", content: "Hello again" }])
+    expect(result2.length).toBe(recoveryChunks.length)
     expect(callCount).toBe(2)
   })
 
@@ -779,9 +659,9 @@ describe("wrapWithLoopDetection — per-stream isolation", () => {
   })
 
   test("loop detection still works within a single doStream", async () => {
-    // Looping chunks that trigger step_loop within one stream
+    // Looping chunks that trigger step_loop within one stream (6 steps = 2 detections for threshold)
     const loopingChunks: LanguageModelV3StreamPart[] = []
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
       loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
       loopingChunks.push({
@@ -872,8 +752,7 @@ describe("wrapWithLoopDetection — doom_loop nudge and logs", () => {
   ]
 
   // Disable unrelated detectors so only doom_loop fires.
-  // nudgeMessage: undefined routes through defaultNudgeMessage (the doom_loop branch),
-  // matching the established xml_repetition test pattern.
+  // nudgeMessage: undefined routes through defaultNudgeMessage (the doom_loop branch).
   const doomConfig: UnstuckConfig = {
     ...defaultConfig,
     maxNudges: 2,
@@ -883,7 +762,6 @@ describe("wrapWithLoopDetection — doom_loop nudge and logs", () => {
     enablePatternLoopDetection: false,
     enableSentenceLoopDetection: false,
     enableSelfDiagnosisDetection: false,
-    enableXmlRepetitionGuard: false,
     nudgeMessage: undefined,
   }
 
@@ -1008,8 +886,8 @@ describe("wrapWithLoopDetection — doom_loop nudge and logs", () => {
       async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
         callCount++
         receivedPrompt = args.prompt as any[]
-        // Call 1: doom loop detected, evidence doom_loop=1, below doomLoop threshold=2 → restart
-        // Call 2: recovery (no loop)
+        // Call 1: doom loop detected, evidence doom_loop=1, below doomLoop threshold=2 → continue same stream
+        // Call 2: recovery (separate doStream)
         if (callCount === 1) {
           return { stream: createMockStream(doomLoopChunks()) }
         }
@@ -1028,7 +906,6 @@ describe("wrapWithLoopDetection — doom_loop nudge and logs", () => {
         sentenceLoop: 99,
         selfDiagnosis: 99,
         patternLoop: 99,
-        xmlRepetition: 99,
         doomLoop: 2,
       },
     }
@@ -1037,8 +914,8 @@ describe("wrapWithLoopDetection — doom_loop nudge and logs", () => {
     const initialMessages = [{ role: "user", content: "Hello" }]
     await collectStream(wrapped, initialMessages)
 
-    // Below threshold → restart with original args, no nudge
-    expect(callCount).toBe(2)
+    // Below threshold → continues same stream (no restart), only 1 doStream call
+    expect(callCount).toBe(1)
     expect(receivedPrompt).toEqual(initialMessages)
   })
 
@@ -1145,9 +1022,423 @@ describe("wrapWithLoopDetection — doom_loop nudge and logs", () => {
   })
 })
 
+describe("wrapWithLoopDetection — evidence-gated throw (below-threshold continues same stream)", () => {
+  test("single below-threshold detection: evidence added, detector reset, same stream continues (no second doStream)", async () => {
+    let callCount = 0
+
+    // A stream that produces one step_loop detection (3 identical steps) then continues with clean chunks
+    // After detector.reset() in streamWithDetection, the clean chunks should NOT trigger another detection
+    const chunks: LanguageModelV3StreamPart[] = [
+      // Step 1: thinking + tool
+      { type: "text-delta", id: "1-text", delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." },
+      { type: "tool-input-start", id: "call-1", toolName: "ReadFile" },
+      { type: "tool-input-end", id: "call-1", providerMetadata: undefined } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+
+      // Step 2: identical
+      { type: "text-delta", id: "2-text", delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." },
+      { type: "tool-input-start", id: "call-2", toolName: "ReadFile" },
+      { type: "tool-input-end", id: "call-2", providerMetadata: undefined } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+
+      // Step 3: identical — triggers step_loop (loopThreshold=3)
+      { type: "text-delta", id: "3-text", delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." },
+      { type: "tool-input-start", id: "call-3", toolName: "ReadFile" },
+      { type: "tool-input-end", id: "call-3", providerMetadata: undefined } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+
+      // After reset: clean chunks that should pass through
+      { type: "text-delta", id: "4-text", delta: "Different thinking that is long enough to pass the minThinkingLength threshold for detection here." },
+      { type: "tool-input-start", id: "call-4", toolName: "WriteFile" },
+      { type: "tool-input-end", id: "call-4", providerMetadata: undefined } as any,
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() { throw new Error("not implemented") },
+      async doStream(): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        return { stream: createMockStream(chunks) }
+      },
+    }
+
+    // stepLoop threshold = 2, so 1 detection is below threshold
+    const config: UnstuckConfig = { ...defaultConfig, strategy: "nudge-and-prune", maxNudges: 2 }
+    const wrapped = wrapWithLoopDetection(model, config)
+
+    const result = await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+    // Key assertion: only ONE doStream call — the stream continued without restart
+    expect(callCount).toBe(1)
+
+    // The stream should have yielded chunks (some before the detection, then the clean chunks after reset)
+    expect(result.length).toBeGreaterThan(0)
+  })
+
+  test("threshold-met detection: LoopDetectedError is thrown from streamWithDetection", async () => {
+    let callCount = 0
+
+    // Two step_loop detections in the same stream — second one should meet threshold (stepLoop=2)
+    // and throw from streamWithDetection, causing the wrapper to nudge
+    // 6 identical steps: first 3 trigger detection (below threshold, reset), next 3 trigger second detection (threshold met, throw)
+    const loopingChunks: LanguageModelV3StreamPart[] = []
+    for (let i = 0; i < 6; i++) {
+      loopingChunks.push({ type: "text-delta", id: `${i}-text`, delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." })
+      loopingChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "ReadFile" })
+      loopingChunks.push({ type: "tool-input-end", id: `call-${i}`, providerMetadata: undefined } as any)
+      loopingChunks.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage })
+    }
+
+    // After first detection (below threshold), detector resets. Second detection triggers threshold.
+    // After threshold met, LoopDetectedError is thrown from streamWithDetection.
+    // The wrapper catches it, nudges, and the model recovers.
+    const recoveryChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "recovery-text", delta: "Recovery response" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() { throw new Error("not implemented") },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        // Call 1: first detection below threshold → continue stream → second detection meets threshold → throw
+        // Call 2 (after nudge): recovery
+        if (callCount === 1) {
+          return { stream: createMockStream(loopingChunks) }
+        }
+        return { stream: createMockStream(recoveryChunks) }
+      },
+    }
+
+    const config: UnstuckConfig = { ...defaultConfig, strategy: "nudge-and-prune", maxNudges: 2 }
+    const wrapped = wrapWithLoopDetection(model, config)
+
+    const result = await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+    // Stream 1 has two detections: first below threshold (continue same stream), second meets threshold (throw → nudge)
+    // Stream 2 is the nudged recovery
+    expect(callCount).toBe(2)
+    expect(result.length).toBeGreaterThan(0)
+  })
+
+  test("no duplicate output in stream (no second doStream for below-threshold)", async () => {
+    let callCount = 0
+    const yieldedChunks: string[] = []
+
+    // Stream that produces one detection then clean text
+    const chunks: LanguageModelV3StreamPart[] = [
+      // 3 identical steps → step_loop detection
+      { type: "text-delta", id: "1-text", delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." },
+      { type: "tool-input-start", id: "call-1", toolName: "ReadFile" },
+      { type: "tool-input-end", id: "call-1", providerMetadata: undefined } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+
+      { type: "text-delta", id: "2-text", delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." },
+      { type: "tool-input-start", id: "call-2", toolName: "ReadFile" },
+      { type: "tool-input-end", id: "call-2", providerMetadata: undefined } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+
+      { type: "text-delta", id: "3-text", delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." },
+      { type: "tool-input-start", id: "call-3", toolName: "ReadFile" },
+      { type: "tool-input-end", id: "call-3", providerMetadata: undefined } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+
+      // After reset: clean text
+      { type: "text-delta", id: "4-text", delta: "Unique recovery text" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() { throw new Error("not implemented") },
+      async doStream(): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        return { stream: createMockStream(chunks) }
+      },
+    }
+
+    const config: UnstuckConfig = { ...defaultConfig, strategy: "nudge-and-prune", maxNudges: 2 }
+    const wrapped = wrapWithLoopDetection(model, config)
+
+    const result = await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+    // Only one doStream call
+    expect(callCount).toBe(1)
+
+    // Collect text deltas from yielded chunks
+    for (const chunk of result) {
+      if (chunk.type === "text-delta") {
+        yieldedChunks.push((chunk as any).delta)
+      }
+    }
+
+    // "Unique recovery text" should appear exactly once (not duplicated from a restart)
+    const uniqueTextCount = yieldedChunks.filter((t) => t === "Unique recovery text").length
+    expect(uniqueTextCount).toBe(1)
+
+    // The "Same thinking text" appears 3 times (before detection) — not duplicated
+    const sameTextCount = yieldedChunks.filter((t) => t.includes("Same thinking text")).length
+    expect(sameTextCount).toBe(3)
+  })
+
+  test("below-threshold continue branch removed from wrapper — evidence gate lives in streamWithDetection", async () => {
+    // This test proves the below-threshold path no longer restarts the stream.
+    // Previously, the wrapper catch block had a `continue` that restarted the stream.
+    // Now, evidence gating happens inside streamWithDetection.
+    // A single detection below threshold should NOT call doStream twice.
+
+    let callCount = 0
+
+    // Stream with exactly one step_loop detection (3 identical steps) followed by clean finish
+    const chunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "1-text", delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." },
+      { type: "tool-input-start", id: "call-1", toolName: "ReadFile" },
+      { type: "tool-input-end", id: "call-1", providerMetadata: undefined } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+
+      { type: "text-delta", id: "2-text", delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." },
+      { type: "tool-input-start", id: "call-2", toolName: "ReadFile" },
+      { type: "tool-input-end", id: "call-2", providerMetadata: undefined } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+
+      { type: "text-delta", id: "3-text", delta: "Same thinking text that is long enough to pass the minThinkingLength threshold for detection here." },
+      { type: "tool-input-start", id: "call-3", toolName: "ReadFile" },
+      { type: "tool-input-end", id: "call-3", providerMetadata: undefined } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+
+      // Clean finish after detection
+      { type: "text-delta", id: "4-text", delta: "All done now" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() { throw new Error("not implemented") },
+      async doStream(): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        return { stream: createMockStream(chunks) }
+      },
+    }
+
+    // stepLoop threshold = 2, so 1 detection is below threshold
+    const config: UnstuckConfig = { ...defaultConfig, strategy: "nudge-and-prune", maxNudges: 2 }
+    const wrapped = wrapWithLoopDetection(model, config)
+
+    await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+    // Previously: callCount would be 2 (detection → below threshold → restart)
+    // Now: callCount is 1 (detection → below threshold → continue same stream)
+    expect(callCount).toBe(1)
+  })
+})
+
+describe("defaultNudgeMessage", () => {
+  // Helper: import defaultNudgeMessage is not exported, so we test via the nudge injection path.
+  // We use sentence_loop and doom_loop to verify the default nudge messages include context references.
+
+  test("sentence_loop nudge includes the repeated sentence and instructs to continue from current task", async () => {
+    let callCount = 0
+    let receivedPrompt: any[] = []
+
+    const sentenceLoopChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "1", delta: "This is a repeated sentence that appears multiple times. " },
+      { type: "text-delta", id: "1", delta: "Some other text in between to separate the sentences. " },
+      { type: "text-delta", id: "1", delta: "This is a repeated sentence that appears multiple times. " },
+      { type: "text-delta", id: "1", delta: "Some other text in between to separate the sentences. " },
+      { type: "text-delta", id: "1", delta: "This is a repeated sentence that appears multiple times. " },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() { throw new Error("not implemented") },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        receivedPrompt = args.prompt as any[]
+        if (callCount === 1) {
+          return { stream: createMockStream(sentenceLoopChunks) }
+        }
+        return { stream: createMockStream([{ type: "text-delta", id: "r", delta: "OK" }, { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage }]) }
+      },
+    }
+
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      maxNudges: 2,
+      strategy: "nudge-and-prune",
+      sentenceLoopThreshold: 3,
+      minSentenceLength: 10,
+      evidenceThresholds: { ...defaultConfig.evidenceThresholds, sentenceLoop: 1 },
+      nudgeMessage: undefined,
+    }
+    const wrapped = wrapWithLoopDetection(model, config)
+
+    await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+    expect(callCount).toBe(2)
+    const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>
+    const nudgeText = lastContent[0]?.text ?? ""
+
+    // Must include the repeated sentence
+    expect(nudgeText).toContain("This is a repeated sentence")
+
+    // Must instruct to continue from current task (not "break out and take a different direction")
+    expect(nudgeText.toLowerCase()).toContain("continue")
+    expect(nudgeText.toLowerCase()).toContain("current")
+  })
+
+  test("doom_loop nudge includes tool name and instructs to fix input or try different tool (not re-read)", async () => {
+    let callCount = 0
+    let receivedPrompt: any[] = []
+
+    const doomChunks: LanguageModelV3StreamPart[] = []
+    for (let i = 0; i < 3; i++) {
+      doomChunks.push({ type: "text-delta", id: `${i}`, delta: "Doom thinking" })
+      doomChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "Grep" })
+      doomChunks.push({
+        type: "tool-input-end",
+        id: `call-${i}`,
+        input: { pattern: "foo" },
+        providerMetadata: undefined,
+      } as any)
+    }
+    doomChunks.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage })
+
+    const recoveryChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "r", delta: "OK" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() { throw new Error("not implemented") },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        receivedPrompt = args.prompt as any[]
+        if (callCount === 1) {
+          return { stream: createMockStream(doomChunks) }
+        }
+        return { stream: createMockStream(recoveryChunks) }
+      },
+    }
+
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      maxNudges: 2,
+      strategy: "nudge-and-prune",
+      loopThreshold: 100,
+      detectToolOnlyLoops: false,
+      enablePatternLoopDetection: false,
+      enableSentenceLoopDetection: false,
+      enableSelfDiagnosisDetection: false,
+      nudgeMessage: undefined,
+    }
+    const wrapped = wrapWithLoopDetection(model, config)
+
+    await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+    expect(callCount).toBe(2)
+    const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>
+    const nudgeText = lastContent[0]?.text ?? ""
+
+    // Must include the tool name
+    expect(nudgeText).toContain("Grep")
+
+    // Must instruct to fix input or try different tool
+    expect(nudgeText.toLowerCase()).toContain("fix")
+    expect(nudgeText.toLowerCase()).toContain("different tool")
+
+    // Must NOT instruct to re-read
+    expect(nudgeText.toLowerCase()).not.toContain("re-read")
+    expect(nudgeText.toLowerCase()).not.toContain("reread")
+  })
+
+  test("config nudgeMessage override still works", async () => {
+    let callCount = 0
+    let receivedPrompt: any[] = []
+
+    const doomChunks: LanguageModelV3StreamPart[] = []
+    for (let i = 0; i < 3; i++) {
+      doomChunks.push({ type: "text-delta", id: `${i}`, delta: "Doom thinking" })
+      doomChunks.push({ type: "tool-input-start", id: `call-${i}`, toolName: "bash" })
+      doomChunks.push({
+        type: "tool-input-end",
+        id: `call-${i}`,
+        input: { command: "ls" },
+        providerMetadata: undefined,
+      } as any)
+    }
+    doomChunks.push({ type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage })
+
+    const recoveryChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "r", delta: "OK" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() { throw new Error("not implemented") },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        receivedPrompt = args.prompt as any[]
+        if (callCount === 1) {
+          return { stream: createMockStream(doomChunks) }
+        }
+        return { stream: createMockStream(recoveryChunks) }
+      },
+    }
+
+    const customNudge = "CUSTOM OVERRIDE MESSAGE"
+    const config: UnstuckConfig = {
+      ...defaultConfig,
+      maxNudges: 2,
+      strategy: "nudge-and-prune",
+      loopThreshold: 100,
+      detectToolOnlyLoops: false,
+      enablePatternLoopDetection: false,
+      enableSentenceLoopDetection: false,
+      enableSelfDiagnosisDetection: false,
+      nudgeMessage: customNudge,
+    }
+    const wrapped = wrapWithLoopDetection(model, config)
+
+    await collectStream(wrapped, [{ role: "user", content: "Hello" }])
+
+    expect(callCount).toBe(2)
+    const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>
+    const nudgeText = lastContent[0]?.text ?? ""
+
+    // Must use the custom override, not the default
+    expect(nudgeText).toBe(customNudge)
+  })
+})
+
 describe("defaultConfig", () => {
-  test("maxNudges defaults to 10", () => {
-    expect(defaultConfig.maxNudges).toBe(10)
+  test("maxNudges defaults to 2", () => {
+    expect(defaultConfig.maxNudges).toBe(2)
   })
 })
 
@@ -1235,7 +1526,6 @@ describe("wrapWithLoopDetection — cross-stream doom-loop with manager", () => 
     enablePatternLoopDetection: false,
     enableSentenceLoopDetection: false,
     enableSelfDiagnosisDetection: false,
-    enableXmlRepetitionGuard: false,
     enableDoomLoopDetection: false, // Disable per-stream doom-loop so cross-stream is the only one that fires
     enableCrossStreamDoomLoopDetection: true,
     crossStreamDoomLoopThreshold: 3,
@@ -1477,5 +1767,196 @@ describe("wrapWithLoopDetection — cross-stream doom-loop with manager", () => 
     // provider-executed tools should be skipped
     expect(manager.recordCallCalls.length).toBe(0)
   })
-})
 
+  test("cross-stream recordCall routes through evidence.add instead of immediate throw", async () => {
+    // With doomLoop evidence threshold = 2, a single cross-stream detection
+    // should NOT throw — it should add evidence and continue the stream.
+    const manager = createMockManager()
+    let callCount = 0
+
+    // Stream with one tool call — cross-stream manager will see count=1,
+    // but we set crossStreamDoomLoopThreshold=1 so recordCall returns true.
+    // However, evidence threshold for doomLoop is 2, so it should continue.
+    const singleToolChunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-1", toolName: "bash" },
+      {
+        type: "tool-input-end",
+        id: "call-1",
+        input: { command: "ls -la" },
+        providerMetadata: undefined,
+      } as any,
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() { throw new Error("not implemented") },
+      async doStream(): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        return { stream: createMockStream(singleToolChunks) }
+      },
+    }
+
+    // crossStreamDoomLoopThreshold=1 means recordCall returns true on first call,
+    // but doomLoop evidence threshold=2 means we need 2 detections to throw.
+    const config: UnstuckConfig = {
+      ...crossStreamConfig,
+      crossStreamDoomLoopThreshold: 1,
+      evidenceThresholds: {
+        ...defaultConfig.evidenceThresholds,
+        doomLoop: 2,
+      },
+    }
+    const wrapped = wrapWithLoopDetection(model, config, manager)
+
+    const prompt = [
+      { role: "system", content: "<env>\nSession ID: ses_evidence123\n</env>" },
+      { role: "user", content: "Hello" },
+    ]
+
+    // Should complete without throwing — evidence below threshold
+    const result = await collectStream(wrapped, prompt)
+    expect(result.length).toBe(singleToolChunks.length)
+
+    // Only one doStream call — no restart
+    expect(callCount).toBe(1)
+
+    // recordCall was called and returned true (threshold reached at cross-stream level)
+    expect(manager.recordCallCalls.length).toBe(1)
+  })
+
+  test("below-threshold cross-stream detection: stream continues without restart", async () => {
+    // Two cross-stream detections in the same stream, but evidence threshold=3.
+    // Both should add evidence but not throw — stream continues.
+    const manager = createMockManager()
+    let callCount = 0
+
+    // Stream with two identical tool calls — cross-stream threshold=1 means
+    // both recordCall return true, adding 2 pieces of evidence.
+    // But doomLoop evidence threshold=3, so no throw.
+    const twoToolChunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-1", toolName: "bash" },
+      {
+        type: "tool-input-end",
+        id: "call-1",
+        input: { command: "ls -la" },
+        providerMetadata: undefined,
+      } as any,
+      { type: "tool-input-start", id: "call-2", toolName: "bash" },
+      {
+        type: "tool-input-end",
+        id: "call-2",
+        input: { command: "ls -la" },
+        providerMetadata: undefined,
+      } as any,
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() { throw new Error("not implemented") },
+      async doStream(): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        return { stream: createMockStream(twoToolChunks) }
+      },
+    }
+
+    const config: UnstuckConfig = {
+      ...crossStreamConfig,
+      crossStreamDoomLoopThreshold: 1,
+      evidenceThresholds: {
+        ...defaultConfig.evidenceThresholds,
+        doomLoop: 3,
+      },
+    }
+    const wrapped = wrapWithLoopDetection(model, config, manager)
+
+    const prompt = [
+      { role: "system", content: "<env>\nSession ID: ses_below123\n</env>" },
+      { role: "user", content: "Hello" },
+    ]
+
+    const result = await collectStream(wrapped, prompt)
+    expect(result.length).toBe(twoToolChunks.length)
+
+    // Only one doStream call — no restart, stream continued
+    expect(callCount).toBe(1)
+
+    // Both tool calls were recorded
+    expect(manager.recordCallCalls.length).toBe(2)
+  })
+
+  test("threshold-met cross-stream detection: LoopDetectedError is thrown", async () => {
+    // With doomLoop evidence threshold=1, a single cross-stream detection
+    // should add evidence and throw because threshold is met.
+    const manager = createMockManager()
+    let callCount = 0
+    let receivedPrompt: any[] = []
+
+    const singleToolChunks: LanguageModelV3StreamPart[] = [
+      { type: "tool-input-start", id: "call-1", toolName: "bash" },
+      {
+        type: "tool-input-end",
+        id: "call-1",
+        input: { command: "ls -la" },
+        providerMetadata: undefined,
+      } as any,
+      { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+    ]
+
+    const recoveryChunks: LanguageModelV3StreamPart[] = [
+      { type: "text-delta", id: "recovery", delta: "Recovery" },
+      { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: mockUsage },
+    ]
+
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() { throw new Error("not implemented") },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        receivedPrompt = args.prompt as any[]
+        if (callCount === 1) {
+          return { stream: createMockStream(singleToolChunks) }
+        }
+        return { stream: createMockStream(recoveryChunks) }
+      },
+    }
+
+    // crossStreamDoomLoopThreshold=1 → recordCall returns true on first call
+    // doomLoop evidence threshold=1 → 1 detection meets threshold → throw → nudge
+    const config: UnstuckConfig = {
+      ...crossStreamConfig,
+      crossStreamDoomLoopThreshold: 1,
+      evidenceThresholds: {
+        ...defaultConfig.evidenceThresholds,
+        doomLoop: 1,
+      },
+    }
+    const wrapped = wrapWithLoopDetection(model, config, manager)
+
+    const prompt = [
+      { role: "system", content: "<env>\nSession ID: ses_met123\n</env>" },
+      { role: "user", content: "Hello" },
+    ]
+
+    const result = await collectStream(wrapped, prompt)
+
+    // Should have thrown (threshold met) → nudge → recovery
+    expect(result.length).toBeGreaterThan(0)
+    expect(callCount).toBe(2)
+
+    // Nudge was injected
+    const lastContent = receivedPrompt[receivedPrompt.length - 1].content as Array<{ type: string; text: string }>
+    expect(receivedPrompt[receivedPrompt.length - 1]._unstuckNudge).toBe(true)
+    expect(lastContent[0]?.text).toContain("doom loop")
+  })
+})

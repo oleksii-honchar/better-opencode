@@ -28,7 +28,7 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { wrapWithLoopDetection, mergeConfig, CrossStreamDoomLoopManagerImpl } from "../plugin/unstuck"
+import { wrapWithLoopDetection, mergeConfig, CrossStreamDoomLoopManagerImpl, computeUnstuckFingerprint } from "../plugin/unstuck"
 
 const log = Log.create({ service: "provider" })
 
@@ -1719,12 +1719,13 @@ export const layer = Layer.effect(
     const getLanguage = Effect.fn("Provider.getLanguage")(function* (model: Model) {
       const s = yield* InstanceState.get(state)
       const envs = yield* env.all()
-      const key = `${model.providerID}/${model.id}`
+      const cfg = yield* config.get()
+      const unstuckConfig = mergeConfig(cfg.unstuck ?? {})
+      const unstuckHash = computeUnstuckFingerprint(unstuckConfig)
+      const key = `${model.providerID}/${model.id}?unstuck=${unstuckHash}`
       if (s.models.has(key)) return s.models.get(key)!
 
       const provider = s.providers[model.providerID]
-      const cfg = yield* config.get()
-      const unstuckConfig = mergeConfig(cfg.unstuck ?? {})
       log.debug("getLanguage — unstuck config", {
         modelKey: key,
         enabled: unstuckConfig.enabled,

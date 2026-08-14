@@ -2,12 +2,10 @@
 type: concept
 title: "Unstuck Loop Detection System"
 createdAt: "2026-06-21T00:00:00Z"
-updatedAt: "2026-08-12T18:50:00Z"
-tags: [unstuck, loop-detection, fingerprint, nudge-and-prune, xml-repetition, partial-tags, model-thresholds, doom-loop, cross-stream]
+updatedAt: "2026-08-14T19:00:00Z"
+tags: [unstuck, loop-detection, fingerprint, nudge, doom-loop, cross-stream, evidence-gated]
 see_also:
   - "../specifications/0004-unstuck-loop-detection.spec.md"
-  - "../specifications/0009-xml-repetition-detection.spec.md"
-  - "../specifications/0010-enhanced-xml-detection.spec.md"
   - "../specifications/0012-doom-loop-nudge.spec.md"
   - "../specifications/0015-fix-false-self-diagnosis-loop.spec.md"
   - "../adrs/0016-clear-detector-history.adr.md"
@@ -22,6 +20,15 @@ see_also:
   - "../adrs/0072-per-stream-loop-detector.adr.md"
   - "../adrs/0073-self-diagnosis-threshold-2.adr.md"
   - "../adrs/0074-cross-stream-doom-loop-detection.adr.md"
+  - "../adrs/0081-remove-xml-repetition-guard.adr.md"
+  - "../adrs/0082-evidence-gated-throw.adr.md"
+  - "../adrs/0083-reasoning-delta-sentence-loop.adr.md"
+  - "../adrs/0084-maxnudges-default-2.adr.md"
+  - "../adrs/0085-tighten-self-diagnosis.adr.md"
+  - "../adrs/0086-doom-loop-ignore-patterns.adr.md"
+  - "../adrs/0087-cross-stream-opt-in.adr.md"
+  - "../adrs/0088-provider-cache-fingerprint.adr.md"
+  - "../adrs/0089-re-focus-nudge-message.adr.md"
 ---
 
 # CONCEPT-0007: Unstuck Loop Detection System
@@ -30,10 +37,12 @@ see_also:
 **Updated:** 2026-07-15 (added partial/prefix XML detection, model-specific thresholds, user message reset)
 **Updated:** 2026-08-01 (added doom_loop detection — Allow-then-Catch; unstuck now owns doom-loop recovery)
 **Updated:** 2026-08-12 (added cross-stream doom-loop detection — ADR-0074)
+**Updated:** 2026-08-14 (removed xml_repetition detection type — superseded by ADR-0081)
+**Updated:** 2026-08-14 (evidence-gated throw, reasoning-delta exclusion, maxNudges 2, self_diagnosis threshold 3, ignore patterns, cross-stream opt-in, cache fingerprint, re-focus nudge — ADR-0082 through ADR-0089)
 
 ## What
 
-The unstuck plugin is a two-level loop detection system operating at the LLM stream level. It prevents AI agents from getting stuck in infinite loops by detecting repetitive patterns and applying nudge-and-prune interventions.
+The unstuck plugin is a two-level loop detection system operating at the LLM stream level. It prevents AI agents from getting stuck in infinite loops by detecting repetitive patterns and applying nudge-only interventions (pruning removed — ADR-0080). Below-threshold detections continue the same stream without restart (ADR-0082); only threshold-met detections throw to the wrapper catch block for nudge/abort.
 
 ## Why
 
@@ -42,13 +51,13 @@ LLM agents frequently enter behavioral loops (e.g., 697+ iterations of the same 
 ## Key Details
 
 - **Architecture:** Two-level — `LoopDetectorImpl` (detection) + `wrapWithLoopDetection` (stream wrapper)
-- **Detection types:** 7 types — `step_loop` (identical step fingerprints), `tool_loop` (identical tools with gap tolerance), `sentence_loop` (periodic sentence repetition within a step), `self_diagnosis_loop` (model acknowledges being stuck), `pattern_loop` (period-2 alternating pattern), `xml_repetition` (repeating XML tags within tool input stream, including partial/prefix tags), `doom_loop` (3× same tool + exact same input within current step)
+- **Detection types:** 6 types — `step_loop` (identical step fingerprints), `tool_loop` (identical tools with gap tolerance), `sentence_loop` (periodic sentence repetition within a step; reasoning-delta excluded by default — ADR-0083), `self_diagnosis_loop` (model acknowledges being stuck), `pattern_loop` (period-2 alternating pattern), `doom_loop` (3× same tool + exact same input within current step; ignore patterns exempt mandated reads — ADR-0086)
 - **Fingerprinting:** FNV-1a hash of normalized thinking text + tool signatures → step fingerprint
-- **Evidence accumulation:** Multiple detection events must be accumulated before intervention (thresholds: 2 for step/tool/pattern/self-diagnosis, 1 for sentence/doom_loop)
-- **Intervention strategies:** `nudge-and-prune` (inject user message + prune looping messages), `abort` (throw), `warn` (log and rethrow)
+- **Evidence accumulation:** Multiple detection events must be accumulated before intervention (thresholds: 2 for step/tool/pattern, 3 for sentence, 3 for self-diagnosis, 1 for doom_loop)
+- **Intervention strategies:** `nudge-only` (inject re-focused user message — ADR-0089), `abort` (throw), `warn` (log and rethrow). Pruning removed (ADR-0080). Below-threshold detections continue the same stream — no restart (ADR-0082).
 - **Per-stream lifecycle (ADR-0072):** the detector is scoped to ONE `doStream` call — `new LoopDetectorImpl()` inside `doStream` (wrapper.ts:238); the wrapped function remains cached per model in `s.models`; each agent response starts with a fresh detector, so no cross-stream history, evidence, or nudgeCount accumulation (reverses the ADR-0020 global-singleton design)
 - **No user-message reset needed:** the fragile `userMessageCount > lastUserMessageCount` reset was removed — each `doStream` starts clean; `detector.clear()` / `evidence.clear()` retained only on the nudge path (a nudge restarts the SAME doStream)
-- **Self-diagnosis threshold 2 (ADR-0073):** `evidenceThresholds.selfDiagnosis: 2` — a single natural-language phrase ("I cannot proceed") no longer triggers intervention; two self-diagnosis detections within one response do (supersedes ADR-0019 threshold 1)
+- **Self-diagnosis threshold 3 (ADR-0085):** `evidenceThresholds.selfDiagnosis: 3` — three self-diagnosis detections within one response required for intervention. The `cannot (progress|proceed|continue)` pattern was removed from regex (high false-positive on normal status reports). Supersedes ADR-0073's threshold-2 value.
 
 ### Doom Loop Detection (ADR-0060…0064, spec 0012)
 
@@ -66,15 +75,32 @@ LLM agents frequently enter behavioral loops (e.g., 697+ iterations of the same 
 - **Incident:** Session `ses_009302293ffe3KacIsKYNnejAD` — 30 identical `sed -i` calls across 30 streams, never detected; model self-escaped after ~147s.
 - **Solution:** Per-session rolling record in `CrossStreamDoomLoopManager` (keyed by session ID from `<env>` block). After per-step doom-loop detection in `streamWithDetection`, check the session record. If (tool name + input fingerprint) matches, increment count; if count >= threshold, trigger nudge-and-prune.
 - **Reset:** On nudge, `resetSession(sessionId)` clears the counter. On session end, `clearAll()` clears all records.
-- **Config:** `enableCrossStreamDoomLoopDetection` (default true), `crossStreamDoomLoopThreshold` (default 3).
+- **Config:** `enableCrossStreamDoomLoopDetection` (default **false** — opt-in, ADR-0087), `crossStreamDoomLoopThreshold` (default 3).
 - **Session ID extraction:** Regex on `Session ID: ses_xxxxx` from prompt's `<env>` block; fallback to empty string (no cross-stream detection for that call).
 - **Preserves per-stream isolation:** additive to ADR-0072 — the per-stream detector still operates independently; cross-stream detection is a separate layer at the provider/wrapper level.
 
-### XML Repetition Detection (ADR-0051, ADR-0052)
+### XML Repetition Detection (Removed — ADR-0081)
 
-- **Three completeness levels:** `TagEntry.completeness` — `"complete"` (full opening+closing), `"partial"` (opening only), `"prefix"` (tag name prefix)
-- **Three regex families:** complete tags (`XML_TAG_PATTERN`), opening-only (`XML_OPENING_TAG_PATTERN`), malformed (`MALFORMED_PATTERN`)
-- **Dual thresholds:** `repetitionThreshold` (complete tags, default: 4) and `partialTagThreshold` (partial/prefix, default: 2)
-- **Model-specific thresholds:** Qwen models use lower thresholds (repetition=3, partial=2, maxToolInputTokens=2500)
-- **Token estimation:** XML-aware with configurable `xmlTokenEstimationMultiplier` (default: 1.5x) — `Math.ceil(text.length / 4 * multiplier)`
-- **Config:** `xmlRepetitionModelId`, `xmlPartialTagThreshold`, `xmlTokenEstimationMultiplier`, `xmlPartialTagDetection`
+Previously, the unstuck plugin included an `xml_repetition` detection type (ADR-0051, ADR-0052) that monitored tool input streams for repeating XML tags. This was removed in ADR-0081 (2026-08-14) due to high false-positive rate: aggressive token estimation (1.5x multiplier), low partial tag threshold (2), and immediate intervention (evidence threshold 1) caused frequent stream interruptions on legitimate large tool calls, producing the sluggishness and looping behavior reported by users. If the original Qwen XML repetition issue re-emerges, detection can be reintroduced with higher thresholds and evidence threshold ≥ 2.
+
+### Evidence-Gated Throw (ADR-0082)
+
+- **Problem:** Before this fix, ANY detection (even below the intervention threshold) threw `LoopDetectedError`, causing the wrapper to restart the entire stream via `model.doStream` with the same args. Below-threshold detections accumulated evidence but still cost a full regeneration. The spec promised "continue stream (model may self-correct)" — the implementation restarted.
+- **Fix:** Evidence accumulation moved INTO `streamWithDetection`. On detection: add evidence; if threshold met → throw (nudge/abort path); if below threshold → reset per-stream loop state and **continue the same stream**. The wrapper catch block handles only threshold-met nudges, warn, and abort.
+- **Impact:** Below-threshold false positives cost zero regeneration; duplicate output eliminated; evidence still accumulates for genuine loops.
+
+### Doom-Loop Ignore Patterns (ADR-0086)
+
+- **Problem:** The always-apply rules system mandates reading `~/.rules/olho/always-apply/*.mdc` first — these identical reads collided with doom-loop detectors. The DB session showed 9× reads of rules.mdc with identical input.
+- **Fix:** Config `doomLoopIgnorePatterns: string[]` — regex patterns matched against serialized tool input. Matching calls are excluded from doom-loop candidate tracking (per-stream AND cross-stream). Default: `["/\\.rules\\//", "\\.mdc$"]`.
+
+### Provider Cache Config Fingerprint (ADR-0088)
+
+- **Problem:** Wrapped models were cached per `${providerID}/${modelID}` — mid-session config changes (e.g. disabling unstuck) did NOT unwrap an already-wrapped model. The user's disable only took effect via a server restart.
+- **Fix:** Cache key includes unstuck config fingerprint: `${providerID}/${modelID}?unstuck=<hash>`. Config change → new key → fresh wrapped/unwrapped model without restart.
+
+### Nudge Mechanics (Post-ADR-0082–0089)
+
+- **maxNudges default:** 2 (ADR-0084) — down from 10; matches the documented contract.
+- **Re-focus nudge message** (ADR-0089): the default nudge now references the detected context (sentence/tool) and instructs continuation from the current task state without re-reading/re-planning. Replaces "Break out and take a different direction" which pushed the model to re-plan from scratch.
+- **sentence_loop:** reasoning-delta excluded by default (ADR-0083); opt-in via `sentenceLoopIncludeReasoning`. Default evidence threshold raised from 1 → 3.
