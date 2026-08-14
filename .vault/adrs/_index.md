@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-13T18:00:00Z"
+updatedAt: "2026-08-14T09:35:00Z"
 tags: []
 ---
 
@@ -90,3 +90,5 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0076-drop-orphan-tool-results.adr.md]] — Drop Orphan Tool-Results (Do Not Re-Attach Synthetic Tool-Call Parts) (ADR-0076, status: accepted)
 - [[0077-defense-in-depth-validate-messages.adr.md]] — Add Defense-in-Depth in LLM.validateMessages for Orphan Tool-Results (ADR-0077, status: accepted)
 - [[0078-fix-prune-preserve-pairs.adr.md]] — Fix pruneLoopingMessages to Preserve Tool-Call/Tool-Result Pairs (ADR-0078, status: accepted)
+- [[0079-explicit-tool-response-file-handling.adr.md]] — Explicit tool_response_file Handling in MCP Tool Result Processing (ADR-0079, status: accepted)
+- [[0079-explicit-tool-response-file-handling.adr.md]] — Explicit tool_response_file Handling in MCP Tool Result Processing (ADR-0079, status: accepted)

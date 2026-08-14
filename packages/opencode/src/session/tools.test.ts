@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, mock } from "bun:test"
 import * as Effect from "effect/Effect"
+import { isToolResponseFile, type ToolResponseFile, processContentItems } from "./tools"
 
 // ---------------------------------------------------------------------------
 // Mocks — capture calls to Log.toolsLog
@@ -572,6 +573,515 @@ describe("structuredContent forwarding in output", () => {
       const output = buildOutput(result)
 
       expect(output).not.toHaveProperty("structuredContent")
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tests: ToolResponseFile type guard
+// ---------------------------------------------------------------------------
+
+describe("isToolResponseFile", () => {
+  test("returns true for tool_response_file content item", () => {
+    const contentItem: ToolResponseFile = {
+      type: "tool_response_file",
+      filePath: "/tmp/agent-tool-responses/test-123.json",
+      fileName: "test-123.json",
+      fileSize: 159623,
+      summary: "[structuredContent]\\n{\\n  \\\"results\\\": ...",
+      savedAt: "2026-08-14T07:25:27.042Z",
+      instructions: "Tool response saved to file.",
+    }
+
+    expect(isToolResponseFile(contentItem)).toBe(true)
+  })
+
+  test("returns false for text content type", () => {
+    const contentItem = { type: "text" as const, text: "hello world" }
+
+    expect(isToolResponseFile(contentItem)).toBe(false)
+  })
+
+  test("returns false for image content type", () => {
+    const contentItem = {
+      type: "image" as const,
+      data: "base64data",
+      mimeType: "image/png",
+    }
+
+    expect(isToolResponseFile(contentItem)).toBe(false)
+  })
+
+  test("returns false for resource content type", () => {
+    const contentItem = {
+      type: "resource" as const,
+      resource: {
+        uri: "file:///tmp/test.json",
+        mimeType: "application/json",
+        text: '{"key": "value"}',
+      },
+    }
+
+    expect(isToolResponseFile(contentItem)).toBe(false)
+  })
+
+  test("returns false for unknown content type", () => {
+    const contentItem = { type: "unknown_type" as const, data: "something" }
+
+    expect(isToolResponseFile(contentItem)).toBe(false)
+  })
+
+  test("returns false when type is tool_response_file but required fields are missing", () => {
+    const contentItem = { type: "tool_response_file" as const }
+
+    expect(isToolResponseFile(contentItem)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tests: processContentItems — tool_response_file handling
+// ---------------------------------------------------------------------------
+
+describe("processContentItems — tool_response_file", () => {
+  describe("valid file — reads content from filePath", () => {
+    test("reads file content from filePath and uses it for text output", () => {
+      const fileContent = JSON.stringify({ results: [{ id: "test", status: "ok" }] })
+      const contentItems = [
+        {
+          type: "tool_response_file" as const,
+          filePath: "/tmp/test-response.json",
+          fileName: "test-response.json",
+          fileSize: fileContent.length,
+          summary: "corrupted_base64_content_here",
+          savedAt: "2026-08-14T07:25:27.042Z",
+          instructions: "Tool response saved to file.",
+        } satisfies ToolResponseFile,
+      ]
+
+      const result = processContentItems(contentItems, {
+        readFile: (path: string) => {
+          expect(path).toBe("/tmp/test-response.json")
+          return fileContent
+        },
+      })
+
+      // File content is used, NOT the corrupted summary
+      expect(result.textParts).toHaveLength(1)
+      expect(result.textParts[0]).toContain('"results"')
+      expect(result.textParts[0]).toContain('"id": "test"')
+      expect(result.textParts[0]).not.toContain("corrupted_base64_content_here")
+      expect(result.attachments).toHaveLength(0)
+    })
+
+    test("includes filePath, fileName, and fileSize in metadata", () => {
+      const fileContent = JSON.stringify({ key: "value" })
+      const contentItems = [
+        {
+          type: "tool_response_file" as const,
+          filePath: "/tmp/test-file.json",
+          fileName: "test-file.json",
+          fileSize: 42,
+          summary: "some summary",
+          savedAt: "2026-08-14T07:25:27.042Z",
+          instructions: "Read the file.",
+        } satisfies ToolResponseFile,
+      ]
+
+      const result = processContentItems(contentItems, {
+        readFile: () => fileContent,
+      })
+
+      expect(result.textParts).toHaveLength(1)
+      expect(result.textParts[0]).toContain("filePath: /tmp/test-file.json")
+      expect(result.textParts[0]).toContain("fileName: test-file.json")
+      expect(result.textParts[0]).toContain("fileSize: 42")
+    })
+
+    test("parses JSON file content and formats it as pretty-printed text", () => {
+      const fileContent = JSON.stringify({ key: "value", nested: { a: 1 } })
+      const contentItems = [
+        {
+          type: "tool_response_file" as const,
+          filePath: "/tmp/pretty.json",
+          fileName: "pretty.json",
+          fileSize: fileContent.length,
+          summary: "ignored",
+          savedAt: "2026-08-14T07:25:27.042Z",
+          instructions: "Read the file.",
+        } satisfies ToolResponseFile,
+      ]
+
+      const result = processContentItems(contentItems, {
+        readFile: () => fileContent,
+      })
+
+      expect(result.textParts).toHaveLength(1)
+      // Should contain pretty-printed JSON (with indentation)
+      expect(result.textParts[0]).toContain("  \"key\"")
+      expect(result.textParts[0]).toContain("  \"nested\"")
+    })
+  })
+
+  describe("missing file — falls back to instructions", () => {
+    test("falls back to instructions when file read fails with ENOENT", () => {
+      const contentItems = [
+        {
+          type: "tool_response_file" as const,
+          filePath: "/tmp/missing-file.json",
+          fileName: "missing-file.json",
+          fileSize: 100,
+          summary: "corrupted",
+          savedAt: "2026-08-14T07:25:27.042Z",
+          instructions: "Tool response saved to file. Use cat to read it.",
+        } satisfies ToolResponseFile,
+      ]
+
+      const result = processContentItems(contentItems, {
+        readFile: () => {
+          const err = new Error("ENOENT: no such file or directory")
+          ;(err as NodeJS.ErrnoException).code = "ENOENT"
+          throw err
+        },
+      })
+
+      expect(result.textParts).toHaveLength(1)
+      // Should contain the instructions fallback
+      expect(result.textParts[0]).toContain("instructions")
+      expect(result.textParts[0]).toContain("Tool response saved to file")
+      expect(result.textParts[0]).toContain("/tmp/missing-file.json")
+      // Should NOT contain corrupted summary
+      expect(result.textParts[0]).not.toContain("corrupted")
+    })
+
+    test("falls back to instructions when file read fails with permission error", () => {
+      const contentItems = [
+        {
+          type: "tool_response_file" as const,
+          filePath: "/tmp/forbidden.json",
+          fileName: "forbidden.json",
+          fileSize: 100,
+          summary: "corrupted",
+          savedAt: "2026-08-14T07:25:27.042Z",
+          instructions: "Tool response saved to file.",
+        } satisfies ToolResponseFile,
+      ]
+
+      const result = processContentItems(contentItems, {
+        readFile: () => {
+          const err = new Error("EACCES: permission denied")
+          ;(err as NodeJS.ErrnoException).code = "EACCES"
+          throw err
+        },
+      })
+
+      expect(result.textParts).toHaveLength(1)
+      expect(result.textParts[0]).toContain("instructions")
+      expect(result.textParts[0]).toContain("Tool response saved to file")
+      expect(result.textParts[0]).not.toContain("corrupted")
+    })
+  })
+
+  describe("mixed content — tool_response_file with text", () => {
+    test("handles tool_response_file alongside regular text content", () => {
+      const fileContent = JSON.stringify({ data: "from file" })
+      const contentItems = [
+        { type: "text" as const, text: "Hello from text" },
+        {
+          type: "tool_response_file" as const,
+          filePath: "/tmp/mixed.json",
+          fileName: "mixed.json",
+          fileSize: fileContent.length,
+          summary: "ignored",
+          savedAt: "2026-08-14T07:25:27.042Z",
+          instructions: "Read the file.",
+        } satisfies ToolResponseFile,
+        { type: "text" as const, text: "After file" },
+      ]
+
+      const result = processContentItems(contentItems, {
+        readFile: () => fileContent,
+      })
+
+      expect(result.textParts).toHaveLength(3)
+      expect(result.textParts[0]).toBe("Hello from text")
+      expect(result.textParts[1]).toContain('"data": "from file"')
+      expect(result.textParts[2]).toBe("After file")
+    })
+  })
+
+  describe("non-JSON file content", () => {
+    test("uses raw file content when JSON parse fails", () => {
+      const fileContent = "This is not valid JSON {{"
+      const contentItems = [
+        {
+          type: "tool_response_file" as const,
+          filePath: "/tmp/raw.txt",
+          fileName: "raw.txt",
+          fileSize: fileContent.length,
+          summary: "ignored",
+          savedAt: "2026-08-14T07:25:27.042Z",
+          instructions: "Read the file.",
+        } satisfies ToolResponseFile,
+      ]
+
+      const result = processContentItems(contentItems, {
+        readFile: () => fileContent,
+      })
+
+      expect(result.textParts).toHaveLength(1)
+      expect(result.textParts[0]).toContain("This is not valid JSON")
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Integration tests: processContentItems with real file I/O
+// ---------------------------------------------------------------------------
+
+describe("processContentItems — integration (real file I/O)", () => {
+  // Helper: create a temp dir, return cleanup function
+  function createTempDir(): { dir: string; cleanup: () => void } {
+    const dir = Bun.file(Bun.spawnSync(["mktemp", "-d"]).stdout.toString().trim())
+    const tmpPath = dir.path
+    return {
+      dir: tmpPath,
+      cleanup: () => {
+        try {
+          Bun.spawnSync(["rm", "-rf", tmpPath])
+        } catch {
+          // best-effort
+        }
+      },
+    }
+  }
+
+  describe("end-to-end flow: tool_response_file with real file on disk", () => {
+    test("reads real file from disk and produces correct output without base64 corruption", () => {
+      const tmpDir = Bun.spawnSync(["mktemp", "-d"]).stdout.toString().trim()
+      try {
+        // Write a realistic JSON response to disk (simulating what an MCP tool would do)
+        const fileContent = JSON.stringify({
+          results: [
+            { id: "symbols-client", status: "ok", data: { symbols: [{ name: "JraHttpTransport" }] } },
+            { id: "symbols-resolver", status: "ok", data: { symbols: [{ name: "decodeJraPayload" }] } },
+          ],
+        })
+        const filePath = tmpDir + "/octocode_lspGetSemantics-integration.json"
+        Bun.write(filePath, fileContent)
+
+        const contentItems = [
+          {
+            type: "tool_response_file" as const,
+            filePath,
+            fileName: "octocode_lspGetSemantics-integration.json",
+            fileSize: Buffer.byteLength(fileContent),
+            summary: "corrupted_base64_summary_with_long_content",
+            savedAt: "2026-08-14T07:25:27.042Z",
+            instructions: "Tool response saved to file. Use cat to read: " + filePath,
+          } satisfies ToolResponseFile,
+        ]
+
+        // Use default readFile (fs.readFileSync) — no mock
+        const result = processContentItems(contentItems)
+
+        // File content is used, NOT the corrupted summary
+        expect(result.textParts).toHaveLength(1)
+        const output = result.textParts[0]
+
+        // Should contain the actual file content
+        expect(output).toContain('"results"')
+        expect(output).toContain('"symbols-client"')
+        expect(output).toContain('"JraHttpTransport"')
+        expect(output).toContain('"decodeJraPayload"')
+
+        // Should contain metadata
+        expect(output).toContain("filePath: " + filePath)
+        expect(output).toContain("fileName: octocode_lspGetSemantics-integration.json")
+
+        // Should NOT contain the corrupted base64 summary — this is the key regression
+        expect(output).not.toContain("corrupted_base64_summary")
+
+        // No attachments for tool_response_file
+        expect(result.attachments).toHaveLength(0)
+      } finally {
+        Bun.spawnSync(["rm", "-rf", tmpDir])
+      }
+    })
+  })
+
+  describe("mixed content: text + tool_response_file with real file", () => {
+    test("handles text content and tool_response_file from real file correctly", () => {
+      const tmpDir = Bun.spawnSync(["mktemp", "-d"]).stdout.toString().trim()
+      try {
+        // Write a real file to disk
+        const fileContent = JSON.stringify({ data: "from real file", count: 42 })
+        const filePath = tmpDir + "/mixed-test.json"
+        Bun.write(filePath, fileContent)
+
+        const contentItems = [
+          { type: "text" as const, text: "Here is the tool response:" },
+          {
+            type: "tool_response_file" as const,
+            filePath,
+            fileName: "mixed-test.json",
+            fileSize: Buffer.byteLength(fileContent),
+            summary: "corrupted_summary",
+            savedAt: "2026-08-14T07:25:27.042Z",
+            instructions: "Read the file.",
+          } satisfies ToolResponseFile,
+          { type: "text" as const, text: "End of response." },
+        ]
+
+        const result = processContentItems(contentItems)
+
+        expect(result.textParts).toHaveLength(3)
+        expect(result.textParts[0]).toBe("Here is the tool response:")
+        expect(result.textParts[1]).toContain('"data": "from real file"')
+        expect(result.textParts[1]).toContain('"count": 42')
+        expect(result.textParts[1]).not.toContain("corrupted_summary")
+        expect(result.textParts[2]).toBe("End of response.")
+        expect(result.attachments).toHaveLength(0)
+      } finally {
+        Bun.spawnSync(["rm", "-rf", tmpDir])
+      }
+    })
+  })
+
+  describe("regression: existing content types unchanged", () => {
+    test("text content items are processed correctly (no regression)", () => {
+      const contentItems = [
+        { type: "text" as const, text: "First text part" },
+        { type: "text" as const, text: "Second text part" },
+      ]
+
+      const result = processContentItems(contentItems)
+
+      expect(result.textParts).toHaveLength(2)
+      expect(result.textParts[0]).toBe("First text part")
+      expect(result.textParts[1]).toBe("Second text part")
+      expect(result.attachments).toHaveLength(0)
+    })
+
+    test("image content items produce attachments (no regression)", () => {
+      const contentItems = [
+        {
+          type: "image" as const,
+          data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+          mimeType: "image/png",
+        },
+      ]
+
+      const result = processContentItems(contentItems)
+
+      expect(result.textParts).toHaveLength(0)
+      expect(result.attachments).toHaveLength(1)
+      expect(result.attachments[0].type).toBe("file")
+      expect(result.attachments[0].mime).toBe("image/png")
+      expect(result.attachments[0].url).toContain("data:image/png;base64,")
+    })
+
+    test("resource content items with text are processed correctly (no regression)", () => {
+      const contentItems = [
+        {
+          type: "resource" as const,
+          resource: {
+            uri: "file:///tmp/test-resource.json",
+            mimeType: "application/json",
+            text: '{"resourceKey": "resourceValue"}',
+          },
+        },
+      ]
+
+      const result = processContentItems(contentItems)
+
+      expect(result.textParts).toHaveLength(1)
+      expect(result.textParts[0]).toBe('{"resourceKey": "resourceValue"}')
+      expect(result.attachments).toHaveLength(0)
+    })
+
+    test("resource content items with blob produce attachments (no regression)", () => {
+      const contentItems = [
+        {
+          type: "resource" as const,
+          resource: {
+            uri: "file:///tmp/blob-resource.bin",
+            mimeType: "application/octet-stream",
+            blob: "base64blobdata",
+          },
+        },
+      ]
+
+      const result = processContentItems(contentItems)
+
+      expect(result.textParts).toHaveLength(0)
+      expect(result.attachments).toHaveLength(1)
+      expect(result.attachments[0].type).toBe("file")
+      expect(result.attachments[0].mime).toBe("application/octet-stream")
+      expect(result.attachments[0].url).toContain("data:application/octet-stream;base64,")
+      expect(result.attachments[0].filename).toBe("file:///tmp/blob-resource.bin")
+    })
+
+    test("resource content items with both text and blob produce both (no regression)", () => {
+      const contentItems = [
+        {
+          type: "resource" as const,
+          resource: {
+            uri: "file:///tmp/mixed-resource.json",
+            mimeType: "application/json",
+            text: '{"textKey": "textValue"}',
+            blob: "base64blobdata",
+          },
+        },
+      ]
+
+      const result = processContentItems(contentItems)
+
+      expect(result.textParts).toHaveLength(1)
+      expect(result.textParts[0]).toBe('{"textKey": "textValue"}')
+      expect(result.attachments).toHaveLength(1)
+      expect(result.attachments[0].mime).toBe("application/json")
+    })
+  })
+
+  describe("no Path name too long error", () => {
+    test("large file content does not produce Path name too long error", () => {
+      const tmpDir = Bun.spawnSync(["mktemp", "-d"]).stdout.toString().trim()
+      try {
+        // Simulate a large MCP response that would have caused "Path name too long"
+        // before the fix (base64 in summary was used as a path)
+        const largeData: Record<string, unknown> = {}
+        for (let i = 0; i < 100; i++) {
+          largeData[`key_${i}`] = "x".repeat(500)
+        }
+        const fileContent = JSON.stringify(largeData)
+        const filePath = tmpDir + "/large-response.json"
+        Bun.write(filePath, fileContent)
+
+        const base64Chunk = Buffer.from(fileContent).toString("base64").slice(0, 200)
+        const contentItems = [
+          {
+            type: "tool_response_file" as const,
+            filePath,
+            fileName: "large-response.json",
+            fileSize: Buffer.byteLength(fileContent),
+            summary: "Path name too long: " + base64Chunk,
+            savedAt: "2026-08-14T07:25:27.042Z",
+            instructions: "Tool response saved to file.",
+          } satisfies ToolResponseFile,
+        ]
+
+        // This should not throw — the fix ensures we read from filePath, not the corrupted summary
+        const result = processContentItems(contentItems)
+
+        expect(result.textParts).toHaveLength(1)
+        expect(result.textParts[0]).toContain("key_0")
+        expect(result.textParts[0]).toContain("key_99")
+        // Should NOT contain the base64-encoded path that would cause "Path name too long"
+        expect(result.textParts[0]).not.toContain("Path name too long")
+        expect(result.textParts[0]).not.toContain(base64Chunk)
+      } finally {
+        Bun.spawnSync(["rm", "-rf", tmpDir])
+      }
     })
   })
 })

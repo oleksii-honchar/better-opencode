@@ -1,3 +1,4 @@
+import fs from "node:fs"
 import { Agent } from "@/agent/agent"
 import { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
@@ -22,6 +23,152 @@ import { DynamicSkillScanner } from "@/skill/dynamic-scanner"
 import * as SessionMetadata from "@/skill/session-metadata"
 
 const log = Log.create({ service: "session.tools" })
+
+/**
+ * A content item produced by an MCP tool when the response is too large
+ * to inline and is instead saved to a file on disk.
+ */
+export interface ToolResponseFile {
+  type: "tool_response_file"
+  filePath: string
+  fileName: string
+  fileSize: number
+  summary: string
+  savedAt: string
+  instructions: string
+}
+
+/**
+ * Type guard: returns true when a content item is a ToolResponseFile
+ * (i.e. it has type "tool_response_file" and all required fields).
+ */
+export function isToolResponseFile(contentItem: unknown): contentItem is ToolResponseFile {
+  if (typeof contentItem !== "object" || contentItem === null) return false
+  const item = contentItem as Record<string, unknown>
+  return (
+    item.type === "tool_response_file" &&
+    typeof item.filePath === "string" &&
+    typeof item.fileName === "string" &&
+    typeof item.fileSize === "number" &&
+    typeof item.summary === "string" &&
+    typeof item.savedAt === "string" &&
+    typeof item.instructions === "string"
+  )
+}
+
+/**
+ * Result of processing MCP content items — separates text parts from file attachments.
+ */
+export interface ProcessContentItemsResult {
+  textParts: string[]
+  attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[]
+}
+
+/**
+ * Options for processContentItems that allow injecting a mock readFile
+ * for testing purposes.
+ */
+export interface ProcessContentItemsOptions {
+  /**
+   * Override for fs.readFileSync. Used in tests to avoid real file I/O.
+   * Default: uses fs.readFileSync.
+   */
+  readFile?: (path: string) => string
+}
+
+/**
+ * Process MCP tool result content items, extracting text parts and file attachments.
+ * Handles text, image, resource, and tool_response_file content types.
+ *
+ * For tool_response_file items: reads the file from filePath, parses JSON, and
+ * constructs clean text output with metadata. Falls back to instructions if
+ * the file cannot be read.
+ */
+export function processContentItems(
+  contentItems: unknown[],
+  options: ProcessContentItemsOptions = {},
+): ProcessContentItemsResult {
+  const { readFile = fs.readFileSync } = options
+  const textParts: string[] = []
+  const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []
+
+  for (const contentItem of contentItems) {
+    if (isToolResponseFile(contentItem)) {
+      // Handle tool_response_file: read file content from filePath
+      const output = buildToolResponseFileOutput(contentItem, readFile)
+      textParts.push(output)
+    } else if (typeof contentItem === "object" && contentItem !== null) {
+      const typed = contentItem as Record<string, unknown>
+      if (typed.type === "text") {
+        textParts.push(String(typed.text ?? ""))
+      } else if (typed.type === "image") {
+        attachments.push({
+          type: "file",
+          mime: String(typed.mimeType ?? "image/png"),
+          url: `data:${typed.mimeType ?? "image/png"};base64,${typed.data}`,
+        })
+      } else if (typed.type === "resource") {
+        const resource = typed.resource as Record<string, unknown>
+        if (resource.text) textParts.push(String(resource.text))
+        if (resource.blob) {
+          attachments.push({
+            type: "file",
+            mime: String(resource.mimeType ?? "application/octet-stream"),
+            url: `data:${resource.mimeType ?? "application/octet-stream"};base64,${resource.blob}`,
+            filename: String(resource.uri ?? ""),
+          })
+        }
+      }
+    }
+  }
+
+  return { textParts, attachments }
+}
+
+/**
+ * Build text output from a tool_response_file content item.
+ * Reads the file from filePath, parses JSON, and formats with metadata.
+ * Falls back to instructions if the file cannot be read.
+ * If file reads but JSON parse fails, uses raw file content.
+ */
+function buildToolResponseFileOutput(
+  item: ToolResponseFile,
+  readFile: (path: string) => string,
+): string {
+  let raw: string
+  try {
+    raw = readFile(item.filePath)
+  } catch {
+    // File read failed — fall back to instructions
+    return [
+      `--- File not readable: ${item.fileName} ---`,
+      `filePath: ${item.filePath}`,
+      `fileName: ${item.fileName}`,
+      `fileSize: ${item.fileSize}`,
+      "",
+      `instructions:`,
+      item.instructions,
+    ].join("\n")
+  }
+
+  // Try to parse JSON for pretty-printing; fall back to raw content on parse error
+  let contentText: string
+  try {
+    const parsed = JSON.parse(raw)
+    contentText = JSON.stringify(parsed, null, 2)
+  } catch {
+    contentText = raw
+  }
+
+  return [
+    `--- File: ${item.fileName} (${item.fileSize} bytes) ---`,
+    `filePath: ${item.filePath}`,
+    `fileName: ${item.fileName}`,
+    `fileSize: ${item.fileSize}`,
+    "",
+    contentText,
+  ].join("\n")
+}
 
 /** Type for tool.execute.after hook output with the inject field that plugins may add. */
 type ToolExecuteAfterOutput = {
@@ -266,29 +413,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             Effect.forkChild,
           )
 
-          const textParts: string[] = []
-          const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []
-          for (const contentItem of result.content) {
-            if (contentItem.type === "text") textParts.push(contentItem.text)
-            else if (contentItem.type === "image") {
-              attachments.push({
-                type: "file",
-                mime: contentItem.mimeType,
-                url: `data:${contentItem.mimeType};base64,${contentItem.data}`,
-              })
-            } else if (contentItem.type === "resource") {
-              const { resource } = contentItem
-              if (resource.text) textParts.push(resource.text)
-              if (resource.blob) {
-                attachments.push({
-                  type: "file",
-                  mime: resource.mimeType ?? "application/octet-stream",
-                  url: `data:${resource.mimeType ?? "application/octet-stream"};base64,${resource.blob}`,
-                  filename: resource.uri,
-                })
-              }
-            }
-          }
+          const { textParts, attachments } = processContentItems(result.content)
 
           const truncated = yield* truncate.output(textParts.join("\n\n"), {}, input.agent)
 
