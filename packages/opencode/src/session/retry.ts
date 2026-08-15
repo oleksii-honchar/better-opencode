@@ -67,6 +67,10 @@ export function delay(attempt: number, error?: MessageV2.APIError) {
 export function retryable(error: Err, provider: string) {
   // context overflow errors should not be retried
   if (MessageV2.ContextOverflowError.isInstance(error)) return undefined
+  // Provider stream truncation is transient — retry with backoff
+  if (isRecord(error.data) && error.data.type === "response-stream-error") {
+    return { message: "Provider stream ended unexpectedly" }
+  }
   if (MessageV2.APIError.isInstance(error)) {
     const status = error.data.statusCode
     // 5xx errors are transient server failures and should always be retried,

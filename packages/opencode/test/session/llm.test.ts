@@ -23,6 +23,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Permission } from "@/permission"
 import { LLMAISDK } from "@/session/llm/ai-sdk"
 import { Session as SessionNs } from "@/session/session"
+import { ProviderError } from "@/provider/error"
 
 type ConfigModel = NonNullable<NonNullable<Config.Info["provider"]>[string]["models"]>[string]
 
@@ -539,6 +540,96 @@ describe("session.llm.ai-sdk adapter", () => {
     })
     expect(result.tokens.cache.write).toBe(300)
     expect(result.tokens.cache.read).toBe(200)
+  })
+
+  test("throws ResponseStreamError on truncated finish-step (other + undefined rawFinishReason)", async () => {
+    const state = LLMAISDK.adapterState()
+    const exit = await Effect.runPromiseExit(
+      LLMAISDK.toLLMEvents(state, uncheckedAdapterEvent({
+        type: "finish-step",
+        response: { id: "r1", timestamp: new Date(0), modelId: "gpt-test" },
+        finishReason: "other",
+        rawFinishReason: undefined,
+        usage: undefined,
+        providerMetadata: undefined,
+      })),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const cause = exit.cause
+      expect(Cause.squash(cause)).toBeInstanceOf(ProviderError.ResponseStreamError)
+      expect((Cause.squash(cause) as ProviderError.ResponseStreamError).message).toBe(
+        "Provider stream ended without a finish reason",
+      )
+    }
+  })
+
+  test("allows finish-step with other + defined rawFinishReason (no false positive)", async () => {
+    const state = LLMAISDK.adapterState()
+    const events = await Effect.runPromise(
+      LLMAISDK.toLLMEvents(state, uncheckedAdapterEvent({
+        type: "finish-step",
+        response: { id: "r2", timestamp: new Date(0), modelId: "gpt-test" },
+        finishReason: "other",
+        rawFinishReason: "other",
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          totalTokens: 2,
+          inputTokenDetails: { noCacheTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          outputTokenDetails: { textTokens: 1, reasoningTokens: 0 },
+        },
+        providerMetadata: undefined,
+      })),
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ type: "step-finish", index: 0, reason: "unknown" })
+  })
+
+  test("throws ResponseStreamError on truncated finish (other + undefined rawFinishReason)", async () => {
+    const state = LLMAISDK.adapterState()
+    const exit = await Effect.runPromiseExit(
+      LLMAISDK.toLLMEvents(state, uncheckedAdapterEvent({
+        type: "finish",
+        finishReason: "other",
+        rawFinishReason: undefined,
+        totalUsage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          totalTokens: 2,
+          inputTokenDetails: { noCacheTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          outputTokenDetails: { textTokens: 1, reasoningTokens: 0 },
+        },
+      })),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const cause = exit.cause
+      expect(Cause.squash(cause)).toBeInstanceOf(ProviderError.ResponseStreamError)
+      expect((Cause.squash(cause) as ProviderError.ResponseStreamError).message).toBe(
+        "Provider stream ended without a finish reason",
+      )
+    }
+  })
+
+  test("allows finish with other + defined rawFinishReason (no false positive)", async () => {
+    const state = LLMAISDK.adapterState()
+    const events = await Effect.runPromise(
+      LLMAISDK.toLLMEvents(state, uncheckedAdapterEvent({
+        type: "finish",
+        finishReason: "other",
+        rawFinishReason: "other",
+        totalUsage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          totalTokens: 2,
+          inputTokenDetails: { noCacheTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          outputTokenDetails: { textTokens: 1, reasoningTokens: 0 },
+        },
+      })),
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ type: "finish", reason: "unknown" })
   })
 })
 

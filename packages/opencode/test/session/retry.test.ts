@@ -172,6 +172,13 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error, retryProvider)).toBeUndefined()
   })
 
+  test("retries response-stream-error as transient failure", () => {
+    const error = { name: "ResponseStreamError", data: { type: "response-stream-error" } }
+    expect(SessionRetry.retryable(error, retryProvider)).toEqual({
+      message: "Provider stream ended unexpectedly",
+    })
+  })
+
   test("retries 500 errors even when isRetryable is false", () => {
     const error = Schema.decodeUnknownSync(MessageV2.APIError.Schema)(
       new MessageV2.APIError({

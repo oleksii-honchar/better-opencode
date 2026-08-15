@@ -2,6 +2,7 @@ import { FinishReason, LLMEvent, ProviderMetadata, ToolResultValue } from "@open
 import { Effect, Schema } from "effect"
 import { type streamText } from "ai"
 import { errorMessage } from "@/util/error"
+import { ProviderError } from "@/provider/error"
 
 type Result = Awaited<ReturnType<typeof streamText>>
 type AISDKEvent = Result["fullStream"] extends AsyncIterable<infer T> ? T : never
@@ -74,17 +75,25 @@ export function toLLMEvents(
       return Effect.succeed([LLMEvent.stepStart({ index: state.step })])
 
     case "finish-step":
-      return Effect.sync(() => [
-        LLMEvent.stepFinish({
-          index: state.step++,
-          reason: finishReason(event.finishReason),
-          usage: usage(event.usage),
-          providerMetadata: providerMetadata(event.providerMetadata),
-        }),
-      ])
+      return Effect.sync(() => {
+        if (event.finishReason === "other" && event.rawFinishReason === undefined) {
+          throw new ProviderError.ResponseStreamError("Provider stream ended without a finish reason")
+        }
+        return [
+          LLMEvent.stepFinish({
+            index: state.step++,
+            reason: finishReason(event.finishReason),
+            usage: usage(event.usage),
+            providerMetadata: providerMetadata(event.providerMetadata),
+          }),
+        ]
+      })
 
     case "finish":
       return Effect.sync(() => {
+        if (event.finishReason === "other" && event.rawFinishReason === undefined) {
+          throw new ProviderError.ResponseStreamError("Provider stream ended without a finish reason")
+        }
         const events = [
           LLMEvent.finish({
             reason: finishReason(event.finishReason),

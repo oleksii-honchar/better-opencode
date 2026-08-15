@@ -201,4 +201,16 @@ export function parseAPICallError(input: { providerID: ProviderID; error: APICal
   }
 }
 
+export class ResponseStreamError extends APICallError {
+  constructor(message: string) {
+    super({
+      message,
+      url: "",
+      requestBodyValues: null,
+      data: { type: "response-stream-error" },
+    })
+    this.name = "ResponseStreamError"
+  }
+}
+
 export * as ProviderError from "./error"
