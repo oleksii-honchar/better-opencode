@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-14T19:00:00Z"
+updatedAt: "2026-08-15T18:16:15Z"
 tags: []
 ---
 
@@ -101,3 +101,4 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0087-cross-stream-opt-in.adr.md]] — Cross-Stream Doom-Loop Detection Opt-In by Default (ADR-0087, status: accepted)
 - [[0088-provider-cache-fingerprint.adr.md]] — Provider Cache Key Includes Unstuck Config Fingerprint (ADR-0088, status: accepted)
 - [[0089-re-focus-nudge-message.adr.md]] — Re-Focus the Default Nudge Message (ADR-0089, status: accepted)
+- [[0090-retry-truncated-provider-streams.adr.md]] — Retry Truncated Provider Streams (ADR-0090, status: accepted)
