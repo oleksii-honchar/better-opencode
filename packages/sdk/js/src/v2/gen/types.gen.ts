@@ -1351,6 +1351,7 @@ export type Config = {
     includeText?: boolean
     enableSentenceLoopDetection?: boolean
     sentenceLoopThreshold?: number
+    sentenceLoopIncludeReasoning?: boolean
     minSentenceLength?: number
     strategy?: "nudge" | "nudge-and-prune" | "abort" | "warn"
     maxNudges?: number
@@ -1360,17 +1361,13 @@ export type Config = {
       stepLoop?: number
       toolLoop?: number
       sentenceLoop?: number
-      xmlRepetition?: number
+      selfDiagnosis?: number
       doomLoop?: number
     }
     evidenceWindow?: number
-    enableXmlRepetitionGuard?: boolean
-    xmlRepetitionThreshold?: number
-    xmlRepetitionWindowSize?: number
-    maxToolInputTokens?: number
-    maxTotalToolInputTokens?: number
     enableDoomLoopDetection?: boolean
     doomLoopThreshold?: number
+    doomLoopIgnorePatterns?: Array<string>
   }
   rulesInject?: {
     enabled?: boolean
