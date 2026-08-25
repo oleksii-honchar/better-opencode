@@ -1060,7 +1060,6 @@ export function options(input: {
 
   if (input.model.api.npm === "@ai-sdk/azure") {
     result["store"] = false
-    result["promptCacheKey"] = input.sessionID
   }
 
   if (input.model.api.npm === "@openrouter/ai-sdk-provider" || input.model.api.npm === "@llmgateway/ai-sdk-provider") {
@@ -1089,8 +1088,19 @@ export function options(input: {
     }
   }
 
-  if (input.model.providerID === "openai" || input.providerOptions?.setCacheKey) {
-    result["promptCacheKey"] = input.sessionID
+  if (input.providerOptions?.setCacheKey !== false) {
+    if (input.model.api.npm === "@ai-sdk/deepinfra" || input.model.api.npm === "@ai-sdk/cerebras") {
+      result["prompt_cache_key"] = input.sessionID
+    } else if (
+      input.model.api.npm === "@ai-sdk/openai" ||
+      input.model.api.npm === "@ai-sdk/azure" ||
+      input.model.api.npm === "@ai-sdk/xai" ||
+      input.model.api.npm === "@ai-sdk/mistral" ||
+      input.model.api.npm === "venice-ai-sdk-provider" ||
+      input.providerOptions?.setCacheKey === true
+    ) {
+      result["promptCacheKey"] = input.sessionID
+    }
   }
 
   if (input.model.api.npm === "@ai-sdk/google" || input.model.api.npm === "@ai-sdk/google-vertex") {
@@ -1155,20 +1165,13 @@ export function options(input: {
       result["textVerbosity"] = "low"
     }
 
-    if (input.model.providerID.startsWith("opencode")) {
+    if (input.model.providerID.startsWith("opencode") && input.providerOptions?.setCacheKey !== false) {
       result["promptCacheKey"] = input.sessionID
       result["include"] = INCLUDE_ENCRYPTED_REASONING
       result["reasoningSummary"] = "auto"
     }
   }
 
-  if (input.model.providerID === "venice") {
-    result["promptCacheKey"] = input.sessionID
-  }
-
-  if (input.model.providerID === "openrouter") {
-    result["prompt_cache_key"] = input.sessionID
-  }
   if (input.model.api.npm === "@ai-sdk/gateway") {
     result["gateway"] = {
       caching: "auto",
