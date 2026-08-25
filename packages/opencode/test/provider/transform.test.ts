@@ -83,6 +83,59 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBe(sessionID)
   })
 
+  test("should not set promptCacheKey for OpenAI-compatible SDK by provider name", () => {
+    const compatibleModel = {
+      ...mockModel,
+      providerID: "openai",
+      api: {
+        id: "gpt-5",
+        url: "https://cpa.example.com/v1",
+        npm: "@ai-sdk/openai-compatible",
+      },
+    }
+    const result = ProviderTransform.options({ model: compatibleModel, sessionID, providerOptions: {} })
+    expect(result.promptCacheKey).toBeUndefined()
+  })
+
+  test("should set promptCacheKey for native OpenAI SDK regardless of provider ID", () => {
+    const nativeModel = {
+      ...mockModel,
+      providerID: "cpa",
+      api: {
+        id: "gpt-5",
+        url: "https://api.openai.com/v1",
+        npm: "@ai-sdk/openai",
+      },
+    }
+    const result = ProviderTransform.options({ model: nativeModel, sessionID, providerOptions: {} })
+    expect(result.promptCacheKey).toBe(sessionID)
+  })
+
+  test("should use snake-case cache key for DeepInfra and Cerebras SDKs", () => {
+    for (const npm of ["@ai-sdk/deepinfra", "@ai-sdk/cerebras"]) {
+      const result = ProviderTransform.options({
+        model: { ...mockModel, providerID: "custom", api: { ...mockModel.api, npm } },
+        sessionID,
+        providerOptions: {},
+      })
+      expect(result.prompt_cache_key).toBe(sessionID)
+      expect(result.promptCacheKey).toBeUndefined()
+    }
+  })
+
+  test("should not set an undocumented OpenRouter prompt_cache_key", () => {
+    const result = ProviderTransform.options({
+      model: {
+        ...mockModel,
+        providerID: "openrouter",
+        api: { ...mockModel.api, npm: "@openrouter/ai-sdk-provider" },
+      },
+      sessionID,
+      providerOptions: {},
+    })
+    expect(result.prompt_cache_key).toBeUndefined()
+  })
+
   test("should set store=false for openai provider", () => {
     const openaiModel = {
       ...mockModel,
