@@ -23,7 +23,7 @@ export function DialogMcp() {
   const sync = useSync()
   const sdk = useSDK()
   const [, setRef] = createSignal<DialogSelectRef<unknown>>()
-  const [loading, setLoading] = createSignal<string | null>(null)
+  const [loading, setLoading] = createSignal<Set<string>>(new Set())
 
   const options = createMemo(() => {
     // Track sync data and loading state to trigger re-render when they change
@@ -38,7 +38,7 @@ export function DialogMcp() {
         value: name,
         title: name,
         description: status.status === "failed" ? "failed" : status.status,
-        footer: <Status enabled={local.mcp.isEnabled(name)} loading={loadingMcp === name} />,
+        footer: <Status enabled={local.mcp.isEnabled(name)} loading={loadingMcp.has(name)} />,
         category: undefined,
       })),
     )
@@ -49,10 +49,11 @@ export function DialogMcp() {
       command: "dialog.mcp.toggle",
       title: "toggle",
       onTrigger: async (option: DialogSelectOption<string>) => {
-        // Prevent toggling while an operation is already in progress
-        if (loading() !== null) return
+        // Prevent double-toggling the same server while an operation is in progress;
+        // different servers may be toggled concurrently.
+        if (loading().has(option.value)) return
 
-        setLoading(option.value)
+        setLoading((prev) => new Set(prev).add(option.value))
         try {
           await local.mcp.toggle(option.value)
           // Refresh MCP status from server
@@ -65,7 +66,11 @@ export function DialogMcp() {
         } catch (error) {
           console.error("Failed to toggle MCP:", error)
         } finally {
-          setLoading(null)
+          setLoading((prev) => {
+            const next = new Set(prev)
+            next.delete(option.value)
+            return next
+          })
         }
       },
     },
