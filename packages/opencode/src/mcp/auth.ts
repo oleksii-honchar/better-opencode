@@ -3,6 +3,7 @@ import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { Global } from "@opencode-ai/core/global"
 import { Effect, Layer, Context, Option, Schema } from "effect"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
+import * as Log from "@opencode-ai/core/util/log"
 
 export const Tokens = Schema.Struct({
   accessToken: Schema.mutableKey(Schema.String),
@@ -58,11 +59,20 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const fs = yield* AppFileSystem.Service
+    const log = Log.create({ service: "mcp.auth" })
 
     const all = Effect.fn("McpAuth.all")(function* () {
       return yield* fs.readJson(filepath).pipe(
         Effect.map((data): AuthData => Option.getOrElse(decodeAuthData(data), () => ({}) as AuthData) as AuthData),
-        Effect.catch(() => Effect.succeed({} as AuthData)),
+        Effect.catch((error) => {
+          // A missing file is the normal first-run case — must stay silent.
+          // Warn only when the file exists but failed to read/parse.
+          const isNotFound = "reason" in error && error.reason._tag === "NotFound"
+          if (!isNotFound) {
+            log.warn("mcp-auth.json read failed; treating as empty (servers may need re-auth)", { error })
+          }
+          return Effect.succeed({} as AuthData)
+        }),
       )
     })
 
