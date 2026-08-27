@@ -2,7 +2,7 @@
 type: index
 title: "Atomic Memories"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-15T18:16:15Z"
+updatedAt: "2026-08-26T18:11:06Z"
 tags: []
 ---
 
@@ -31,3 +31,6 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0017-prune-looping-messages-orphan.memory.md]] — pruneLoopingMessages Creates Orphaned Tool-Results
 - [[0018-unstuck-trim-bug-root-cause.memory.md]] — Commit 04c1e08c78 Extended Pruning to Tool-Result Messages
 - [[0019-subagent-abrupt-stop-workaround.memory.md]] — Sub-Agent Abrupt Stop — Workaround: Retry or Raise Output Token Max
+- [[0020-mcp-remote-0201-signin-bugs.memory.md]] — mcp-remote 0.2.0/0.2.1 Have Sign-In Coordination Bugs — Pin >= 0.2.6
+- [[0021-ibkr-mcp-endpoint-behavior.memory.md]] — IBKR MCP Endpoint Behavior — 401 Empty Body, Akamai no-store, Registration Works
+- [[0022-remote-type-nul-byte-workaround.memory.md]] — type: remote MCP Servers Break (NUL byte) — Use local mcp-remote Bridges

@@ -86,6 +86,42 @@ let write = (msg: any) => {
   return msg.length
 }
 
+// In-flight async stream writes (only counted once `init` installs the async
+// file-stream `write`). `flush()` resolves when these drain, or after a
+// timeout fallback so the fatal path never hangs on a wedged stream.
+let pendingWrites = 0
+let drainWaiters: Array<() => void> = []
+
+function notifyWriteDrained() {
+  pendingWrites--
+  if (pendingWrites <= 0) {
+    pendingWrites = 0
+    const waiters = drainWaiters
+    drainWaiters = []
+    for (const resolve of waiters) resolve()
+  }
+}
+
+export function flush(timeoutMs = 1000): Promise<void> {
+  return new Promise((resolve) => {
+    const onDrained = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(() => {
+      const index = drainWaiters.indexOf(onDrained)
+      if (index !== -1) drainWaiters.splice(index, 1)
+      resolve()
+    }, timeoutMs)
+    if (pendingWrites <= 0) {
+      clearTimeout(timer)
+      resolve()
+      return
+    }
+    drainWaiters.push(onDrained)
+  })
+}
+
 export async function init(options: Options) {
   if (options.level) level = options.level
   void cleanup(Global.Path.log)
@@ -103,10 +139,12 @@ export async function init(options: Options) {
   if (options.dev && runID) process.env[initializedRunID] = runID
   const stream = createWriteStream(logpath, { flags: "a" })
   write = async (msg: any) => {
+    pendingWrites++
     return new Promise((resolve, reject) => {
       stream.write(msg, (err) => {
         if (err) reject(err)
         else resolve(msg.length)
+        notifyWriteDrained()
       })
     })
   }

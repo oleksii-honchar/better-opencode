@@ -9,6 +9,7 @@ import { UI } from "../ui"
 import { MCP } from "../../mcp"
 import { McpAuth } from "../../mcp/auth"
 import { McpOAuthProvider } from "../../mcp/oauth-provider"
+import { guardedFetchFn } from "../../mcp/fetch-guard"
 import { Config } from "@/config/config"
 import { ConfigMCP } from "../../config/mcp"
 import { InstanceRef } from "@/effect/instance-ref"
@@ -62,6 +63,59 @@ function oauthServers(config: Config.Info) {
   return configuredServers(config).filter(
     (entry): entry is [string, McpRemote] => isMcpRemote(entry[1]) && entry[1].oauth !== false,
   )
+}
+
+/**
+ * Detect a local mcp-remote bridge: `type: "local"`, command contains the
+ * `mcp-remote` token, and some arg AFTER the token parses as a URL.
+ * Bridges manage their own OAuth, so `mcp auth` cannot drive them — but we can
+ * tell the user how to (re)authenticate one directly.
+ */
+export function isMcpRemoteBridge(cfg: McpEntry): boolean {
+  if (!isMcpConfigured(cfg) || cfg.type !== "local" || !Array.isArray(cfg.command)) return false
+  const mcpRemoteIdx = cfg.command.findIndex((arg) => arg.includes("mcp-remote"))
+  if (mcpRemoteIdx === -1) return false
+  for (let i = mcpRemoteIdx + 1; i < cfg.command.length; i++) {
+    if (URL.canParse(cfg.command[i])) return true
+  }
+  return false
+}
+
+function mcpRemoteBridges(config: Config.Info) {
+  return configuredServers(config).filter((entry): entry is [string, ConfigMCP.Local] => isMcpRemoteBridge(entry[1]))
+}
+
+// Known SDK failure class: the authorization server does not support (or
+// advertise) dynamic client registration (RFC 7591) — the user must supply a
+// pre-registered clientId instead.
+const REGISTRATION_ERROR_RE = /registration/i
+function isRegistrationError(message: string) {
+  return REGISTRATION_ERROR_RE.test(message)
+}
+
+function printBridgeGuidance(bridges: Array<[string, ConfigMCP.Local]>) {
+  const exampleUrl = bridges[0][1].command.find((arg) => URL.canParse(arg))
+  prompts.log.warn(
+    `No remote OAuth servers configured, but ${bridges.length} local mcp-remote bridge${bridges.length === 1 ? "" : "s"} found.`,
+  )
+  prompts.log.info("Bridges manage their own OAuth. To (re)authenticate one, run it directly, e.g.:")
+  prompts.log.info(`  npx --prefer-offline -y mcp-remote@0.2.6 ${exampleUrl}`)
+  prompts.log.info("Then restart opencode. (Upgrade pinned mcp-remote to >= 0.2.6 — 0.2.0/0.2.1 have sign-in bugs.)")
+}
+
+function printClientIdHint(serverName: string, url: string) {
+  prompts.log.info("Add clientId to your MCP server config:")
+  prompts.log.info(`
+  "mcp": {
+    "${serverName}": {
+      "type": "remote",
+      "url": "${url}",
+      "oauth": {
+        "clientId": "your-client-id",
+        "clientSecret": "your-client-secret"
+      }
+    }
+  }`)
 }
 
 function listState() {
@@ -166,6 +220,141 @@ export const McpListCommand = effectCmd({
   }),
 })
 
+export const mcpAuthCommand = Effect.fn("Cli.mcp.auth")(function* (args: { name?: string }) {
+  UI.empty()
+  prompts.intro("MCP OAuth Authentication")
+
+  const { config, auth } = yield* authState()
+  const mcpServers = config.mcp ?? {}
+  const servers = oauthServers(config)
+
+  if (servers.length === 0) {
+    // No type:remote OAuth servers — but the user may run remote servers as
+    // local mcp-remote bridges. Print actionable guidance instead of a bare no-op.
+    const bridges = mcpRemoteBridges(config)
+    if (bridges.length > 0) {
+      printBridgeGuidance(bridges)
+      prompts.outro("Done")
+      return
+    }
+    prompts.log.warn("No OAuth-capable MCP servers configured")
+    prompts.log.info("Remote MCP servers support OAuth by default. Add a remote server in opencode.json:")
+    prompts.log.info(`
+  "mcp": {
+    "my-server": {
+      "type": "remote",
+      "url": "https://example.com/mcp"
+    }
+  }`)
+    prompts.outro("Done")
+    return
+  }
+
+  let serverName = args.name
+  if (!serverName) {
+    // Build options with auth status
+    const options = servers.map(([name, cfg]) => {
+      const authStatus = auth[name]
+      const icon = getAuthStatusIcon(authStatus)
+      const statusText = getAuthStatusText(authStatus)
+      const url = cfg.url
+      return {
+        label: `${icon} ${name} (${statusText})`,
+        value: name,
+        hint: url,
+      }
+    })
+
+    const selected = yield* Effect.promise(() =>
+      prompts.select({
+        message: "Select MCP server to authenticate",
+        options,
+      }),
+    )
+    if (prompts.isCancel(selected)) throw new UI.CancelledError()
+    serverName = selected
+  }
+
+  const serverConfig = mcpServers[serverName]
+  if (!serverConfig) {
+    prompts.log.error(`MCP server not found: ${serverName}`)
+    prompts.outro("Done")
+    return
+  }
+
+  if (!isMcpRemote(serverConfig) || serverConfig.oauth === false) {
+    prompts.log.error(`MCP server ${serverName} is not an OAuth-capable remote server`)
+    prompts.outro("Done")
+    return
+  }
+
+  // Check if already authenticated
+  const authStatus = auth[serverName] ?? (yield* MCP.Service.use((mcp) => mcp.getAuthStatus(serverName)))
+  if (authStatus === "authenticated") {
+    const confirm = yield* Effect.promise(() =>
+      prompts.confirm({
+        message: `${serverName} already has valid credentials. Re-authenticate?`,
+      }),
+    )
+    if (prompts.isCancel(confirm) || !confirm) {
+      prompts.outro("Cancelled")
+      return
+    }
+  } else if (authStatus === "expired") {
+    prompts.log.warn(`${serverName} has expired credentials. Re-authenticating...`)
+  }
+
+  const spinner = prompts.spinner()
+  spinner.start("Starting OAuth flow...")
+
+  // Subscribe to browser open failure events to show URL for manual opening
+  const unsubscribe = Bus.subscribe(MCP.BrowserOpenFailed, (evt) => {
+    if (evt.properties.mcpName === serverName) {
+      spinner.stop("Could not open browser automatically")
+      prompts.log.warn("Please open this URL in your browser to authenticate:")
+      prompts.log.info(evt.properties.url)
+      spinner.start("Waiting for authorization...")
+    }
+  })
+
+  yield* MCP.Service.use((mcp) => mcp.authenticate(serverName)).pipe(
+    Effect.tap((status) =>
+      Effect.sync(() => {
+        if (status.status === "connected") {
+          spinner.stop("Authentication successful!")
+        } else if (status.status === "needs_client_registration") {
+          spinner.stop("Authentication failed", 1)
+          prompts.log.error(status.error)
+          printClientIdHint(serverName, serverConfig.url)
+        } else if (status.status === "failed") {
+          spinner.stop("Authentication failed", 1)
+          prompts.log.error(status.error)
+        } else {
+          spinner.stop("Unexpected status: " + status.status, 1)
+        }
+      }),
+    ),
+    Effect.catchCause((cause) =>
+      Effect.sync(() => {
+        spinner.stop("Authentication failed", 1)
+        const error = Cause.squash(cause)
+        const message = error instanceof Error ? error.message : String(error)
+        prompts.log.error(message)
+        // The SDK surfaces "Incompatible auth server / does not support dynamic
+        // client registration" as a defect (startAuth -> Effect.die). Squash the
+        // cause so this known class renders the clientId hint instead of bubbling
+        // up as an opaque "Unexpected error".
+        if (isRegistrationError(message)) {
+          printClientIdHint(serverName, serverConfig.url)
+        }
+      }),
+    ),
+    Effect.ensuring(Effect.sync(() => unsubscribe())),
+  )
+
+  prompts.outro("Done")
+})
+
 export const McpAuthCommand = effectCmd({
   command: "auth [name]",
   describe: "authenticate with an OAuth-enabled MCP server",
@@ -176,135 +365,7 @@ export const McpAuthCommand = effectCmd({
         type: "string",
       })
       .command(McpAuthListCommand),
-  handler: Effect.fn("Cli.mcp.auth")(function* (args) {
-    UI.empty()
-    prompts.intro("MCP OAuth Authentication")
-
-    const { config, auth } = yield* authState()
-    const mcpServers = config.mcp ?? {}
-    const servers = oauthServers(config)
-
-    if (servers.length === 0) {
-      prompts.log.warn("No OAuth-capable MCP servers configured")
-      prompts.log.info("Remote MCP servers support OAuth by default. Add a remote server in opencode.json:")
-      prompts.log.info(`
-  "mcp": {
-    "my-server": {
-      "type": "remote",
-      "url": "https://example.com/mcp"
-    }
-  }`)
-      prompts.outro("Done")
-      return
-    }
-
-    let serverName = args.name
-    if (!serverName) {
-      // Build options with auth status
-      const options = servers.map(([name, cfg]) => {
-        const authStatus = auth[name]
-        const icon = getAuthStatusIcon(authStatus)
-        const statusText = getAuthStatusText(authStatus)
-        const url = cfg.url
-        return {
-          label: `${icon} ${name} (${statusText})`,
-          value: name,
-          hint: url,
-        }
-      })
-
-      const selected = yield* Effect.promise(() =>
-        prompts.select({
-          message: "Select MCP server to authenticate",
-          options,
-        }),
-      )
-      if (prompts.isCancel(selected)) throw new UI.CancelledError()
-      serverName = selected
-    }
-
-    const serverConfig = mcpServers[serverName]
-    if (!serverConfig) {
-      prompts.log.error(`MCP server not found: ${serverName}`)
-      prompts.outro("Done")
-      return
-    }
-
-    if (!isMcpRemote(serverConfig) || serverConfig.oauth === false) {
-      prompts.log.error(`MCP server ${serverName} is not an OAuth-capable remote server`)
-      prompts.outro("Done")
-      return
-    }
-
-    // Check if already authenticated
-    const authStatus = auth[serverName] ?? (yield* MCP.Service.use((mcp) => mcp.getAuthStatus(serverName)))
-    if (authStatus === "authenticated") {
-      const confirm = yield* Effect.promise(() =>
-        prompts.confirm({
-          message: `${serverName} already has valid credentials. Re-authenticate?`,
-        }),
-      )
-      if (prompts.isCancel(confirm) || !confirm) {
-        prompts.outro("Cancelled")
-        return
-      }
-    } else if (authStatus === "expired") {
-      prompts.log.warn(`${serverName} has expired credentials. Re-authenticating...`)
-    }
-
-    const spinner = prompts.spinner()
-    spinner.start("Starting OAuth flow...")
-
-    // Subscribe to browser open failure events to show URL for manual opening
-    const unsubscribe = Bus.subscribe(MCP.BrowserOpenFailed, (evt) => {
-      if (evt.properties.mcpName === serverName) {
-        spinner.stop("Could not open browser automatically")
-        prompts.log.warn("Please open this URL in your browser to authenticate:")
-        prompts.log.info(evt.properties.url)
-        spinner.start("Waiting for authorization...")
-      }
-    })
-
-    yield* MCP.Service.use((mcp) => mcp.authenticate(serverName)).pipe(
-      Effect.tap((status) =>
-        Effect.sync(() => {
-          if (status.status === "connected") {
-            spinner.stop("Authentication successful!")
-          } else if (status.status === "needs_client_registration") {
-            spinner.stop("Authentication failed", 1)
-            prompts.log.error(status.error)
-            prompts.log.info("Add clientId to your MCP server config:")
-            prompts.log.info(`
-  "mcp": {
-    "${serverName}": {
-      "type": "remote",
-      "url": "${serverConfig.url}",
-      "oauth": {
-        "clientId": "your-client-id",
-        "clientSecret": "your-client-secret"
-      }
-    }
-  }`)
-          } else if (status.status === "failed") {
-            spinner.stop("Authentication failed", 1)
-            prompts.log.error(status.error)
-          } else {
-            spinner.stop("Unexpected status: " + status.status, 1)
-          }
-        }),
-      ),
-      Effect.catchCause((cause) =>
-        Effect.sync(() => {
-          spinner.stop("Authentication failed", 1)
-          const error = Cause.squash(cause)
-          prompts.log.error(error instanceof Error ? error.message : String(error))
-        }),
-      ),
-      Effect.ensuring(Effect.sync(() => unsubscribe())),
-    )
-
-    prompts.outro("Done")
-  }),
+  handler: mcpAuthCommand,
 })
 
 export const McpAuthListCommand = effectCmd({
@@ -720,6 +781,7 @@ export const McpDebugCommand = effectCmd({
           // Try creating transport with auth provider to trigger discovery
           const transport = new StreamableHTTPClientTransport(new URL(serverConfig.url), {
             authProvider,
+            fetch: guardedFetchFn(serverConfig.url),
           })
 
           try {
