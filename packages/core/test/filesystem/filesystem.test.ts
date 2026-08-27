@@ -109,6 +109,37 @@ describe("AppFileSystem", () => {
         expect(result).toEqual(data)
       }),
     )
+
+    it(
+      "returns typed FileSystemError for corrupt JSON (not a defect)",
+      Effect.gen(function* () {
+        const fs = yield* AppFileSystem.Service
+        const filesys = yield* FileSystem.FileSystem
+        const tmp = yield* filesys.makeTempDirectoryScoped()
+        const file = path.join(tmp, "corrupt.json")
+
+        // Write corrupt JSON: valid JSON followed by trailing NUL byte
+        const bytes = Buffer.from('{"a":1}\u0000')
+        yield* filesys.writeFile(file, new Uint8Array(bytes))
+
+        // Effect.catch captures typed failures; a defect would crash the process (RED signal)
+        const result = yield* fs.readJson(file).pipe(
+          Effect.map((data) => ({ success: true as const, data: data as unknown })),
+          Effect.catch((error: unknown) => Effect.succeed({ success: false as const, error })),
+        )
+
+        // Must have failed with a typed error — success means parsing succeeded on corrupt data
+        expect(result.success).toBe(false)
+
+        if (!result.success) {
+          const error: unknown = result.error
+          expect(error).toBeInstanceOf(AppFileSystem.FileSystemError)
+          const fsError = error as AppFileSystem.FileSystemError
+          expect(fsError.method).toBe("readJson")
+          expect(fsError.cause).toBeInstanceOf(SyntaxError)
+        }
+      }),
+    )
   })
 
   describe("ensureDir", () => {

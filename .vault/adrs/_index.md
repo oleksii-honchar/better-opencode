@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-26T18:11:06Z"
+updatedAt: "2026-08-27T17:04:04Z"
 tags: []
 ---
 
@@ -107,3 +107,4 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0093-bridge-guidance-instead-of-cli-integration.adr.md]] — Bridge Guidance Instead of Full CLI Bridge Integration (ADR-0093, status: accepted)
 - [[0094-defer-sdk-129-upgrade.adr.md]] — Defer MCP SDK 1.29.0 Upgrade (ADR-0094, status: accepted)
 - [[0095-preserve-fatal-log-entries.adr.md]] — Preserve Fatal Log Entries via Log.flush() (ADR-0095, status: accepted)
+- [[0096-defect-safe-readjson.adr.md]] — Make AppFileSystem.readJson Defect-Safe (typed parse errors) (ADR-0096, status: accepted)
