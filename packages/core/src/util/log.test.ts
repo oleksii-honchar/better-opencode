@@ -1,4 +1,4 @@
-import { expect, test, describe, beforeEach, afterEach } from "bun:test"
+import { expect, test, describe, beforeEach, afterEach, afterAll, mock } from "bun:test"
 import * as fs from "fs"
 import * as path from "path"
 import { mkdtemp, rm } from "fs/promises"
@@ -6,6 +6,17 @@ import { tmpdir } from "os"
 
 // Test state for line counting and rotation
 let testDir: string
+
+// --- Log.flush() tests: redirect Global.Path.log to a temp dir -----------
+// mock.module is hoisted by Bun, so the factory runs when `../log` (which
+// imports `../global`) is evaluated — before any test body executes.
+let flushLogDir = ""
+mock.module("../global", () => {
+  flushLogDir = fs.mkdtempSync(path.join(tmpdir(), "log-flush-test-"))
+  return { Path: { log: flushLogDir } }
+})
+
+import * as Log from "./log"
 
 describe("TOOL_LOG_FILE_MAX_LINES - Line Count Management", () => {
   beforeEach(async () => {
@@ -285,5 +296,31 @@ describe("TOOLS_LOG_MAX_LINES - Integration with tools.log", () => {
     const content = fs.readFileSync(logFile, "utf-8")
     const lines = content.split("\n").filter(l => l.length > 0)
     expect(lines.length).toBe(2)
+  })
+})
+
+describe("Log.flush() - pending async writes", () => {
+  afterAll(async () => {
+    if (flushLogDir) await rm(flushLogDir, { recursive: true, force: true })
+  })
+
+  test("resolves after pending async writes complete (log content written to the file before flush resolves)", async () => {
+    await Log.init({ print: false, dev: true })
+
+    Log.Default.info("flush-marker-42")
+
+    await Log.flush()
+
+    // The file write must have landed before flush() resolved.
+    const content = fs.readFileSync(Log.file(), "utf-8")
+    expect(content).toContain("flush-marker-42")
+  })
+
+  test("resolves immediately when no writes are pending", async () => {
+    const start = Date.now()
+    await Log.flush()
+    const elapsed = Date.now() - start
+    // No in-flight writes: no waiting on the stream, no timeout tick.
+    expect(elapsed).toBeLessThan(50)
   })
 })

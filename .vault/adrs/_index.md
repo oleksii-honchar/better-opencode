@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-15T18:16:15Z"
+updatedAt: "2026-08-26T18:11:06Z"
 tags: []
 ---
 
@@ -102,3 +102,8 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0088-provider-cache-fingerprint.adr.md]] — Provider Cache Key Includes Unstuck Config Fingerprint (ADR-0088, status: accepted)
 - [[0089-re-focus-nudge-message.adr.md]] — Re-Focus the Default Nudge Message (ADR-0089, status: accepted)
 - [[0090-retry-truncated-provider-streams.adr.md]] — Retry Truncated Provider Streams (ADR-0090, status: accepted)
+- [[0091-pin-mcp-remote-bridge.adr.md]] — Pin mcp-remote >= 0.2.6 in User Config Bridges (ADR-0091, status: accepted)
+- [[0092-guard-oauth-http-parsing.adr.md]] — Guard OAuth HTTP Parsing at the Transport Boundary (ADR-0092, status: accepted)
+- [[0093-bridge-guidance-instead-of-cli-integration.adr.md]] — Bridge Guidance Instead of Full CLI Bridge Integration (ADR-0093, status: accepted)
+- [[0094-defer-sdk-129-upgrade.adr.md]] — Defer MCP SDK 1.29.0 Upgrade (ADR-0094, status: accepted)
+- [[0095-preserve-fatal-log-entries.adr.md]] — Preserve Fatal Log Entries via Log.flush() (ADR-0095, status: accepted)

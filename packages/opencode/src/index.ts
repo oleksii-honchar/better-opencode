@@ -235,6 +235,9 @@ try {
     })
   }
   Log.Default.error("fatal", data)
+  // Defer process.exit() (finally below) until the fatal log entry has been
+  // written — otherwise the async stream.write is killed before it lands.
+  await Log.flush()
   const formatted = FormatError(e)
   if (formatted) UI.error(formatted)
   if (formatted === undefined) {

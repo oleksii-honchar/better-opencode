@@ -23,6 +23,7 @@ import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { McpOAuthProvider, OAUTH_CALLBACK_PATH } from "./oauth-provider"
 import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
+import { guardedFetchFn } from "./fetch-guard"
 import { BusEvent } from "../bus/bus-event"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
@@ -508,6 +509,7 @@ export const layer = Layer.effect(
           transport: new StreamableHTTPClientTransport(url, {
             authProvider,
             requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+            fetch: guardedFetchFn(url),
           }),
         },
         {
@@ -1079,7 +1081,10 @@ export const layer = Layer.effect(
         auth,
       )
 
-      const transport = new StreamableHTTPClientTransport(url, { authProvider })
+      const transport = new StreamableHTTPClientTransport(url, {
+        authProvider,
+        fetch: guardedFetchFn(url),
+      })
 
       return yield* Effect.tryPromise({
         try: () => {
