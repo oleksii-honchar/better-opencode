@@ -193,6 +193,7 @@ export const TaskTool = Tool.define(
       const parentModel = {
         modelID: msg.info.modelID,
         providerID: msg.info.providerID,
+        variant: msg.info.variant,
       }
       const resolvedModel = Agent.resolveAgentModel(next.models, next.model, next.modelPreset, parentModel)
       let model = resolvedModel

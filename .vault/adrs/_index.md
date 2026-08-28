@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-27T17:04:04Z"
+updatedAt: "2026-08-28T17:45:00Z"
 tags: []
 ---
 
@@ -108,3 +108,4 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0094-defer-sdk-129-upgrade.adr.md]] — Defer MCP SDK 1.29.0 Upgrade (ADR-0094, status: accepted)
 - [[0095-preserve-fatal-log-entries.adr.md]] — Preserve Fatal Log Entries via Log.flush() (ADR-0095, status: accepted)
 - [[0096-defect-safe-readjson.adr.md]] — Make AppFileSystem.readJson Defect-Safe (typed parse errors) (ADR-0096, status: accepted)
+- [[0097-subagent-model-mirroring.adr.md]] — Sub-agent Model Mirroring — Exact (providerID, modelID) Match (ADR-0097, status: accepted)

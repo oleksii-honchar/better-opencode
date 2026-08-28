@@ -125,6 +125,68 @@ describe("resolveAgentModel", () => {
     })
   })
 
+  describe("two-stage exact model matching (mirroring parent)", () => {
+    const codex = ProviderID.make("codex")
+    const luna = ModelID.make("gpt-5.6-luna")
+    const terra = ModelID.make("gpt-5.6-terra")
+
+    it("resolves to the exact (providerID, modelID) entry even when another same-provider entry is listed first (regression: terra parent)", () => {
+      const agentModels = [
+        { providerID: codex, modelID: luna, variant: "high" as string | undefined },
+        { providerID: codex, modelID: terra, variant: "high" as string | undefined },
+      ]
+      const terraParent = { providerID: codex, modelID: terra, variant: "high" }
+      const result = Agent.resolveAgentModel(agentModels, undefined, undefined, terraParent)
+      expect(result.providerID).toBe(codex)
+      expect(result.modelID).toBe(terra)
+      expect(result.variant).toBe("high")
+    })
+
+    it("overrides the entry's variant with the parent's variant on exact (providerID, modelID) match", () => {
+      const agentModels = [
+        { providerID: codex, modelID: terra, variant: "high" as string | undefined },
+      ]
+      const terraParent = { providerID: codex, modelID: terra, variant: "medium" }
+      const result = Agent.resolveAgentModel(agentModels, undefined, undefined, terraParent)
+      expect(result.providerID).toBe(codex)
+      expect(result.modelID).toBe(terra)
+      expect(result.variant).toBe("medium")
+    })
+
+    it("keeps the entry's configured variant on exact match when the parent has no variant", () => {
+      const agentModels = [
+        { providerID: codex, modelID: luna, variant: "high" as string | undefined },
+        { providerID: codex, modelID: terra, variant: "low" as string | undefined },
+      ]
+      const terraParent = { providerID: codex, modelID: terra }
+      const result = Agent.resolveAgentModel(agentModels, undefined, undefined, terraParent)
+      expect(result.providerID).toBe(codex)
+      expect(result.modelID).toBe(terra)
+      expect(result.variant).toBe("low")
+    })
+
+    it("falls back to the first provider match when the parent modelID is absent from the list", () => {
+      const agentModels = [
+        { providerID: codex, modelID: luna, variant: "high" as string | undefined },
+        { providerID: codex, modelID: terra, variant: "high" as string | undefined },
+      ]
+      const otherCodexParent = { providerID: codex, modelID: ModelID.make("some-other-model") }
+      const result = Agent.resolveAgentModel(agentModels, undefined, undefined, otherCodexParent)
+      expect(result.providerID).toBe(codex)
+      expect(result.modelID).toBe(luna)
+    })
+
+    it("falls through to the parent chain when there is no provider match in the models list", () => {
+      const agentModels = [
+        { providerID: ProviderID.make("mammoth"), modelID: ModelID.make("qwen3.6-40b") },
+      ]
+      const terraParent = { providerID: codex, modelID: terra }
+      const result = Agent.resolveAgentModel(agentModels, undefined, undefined, terraParent)
+      expect(result.providerID).toBe(codex)
+      expect(result.modelID).toBe(terra)
+    })
+  })
+
   describe("variant propagation", () => {
     it("propagates variant from models entry when present", () => {
       const agentModels = [
