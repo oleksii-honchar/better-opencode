@@ -2,7 +2,7 @@
 type: index
 title: "Domain Concepts"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-26T18:11:06Z"
+updatedAt: "2026-08-28T17:59:30Z"
 tags: []
 ---
 
@@ -19,7 +19,7 @@ Mental models, domain vocabulary, and architectural patterns used in better-open
 - [[0005-agent-meta-tool-plugin.concept.md]] — Agent Meta Tool Plugin: dynamic skill/tool management via system prompt and tool definition interception
 - [[0006-opencode-observability.concept.md]] — OpenCode Observability (OTEL): telemetry pipeline, data sources, Grafana dashboards
 - [[0007-unstuck-loop-detection.concept.md]] — Unstuck Loop Detection System: fingerprint-based detection, evidence accumulation, nudge-and-prune, per-stream lifecycle (ADR-0072), self-diagnosis threshold 2 (ADR-0073), 7 detection types (xml_repetition with partial/prefix tag detection, doom_loop via Allow-then-Catch, model-specific thresholds)
-- [[0008-agent-model-selection.concept.md]] — Agent Model Selection from Frontmatter: three fields (models, model, modelPreset), resolution chain, provider-model format
+- [[0008-agent-model-selection.concept.md]] — Agent Model Selection from Frontmatter: three fields (models, model, modelPreset), two-stage match (exact (providerID, modelID) mirroring, ADR-0097, then provider-only), provider-model format
 - [[0009-agent-model-variant-parsing.concept.md]] — Agent Model Variant Parsing (`:variant` Syntax): inline variant extraction, precedence rules, single/multi-model propagation
 - [[0010-dynamic-context-injection.concept.md]] — Dynamic Context Injection with KV Cache Preservation: two-phase pattern (synthetic messages before compaction, system prompt after)
 - [[0011-dynamic-skill-visibility.concept.md]] — Dynamic Skill Visibility Chain (Registered but Invisible): process-wide registration vs per-session injection, plugin search blind spot, KV-cache-driven visibility gap
