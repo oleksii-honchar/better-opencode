@@ -88,7 +88,7 @@ export function processContentItems(
   contentItems: unknown[],
   options: ProcessContentItemsOptions = {},
 ): ProcessContentItemsResult {
-  const { readFile = fs.readFileSync } = options
+  const { readFile = (path: string) => fs.readFileSync(path, "utf8") } = options
   const textParts: string[] = []
   const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []
 

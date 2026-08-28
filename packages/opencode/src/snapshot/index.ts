@@ -12,7 +12,7 @@ import * as Log from "@opencode-ai/core/util/log"
 
 export const Patch = Schema.Struct({
   hash: Schema.String,
-  files: Schema.Array(Schema.String),
+  files: Schema.mutable(Schema.Array(Schema.String)),
 })
 export type Patch = typeof Patch.Type
 

@@ -32,7 +32,7 @@ export function jsonc(text: string, filepath: string): unknown {
   return data
 }
 
-export function schema<S extends EffectSchema.Top>(
+export function schema<S extends EffectSchema.Decoder<unknown, never>>(
   schema: S,
   data: unknown,
   source: string,
