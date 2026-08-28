@@ -322,8 +322,9 @@ const lowerToolResultOutput = Effect.fn("OpenAIResponses.lowerToolResultOutput")
   // Text/json/error results are encoded as a plain string for backward
   // compatibility with existing cassettes and provider expectations.
   if (part.result.type !== "content") return ProviderShared.toolResultText(part)
-  const items = part.result.value as ToolResultContentPart[]
-  return yield* Effect.forEach(items, lowerToolResultContentItem)
+  // Preserve the narrowed array element type when compiled through a consumer package.
+  const content: ReadonlyArray<ToolResultContentPart> = part.result.value
+  return yield* Effect.forEach(content, lowerToolResultContentItem)
 })
 
 // Removes orphaned `function_call_output` items whose `call_id` does not have
