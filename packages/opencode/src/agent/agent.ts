@@ -503,7 +503,10 @@ export const layer = Layer.effect(
 
 /**
  * Resolves the effective model for an agent:
- * 1. `models` list — match parent provider (provider-specific selection)
+ * 1. `models` list — two-stage matching against the parent:
+ *    a. exact match on (providerID, modelID) mirroring the parent; inherits the
+ *       parent's effective variant when present, otherwise keeps the entry's variant
+ *    b. provider-only match — the first entry sharing the parent's providerID (legacy)
  * 2. Explicit `model` — return explicit model
  * 3. `modelPreset` — compute suffixed model ID from parent model
  * 4. Falls back to parent model
@@ -512,10 +515,20 @@ export function resolveAgentModel(
   agentModels: Info["models"],
   agentModel: Info["model"],
   agentModelPreset: Info["modelPreset"],
-  parentModel: { providerID: ProviderID; modelID: ModelID },
+  parentModel: { providerID: ProviderID; modelID: ModelID; variant?: string },
 ): { modelID: ModelID; providerID: ProviderID; variant?: string } {
-  // Check models list for parent provider match
+  // Check models list: 1) exact model match (mirror parent), 2) provider-only match (legacy)
   if (agentModels) {
+    const exactMatch = agentModels.find(
+      (model) =>
+        model.providerID === parentModel.providerID &&
+        model.modelID === parentModel.modelID,
+    )
+    if (exactMatch) {
+      return parentModel.variant
+        ? { ...exactMatch, variant: parentModel.variant }
+        : exactMatch
+    }
     const match = agentModels.find((model) => model.providerID === parentModel.providerID)
     if (match) return match
   }

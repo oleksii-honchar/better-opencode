@@ -2,7 +2,7 @@
 type: concept
 title: "Agent Model Selection from Frontmatter"
 createdAt: "2026-07-06T13:15:00Z"
-updatedAt: "2026-07-06T13:15:00Z"
+updatedAt: "2026-08-28T17:45:00Z"
 tags: [agent, model-resolution, configuration]
 see_also:
   - "adrs/0022-multi-provider-model-field.adr.md"
@@ -10,6 +10,8 @@ see_also:
   - "adrs/0024-exact-provider-match.adr.md"
   - "adrs/0025-graceful-fallback.adr.md"
   - "adrs/0026-deprecate-model-fields.adr.md"
+  - "adrs/0030-models-per-entry-variant.adr.md"
+  - "adrs/0097-subagent-model-mirroring.adr.md"
   - "specifications/0005-multi-provider-model-setup.spec.md"
   - "concepts/0004-subagent-delegation.concept.md"
   - "concepts/0009-agent-model-variant-parsing.concept.md"
@@ -35,7 +37,7 @@ Before the `models:` field, agents could only specify a single model (`model:`) 
 
 | Field | Type | Resolution Behavior |
 |-------|------|-------------------|
-| `models:` | `string[]` — array of `provider/modelID` strings | Iterate entries, match `providerID === parentModel.providerID` (exact match). First match wins. If no match, fall through. |
+| `models:` | `string[]` — array of `provider/modelID[:variant]` strings | Two-stage match against the parent: **(1)** exact `(providerID, modelID)` match mirroring the parent — inherits the parent's effective variant when present; **(2)** provider-only match — the first entry sharing the parent's `providerID` (legacy). If neither matches, fall through. |
 | `model:` | `string` — single `provider/modelID` string | Return the explicitly specified model. **Deprecated** — use `models:` instead. |
 | `modelPreset:` | `string` — suffix (e.g., `-precise`, `-fast`) | Compute `modelID = parentModel.modelID + modelPreset`, using `parentModel.providerID`. **Deprecated** — use `models:` instead. |
 
@@ -52,10 +54,15 @@ Sub-agent frontmatter:
   modelPreset: -precise       # deprecated fallback
 
 Resolution:
-  1. models: → mammoth/qwen3.6-40b ✓ (parent provider "mammoth" matches)
-     → RESULT: mammoth/qwen3.6-40b
+  1. models: (two-stage match against the parent)
+     a. exact (providerID, modelID) match → mammoth/qwen3.6-40b ✓
+        (mirrors parent: both "mammoth" and "qwen3.6-40b" match)
+        → RESULT: mammoth/qwen3.6-40b
+        (on an exact match the parent's effective variant is inherited when present)
+     b. (only if no exact match) provider-only match →
+        first entry whose providerID is "mammoth" (legacy)
 
-  (If step 1 had no match:)
+  (If step 1 had no match at all:)
   2. model: → codex/gpt-5 ✓
      → RESULT: codex/gpt-5
 
@@ -67,6 +74,12 @@ Resolution:
   4. Parent model → mammoth/qwen3.6-40b
      → RESULT: mammoth/qwen3.6-40b (inheritance)
 ```
+
+> **Two-stage in practice (the codex luna/terra case):** with `models:
+> [codex/gpt-5.6-luna:high, codex/gpt-5.6-terra:high]` and a parent on
+> `codex/gpt-5.6-terra:high`, stage 1a (exact providerID + modelID match) selects the
+> `terra` entry and inherits variant `high` — not the first-listed `luna`. A provider-only
+> match (stage 1b) would have picked `luna`, which was the previous behavior and the reported bug.
 
 ### Provider-Model String Format
 
@@ -115,9 +128,11 @@ Examples:
 
 ### Matching Rules
 
-- **Exact match only** — `providerID === parentModel.providerID`. No fuzzy matching, prefix matching, or wildcards.
-- **First match wins** — if multiple entries in `models:` have the same providerID, the first one is used.
-- **Unmatched providers** — fall through to `model:`, then `modelPreset:`, then parent model. No error thrown.
+- **Two-stage match** — the `models:` list is matched against the parent in two stages, in order:
+  1. **Exact `(providerID, modelID)` match** — the first entry where **both** `providerID` and `modelID` equal the parent's (mirrors the parent's exact model). On this match, the resolved variant is the parent's effective variant when one is present; otherwise the entry's own variant is kept.
+  2. **Provider-only match** — if no exact match exists, the first entry whose `providerID` equals the parent's (legacy behavior). The entry's own variant is kept here.
+- **Exact comparison only** — both stages use `===` comparison. No fuzzy matching, prefix matching, or wildcards (ADR-0024).
+- **Unmatched providers** — if neither stage matches, fall through to `model:`, then `modelPreset:`, then parent model. No error thrown.
 
 ### Schema Locations
 

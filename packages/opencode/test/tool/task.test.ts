@@ -77,7 +77,10 @@ function defer<T>() {
   return { promise, resolve }
 }
 
-const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned") {
+const seed = Effect.fn("TaskToolTest.seed")(function* (
+  title = "Pinned",
+  assistantModel?: { modelID?: ModelID; variant?: string },
+) {
   const session = yield* Session.Service
   const chat = yield* session.create({ title })
   const user = yield* session.updateMessage({
@@ -98,8 +101,9 @@ const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned") {
     cost: 0,
     path: { cwd: "/tmp", root: "/tmp" },
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    modelID: ref.modelID,
+    modelID: assistantModel?.modelID ?? ref.modelID,
     providerID: ref.providerID,
+    ...(assistantModel?.variant !== undefined ? { variant: assistantModel.variant } : {}),
     time: { created: Date.now() },
   }
   yield* session.updateMessage(assistant)
@@ -819,6 +823,106 @@ describe("tool.task", () => {
           "multi-model-agent": {
             mode: "subagent",
             models: ["test/mammoth-model"],
+          },
+        },
+      },
+    },
+  )
+
+  it.instance(
+    "mirrors parent's exact model and variant when the sub-agent models list contains the parent model",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed("Pinned", {
+          modelID: ModelID.make("terra-model"),
+          variant: "high",
+        })
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+        const result = yield* def.execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "mirror-variant-agent",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(result).toBeDefined()
+        // Parent is test/terra-model:high; subagent has models: [test/luna-model:high, test/terra-model:medium]
+        // The exact (providerID, modelID) match must beat the first (luna) entry, and the
+        // parent's effective variant must be inherited end-to-end into the prompt call
+        expect(seen?.model?.modelID).toBe(ModelID.make("terra-model"))
+        expect(seen?.model?.providerID).toBe(ProviderID.make("test"))
+        expect(seen?.variant).toBe("high")
+      }),
+    {
+      config: {
+        agent: {
+          "mirror-variant-agent": {
+            mode: "subagent",
+            models: ["test/luna-model:high", "test/terra-model:medium"],
+          },
+        },
+      },
+    },
+  )
+
+  it.instance(
+    "keeps the models entry's configured variant when the parent has no variant",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed("Pinned", {
+          modelID: ModelID.make("terra-model"),
+        })
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        let seen: SessionPrompt.PromptInput | undefined
+        const promptOps = stubOps({ onPrompt: (input) => (seen = input) })
+
+        const result = yield* def.execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "mirror-no-variant-agent",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(result).toBeDefined()
+        // Parent is test/terra-model (no variant); the exact match resolves to the terra entry
+        // and the entry's own :medium variant must be used end-to-end (per-entry variant path)
+        expect(seen?.model?.modelID).toBe(ModelID.make("terra-model"))
+        expect(seen?.model?.providerID).toBe(ProviderID.make("test"))
+        expect(seen?.variant).toBe("medium")
+      }),
+    {
+      config: {
+        agent: {
+          "mirror-no-variant-agent": {
+            mode: "subagent",
+            models: ["test/luna-model:medium", "test/terra-model:medium"],
           },
         },
       },
