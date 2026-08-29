@@ -28,6 +28,7 @@ BETTER_OPENCODE_BIN="$HOME/bin/better-opencode.exe"
 INSTALL=false
 ONLY_BUILD=false
 CLEAN=false
+SINGLE_FLAG=false
 DRY_RUN="${DRY_RUN:-0}"
 
 # Run or print a command depending on DRY_RUN
@@ -45,6 +46,7 @@ for arg in "$@"; do
     --install) INSTALL=true ;;
     --only-build) ONLY_BUILD=true ;;
     --clean) CLEAN=true ;;
+    --single) SINGLE_FLAG=true ;;
     --help)
       echo "Usage: $0 [OPTIONS]"
       echo ""
@@ -52,17 +54,22 @@ for arg in "$@"; do
       echo "  --install              Install forked binary to ~/bin/better-opencode.exe"
       echo "  --only-build           Skip binary install (build only)"
       echo "  --clean                Remove dist/ before building"
+      echo "  --single               Build only the current platform target (forwarded to build.ts"
+      echo "                         as --single). Default is the full 13-target build. Safe to use"
+      echo "                         ONLY when the host platform matches the target (e.g. native"
+      echo "                         build on Win11). Cross-build from darwin to win32 MUST NOT"
+      echo "                         use --single — leave it off so all 13 targets are built."
       echo ""
       echo "Environment:"
       echo "  DRY_RUN=1              Print the commands instead of executing them"
       echo ""
       echo "Examples:"
-      echo "  $0 --install --clean              # Full build + install"
+      echo "  $0 --install --clean              # Full build + install (cross-build safe)"
       echo "  $0 --only-build                   # Build only, no install"
+      echo "  $0 --install --clean --single     # Native Win11 build: only win32-x64 target"
       echo "  DRY_RUN=1 $0 --install            # Preview the commands"
       echo ""
       echo "Note: No git operations (fetch, rebase, checkout). Builds from current branch."
-      echo "Hint: On Win11 you can pass --single to the build for a faster target-only build."
       exit 0
       ;;
   esac
@@ -98,8 +105,13 @@ if [ "$CLEAN" = true ]; then
   run rm -rf "$FORK_DIR/packages/opencode/dist"
 fi
 
-# Tip: add `--single` on Win11 to build only the current (win32-x64) target for speed.
-run bun run --cwd packages/opencode build
+# Tip: pass `--single` on Win11 to build only the current (win32-x64) target for speed.
+# Cross-build from darwin to win32 MUST NOT use --single (would skip the win32 target).
+if [ "$SINGLE_FLAG" = true ]; then
+  run bun run --cwd packages/opencode build --single
+else
+  run bun run --cwd packages/opencode build
+fi
 
 if [ ! -f "$BINARY_SOURCE" ] && [ "$DRY_RUN" != "1" ]; then
   echo "ERROR: Binary not found at $BINARY_SOURCE"
