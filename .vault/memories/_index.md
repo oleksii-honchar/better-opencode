@@ -2,7 +2,7 @@
 type: index
 title: "Atomic Memories"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-26T18:11:06Z"
+updatedAt: "2026-08-30T15:54:00Z"
 tags: []
 ---
 
@@ -34,3 +34,4 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0020-mcp-remote-0201-signin-bugs.memory.md]] — mcp-remote 0.2.0/0.2.1 Have Sign-In Coordination Bugs — Pin >= 0.2.6
 - [[0021-ibkr-mcp-endpoint-behavior.memory.md]] — IBKR MCP Endpoint Behavior — 401 Empty Body, Akamai no-store, Registration Works
 - [[0022-remote-type-nul-byte-workaround.memory.md]] — type: remote MCP Servers Break (NUL byte) — Use local mcp-remote Bridges
+- [[0023-litellm-mcp-tool-name-prefixing.memory.md]] — LiteLLM-Proxy MCP Tool Names Get <server>- Prefix; Unprefixed Allowlists Silently Break
