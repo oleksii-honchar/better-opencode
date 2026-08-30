@@ -36,6 +36,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { LenientJsonSchemaValidator } from "./lenient-validator"
+import { toolNameMatches } from "./tool-name-filter"
 
 const log = Log.create({ service: "mcp" })
 const DEFAULT_TIMEOUT = 30_000
@@ -899,10 +900,10 @@ export const layer = Layer.effect(
 
               const filteredTools = listed.filter((mcpTool) => {
                 if (isWhitelist) {
-                  return toolFilter!.includes(mcpTool.name)
+                  return toolNameMatches(mcpTool.name, toolFilter!)
                 }
                 // Blacklist: include if NOT in disabled list
-                return !toolFilter!.includes(mcpTool.name)
+                return !toolNameMatches(mcpTool.name, toolFilter!)
               })
 
               if (filteredTools.length === 0) {
@@ -921,8 +922,8 @@ export const layer = Layer.effect(
                     excludedToolCount: listed.length,
                   }),
                   hint: isWhitelist
-                    ? `enabledTools names must match the tool names returned by the server. For remote servers proxied through LiteLLM (/mcp/<server>), tools are prefixed with "<server>-" (e.g. paperless-list_documents, hugging_kreuzberg-extract_bytes)`
-                    : "disabledTools names must match the tool names returned by the server",
+                    ? `enabledTools names must match the tool names returned by the server, either exactly or after any "<server>-" / "<server>_" / "<server>." prefix (e.g. recallMemory matches bensyne-recallMemory; for remote servers proxied through LiteLLM (/mcp/<server>), tools are prefixed with "<server>-" such as paperless-list_documents, hugging_kreuzberg-extract_bytes)`
+                    : "disabledTools names must match the tool names returned by the server, either exactly or after any \"<server>-\" / \"<server>_\" / \"<server>.\" prefix",
                 })
                 return
               }
