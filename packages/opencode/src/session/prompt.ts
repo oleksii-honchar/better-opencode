@@ -695,7 +695,7 @@ export const layer = Layer.effect(
               const cmd = ChildProcess.make(sh, args, {
                 cwd,
                 extendEnv: true,
-                env: { ...shellEnv.env, TERM: "dumb" },
+                env: { ...shellEnv.env, TERM: "dumb", OPENCODE_SESSION_ID: input.sessionID },
                 stdin: "ignore",
                 forceKillAfter: "3 seconds",
               })
