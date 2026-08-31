@@ -110,3 +110,4 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0096-defect-safe-readjson.adr.md]] — Make AppFileSystem.readJson Defect-Safe (typed parse errors) (ADR-0096, status: accepted)
 - [[0097-subagent-model-mirroring.adr.md]] — Sub-agent Model Mirroring — Exact (providerID, modelID) Match (ADR-0097, status: accepted)
 - [[0098-prefix-tolerant-mcp-tool-filter.adr.md]] — Prefix-Tolerant MCP enabledTools / disabledTools Matching (ADR-0098, status: accepted)
+- [[0099-expose-session-id-env-var.adr.md]] — Expose OPENCODE_SESSION_ID in Bash-Tool Child Envs (ADR-0099, status: accepted)
