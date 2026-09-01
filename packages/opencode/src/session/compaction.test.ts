@@ -147,6 +147,7 @@ function createMockSession(): Session.Interface {
     setTitle: Effect.fn("MockSession.setTitle")(function* () {}),
     setArchived: Effect.fn("MockSession.setArchived")(function* () {}),
     setPermission: Effect.fn("MockSession.setPermission")(function* () {}),
+    setModel: Effect.fn("MockSession.setModel")(function* () {}),
     setRevert: Effect.fn("MockSession.setRevert")(function* () {}),
     clearRevert: Effect.fn("MockSession.clearRevert")(function* () {}),
     setSummary: Effect.fn("MockSession.setSummary")(function* () {}),

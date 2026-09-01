@@ -258,6 +258,13 @@ export const Info = Schema.Struct({
   features: Schema.optional(ConfigFeatures.Info).annotate({
     description: "Feature flags for opt-in behaviors (e.g., MCP file path base64 encoding)",
   }),
+  dynamicModelSwitch: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean),
+    }),
+  ).annotate({
+    description: "Enable agent-driven in-flight model switching (default true)",
+  }),
   enterprise: Schema.optional(
     Schema.Struct({
       url: Schema.optional(Schema.String).annotate({ description: "Enterprise URL" }),

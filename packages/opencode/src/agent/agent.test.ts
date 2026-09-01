@@ -224,3 +224,78 @@ describe("unstuck index — doom_loop type exports", () => {
     expect(info.type).toBe("doom_loop")
   })
 })
+
+// ---------------------------------------------------------------------------
+// smartModels — per-agent provider-scoped smart models for in-flight switching
+// ---------------------------------------------------------------------------
+
+function createMockConfigWithSmartModels(): Config.Interface {
+  const mockInfo: Config.Info = {
+    permission: {},
+    agent: {
+      smartAgent: {
+        name: "smartAgent",
+        mode: "subagent",
+        smartModels: ["p1/smart", "p2/smart"],
+        options: {},
+        permission: {},
+      },
+      noSmartAgent: {
+        name: "noSmartAgent",
+        mode: "subagent",
+        options: {},
+        permission: {},
+      },
+    },
+  } as Config.Info
+  return {
+    get: Effect.fn("MockConfigSmart.get")(function* () {
+      return mockInfo
+    }),
+    getGlobal: Effect.fn("MockConfigSmart.getGlobal")(function* () {
+      return mockInfo
+    }),
+    getConsoleState: Effect.fn("MockConfigSmart.getConsoleState")(function* () {
+      return ConsoleState.make({ consoleManagedProviders: [], switchableOrgCount: 0 })
+    }),
+    update: Effect.fn("MockConfigSmart.update")(function* () {}),
+    updateGlobal: Effect.fn("MockConfigSmart.updateGlobal")(function* () {
+      return { info: mockInfo, changed: false }
+    }),
+    invalidate: Effect.fn("MockConfigSmart.invalidate")(function* () {}),
+    directories: Effect.fn("MockConfigSmart.directories")(function* () {
+      return []
+    }),
+    waitForDependencies: Effect.fn("MockConfigSmart.waitForDependencies")(function* () {}),
+  }
+}
+
+const smartModelMockLayers = Layer.mergeAll(
+  Layer.succeed(Config.Service, createMockConfigWithSmartModels()),
+  Layer.succeed(Auth.Service, createMockAuth()),
+  Layer.succeed(Plugin.Service, createMockPlugin()),
+  Layer.succeed(Skill.Service, createMockSkill()),
+  Layer.succeed(Provider.Service, createMockProvider()),
+  Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags()),
+)
+
+describe("Agent — smartModels parsing", () => {
+  test("parses smartModels with provider/model format into structured entries", async () => {
+    const agent = await Effect.runPromise(
+      Effect.provide(Agent.use.get("smartAgent"), Layer.provide(Agent.layer, smartModelMockLayers)),
+    )
+
+    expect(agent.smartModels).toEqual([
+      { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart"), variant: undefined },
+      { providerID: ProviderID.make("p2"), modelID: ModelID.make("smart"), variant: undefined },
+    ])
+  })
+
+  test("smartModels is undefined when not configured (existing agents unaffected)", async () => {
+    const agent = await Effect.runPromise(
+      Effect.provide(Agent.use.get("noSmartAgent"), Layer.provide(Agent.layer, smartModelMockLayers)),
+    )
+
+    expect(agent.smartModels).toBeUndefined()
+  })
+})

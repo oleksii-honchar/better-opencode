@@ -473,6 +473,7 @@ export interface Interface {
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
   readonly setPermission: (input: { sessionID: SessionID; permission: Permission.Ruleset }) => Effect.Effect<void>
+  readonly setModel: (sessionID: SessionID, model: { providerID: ProviderID; modelID: ModelID }) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
     revert: Info["revert"]
@@ -755,6 +756,13 @@ export const layer: Layer.Layer<
       yield* patch(input.sessionID, { permission: [...input.permission], time: { updated: Date.now() } })
     })
 
+    const setModel = Effect.fn("Session.setModel")(function* (
+      sessionID: SessionID,
+      model: { providerID: ProviderID; modelID: ModelID },
+    ) {
+      yield* patch(sessionID, { model: { id: model.modelID, providerID: model.providerID } })
+    })
+
     const setRevert = Effect.fn("Session.setRevert")(function* (input: {
       sessionID: SessionID
       revert: Info["revert"]
@@ -861,6 +869,7 @@ export const layer: Layer.Layer<
       setTitle,
       setArchived,
       setPermission,
+      setModel,
       setRevert,
       clearRevert,
       setSummary,

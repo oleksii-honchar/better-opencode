@@ -54,6 +54,17 @@ export const Info = Schema.Struct({
   ).annotate({
     description: "Provider-specific model selections parsed from config",
   }),
+  smartModels: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        modelID: ModelID,
+        providerID: ProviderID,
+        variant: Schema.optional(Schema.String),
+      }),
+    ),
+  ).annotate({
+    description: "Provider-scoped smart models for in-flight switching, parsed from config",
+  }),
   modelPreset: Schema.optional(Schema.String),
   variant: Schema.optional(Schema.String),
   prompt: Schema.optional(Schema.String),
@@ -333,6 +344,12 @@ export const layer = Layer.effect(
           if (!value.model) {
             item.variant = value.variant ?? item.variant
           }
+        }
+        if (value.smartModels) {
+          item.smartModels = value.smartModels.map((m) => {
+            const parsed = Provider.parseModel(m)
+            return { providerID: parsed.providerID, modelID: parsed.modelID, variant: parsed.variant }
+          })
         }
         // If neither model nor models was set, apply config-level variant:
         if (!value.model && !value.models) {

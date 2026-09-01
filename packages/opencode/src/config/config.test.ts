@@ -326,3 +326,40 @@ describe("Config Schema — unstuck nudge strategy and pruneCount removal", () =
   })
 })
 
+describe("Config Schema — dynamicModelSwitch gate (C5)", () => {
+  // Read-site default: the gate is default-on (opt-out). Callers read it as
+  // `cfg.dynamicModelSwitch?.enabled ?? true` — the test mirrors that expression.
+  const resolvedGate = (cfg: { dynamicModelSwitch?: { enabled?: boolean } }) =>
+    cfg.dynamicModelSwitch?.enabled ?? true
+
+  test("default-on: no dynamicModelSwitch resolves to true", () => {
+    const parsed = Schema.decodeSync(Info)({})
+    expect(parsed.dynamicModelSwitch).toBeUndefined()
+    expect(resolvedGate(parsed)).toBe(true)
+  })
+
+  test("dynamicModelSwitch.enabled false resolves to false (opt-out)", () => {
+    const parsed = Schema.decodeSync(Info)({ dynamicModelSwitch: { enabled: false } })
+    expect(parsed.dynamicModelSwitch?.enabled).toBe(false)
+    expect(resolvedGate(parsed)).toBe(false)
+  })
+
+  test("dynamicModelSwitch.enabled true resolves to true", () => {
+    const parsed = Schema.decodeSync(Info)({ dynamicModelSwitch: { enabled: true } })
+    expect(parsed.dynamicModelSwitch?.enabled).toBe(true)
+    expect(resolvedGate(parsed)).toBe(true)
+  })
+
+  test("dynamicModelSwitch empty object decodes; enabled absent resolves to true", () => {
+    const parsed = Schema.decodeSync(Info)({ dynamicModelSwitch: {} })
+    expect(parsed.dynamicModelSwitch?.enabled).toBeUndefined()
+    expect(resolvedGate(parsed)).toBe(true)
+  })
+
+  test("backward compatible — config with other fields but no dynamicModelSwitch still parses", () => {
+    const parsed = Schema.decodeSync(Info)({ model: "anthropic/claude-2" })
+    expect(parsed.model).toBe("anthropic/claude-2")
+    expect(parsed.dynamicModelSwitch).toBeUndefined()
+  })
+})
+

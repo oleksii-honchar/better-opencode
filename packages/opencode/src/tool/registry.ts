@@ -8,6 +8,7 @@ import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
 import { TaskStatusTool } from "./task_status"
+import { SwitchModelTool } from "./switch_model"
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
@@ -47,6 +48,7 @@ import { LSP } from "@/lsp/lsp"
 import { Instruction } from "../session/instruction"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Bus } from "../bus"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { Agent } from "../agent/agent"
 import { Git } from "@/git"
 import { Skill } from "../skill"
@@ -106,6 +108,7 @@ export const layer: Layer.Layer<
   | Instruction.Service
   | AppFileSystem.Service
   | Bus.Service
+  | EventV2Bridge.Service
   | HttpClient.HttpClient
   | ChildProcessSpawner
   | Ripgrep.Service
@@ -141,6 +144,7 @@ export const layer: Layer.Layer<
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const switchmodel = yield* SwitchModelTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -251,6 +255,7 @@ export const layer: Layer.Layer<
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
+          switch_model: Tool.init(switchmodel),
         })
 
         return {
@@ -272,6 +277,7 @@ export const layer: Layer.Layer<
             ...(flags.experimentalScout ? [tool.repo_clone, tool.repo_overview] : []),
             tool.skill,
             ...(cfg.toolFilter?.applyPatch?.enabled !== false ? [tool.patch] : []),
+            ...((cfg.dynamicModelSwitch?.enabled ?? true) ? [tool.switch_model] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
@@ -421,8 +427,10 @@ export const defaultLayer = Layer.suspend(() =>
       Layer.provide(CrossSpawnSpawner.defaultLayer),
       Layer.provide(Ripgrep.defaultLayer),
       Layer.provide(Truncate.defaultLayer),
-    )
-    .pipe(Layer.provide(RuntimeFlags.defaultLayer)),
+    ).pipe(
+      Layer.provide(RuntimeFlags.defaultLayer),
+      Layer.provide(EventV2Bridge.defaultLayer),
+    ),
 )
 
 function isZodType(value: unknown): value is z.ZodType {
