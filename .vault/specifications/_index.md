@@ -2,7 +2,7 @@
 type: index
 title: "Specifications"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-26T18:11:06Z"
+updatedAt: "2026-09-01T15:56:13Z"
 tags: []
 ---
 
@@ -31,3 +31,4 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 - [[0017-fix-prune-looping-messages.spec.md]] — Fix pruneLoopingMessages to Preserve Tool-Call/Tool-Result Pairs (kind: refactor, status: accepted)
 - [[0018-retry-truncated-provider-streams.spec.md]] — Retry Truncated Provider Streams — Fix Sub-Agent Abrupt Stop (kind: bugfix, status: accepted)
 - [[0019-mcp-oauth-auth-reliability.spec.md]] — MCP OAuth Auth Reliability (kind: bugfix, status: completed)
+- [[0020-in-flight-model-switching.spec.md]] — In-flight Model Switching via a `switch_model` Tool (kind: feature, status: approved)

@@ -2,7 +2,7 @@
 type: index
 title: "Domain Concepts"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-28T17:59:30Z"
+updatedAt: "2026-09-01T15:56:13Z"
 tags: []
 ---
 
@@ -24,3 +24,4 @@ Mental models, domain vocabulary, and architectural patterns used in better-open
 - [[0010-dynamic-context-injection.concept.md]] — Dynamic Context Injection with KV Cache Preservation: two-phase pattern (synthetic messages before compaction, system prompt after)
 - [[0011-dynamic-skill-visibility.concept.md]] — Dynamic Skill Visibility Chain (Registered but Invisible): process-wide registration vs per-session injection, plugin search blind spot, KV-cache-driven visibility gap
 - [[0012-mcp-oauth-auth-flow.concept.md]] — MCP OAuth Auth Flow: SDK auth chain, guardedFetchFn transport boundary, oauthServers type-remote-only limitation
+- [[0013-in-flight-model-switching.concept.md]] — In-flight Model Switching: agent-driven mid-turn model switching via a `switch_model` tool riding the runLoop per-iteration model re-resolution

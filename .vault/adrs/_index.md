@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-30T15:47:00Z"
+updatedAt: "2026-09-01T15:56:13Z"
 tags: []
 ---
 
@@ -111,3 +111,6 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0097-subagent-model-mirroring.adr.md]] — Sub-agent Model Mirroring — Exact (providerID, modelID) Match (ADR-0097, status: accepted)
 - [[0098-prefix-tolerant-mcp-tool-filter.adr.md]] — Prefix-Tolerant MCP enabledTools / disabledTools Matching (ADR-0098, status: accepted)
 - [[0099-expose-session-id-env-var.adr.md]] — Expose OPENCODE_SESSION_ID in Bash-Tool Child Envs (ADR-0099, status: accepted)
+- [[0100-in-flight-model-switch-tool.adr.md]] — In-flight Agent-Driven Model Switching via a `switch_model` Tool (ADR-0100, status: accepted)
+- [[0101-provider-scoped-smart-models.adr.md]] — Provider-Scoped `smartModels` as the In-flight Switch Candidate Set (ADR-0101, status: accepted)
+- [[0102-dynamic-model-switch-config-gate.adr.md]] — `dynamicModelSwitch` Root Config Gate — Default On (Opt-Out) (ADR-0102, status: accepted)

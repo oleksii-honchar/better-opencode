@@ -8,6 +8,8 @@ see_also:
   - "concepts/0001-session-model.concept.md"
   - "concepts/0002-system-prompt.concept.md"
   - "concepts/0004-subagent-delegation.concept.md"
+  - "concepts/0013-in-flight-model-switching.concept.md"
+  - "adrs/0100-in-flight-model-switch-tool.adr.md"
 ---
 
 # Concept: LLM Turn Management
@@ -39,6 +41,14 @@ while(true) {
   9. Loop back to step 1
 }
 ```
+
+### Per-Iteration Model Re-Resolution
+
+Each iteration re-resolves the active model from the last user message —
+`getModel(lastUser.model.providerID, lastUser.model.modelID, ...)` (prompt.ts:~1447). This is a
+**seam**: writing a new model onto `lastUser.model` takes effect on the next iteration with no
+changes to the loop. The in-flight `switch_model` tool (CONCEPT-0013, ADR-0100) rides this seam to
+let the LLM change models mid-turn.
 
 ### LLM SDK Multi-Step Tool Execution (Within One Stream)
 
