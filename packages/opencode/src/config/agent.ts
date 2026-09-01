@@ -26,6 +26,12 @@ const AgentSchema = Schema.StructWithRest(
       description:
         "Array of provider-prefixed model IDs (e.g., 'mammoth/qwen3.6-40b', 'deepseek/v4-flash') for per-provider model selection.",
     }),
+    smartModels: Schema.optional(Schema.mutable(Schema.Array(ConfigModelID))).annotate({
+      description:
+        "Provider-prefixed 'provider/model' smart models for in-flight switching, " +
+        "one per provider (e.g. 'p1/smart', 'p2/smart'). The agent may only switch to its " +
+        "smart model matching its current provider.",
+    }),
     variant: Schema.optional(Schema.String).annotate({
       description: "Default model variant for this agent (applies only when using the agent's configured model).",
     }),
@@ -65,6 +71,7 @@ const KNOWN_KEYS = new Set([
   "name",
   "model",
   "models",
+  "smartModels",
   "variant",
   "prompt",
   "description",

@@ -34,7 +34,14 @@ export function provider(model: Provider.Model) {
 }
 
 export interface Interface {
-  readonly environment: (model: Provider.Model, sessionID?: string, parentSessionID?: string, workspaceFolders?: string[]) => Effect.Effect<string[]>
+  readonly environment: (
+    model: Provider.Model,
+    sessionID?: string,
+    parentSessionID?: string,
+    workspaceFolders?: string[],
+    agent?: Agent.Info,
+    modelSwitchEnabled?: boolean,
+  ) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
 }
 
@@ -47,10 +54,17 @@ export const layer = Layer.effect(
     const skill = yield* Skill.Service
 
     return Service.of({
-      environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model, sessionID?: string, parentSessionID?: string, workspaceFolders?: string[]) {
+      environment: Effect.fn("SystemPrompt.environment")(function* (
+        model: Provider.Model,
+        sessionID?: string,
+        parentSessionID?: string,
+        workspaceFolders?: string[],
+        agent?: Agent.Info,
+        modelSwitchEnabled?: boolean,
+      ) {
         log.info(`workspaceFolders=${JSON.stringify(workspaceFolders)}`, { sessionID })
         const ctx = yield* InstanceState.context
-        return [
+        const env = [
           [
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
             `Here is some useful information about the environment you are running in:`,
@@ -66,6 +80,14 @@ export const layer = Layer.effect(
             `</env>`,
           ].join("\n"),
         ]
+        const smartModels = agent?.smartModels?.filter((m) => m.providerID === model.providerID) ?? []
+        if (smartModels.length > 0 && (modelSwitchEnabled ?? true)) {
+          env.push(
+            `SMART_MODELS: ${smartModels.map((m) => `${m.providerID}/${m.modelID}`).join(", ")}`,
+            "For especially complex tasks — intricate architecture decisions, difficult debugging, or critical implementation choices — you may call the switch_model tool to temporarily use a more capable model. For routine work, keep using your current model.",
+          )
+        }
+        return env
       }),
 
       skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info) {

@@ -1,0 +1,11 @@
+Switch to a different model to handle complex reasoning or specialized tasks.
+
+Use this tool when you need to access a smarter or more capable model for difficult problems, complex analysis, or specialized domains.
+
+When to use:
+- Complex architectural decisions or system design
+- Difficult debugging or root cause analysis
+- Mathematical or logical reasoning
+- Creative writing or brainstorming
+
+The available smart models depend on your current provider and configuration.

@@ -1,5 +1,32 @@
 import { describe, test, expect } from "bun:test"
-import { Effect, Layer, Scope } from "effect"
+import { Effect } from "effect"
+import { ToolRegistry } from "./registry"
+import { Config as ConfigModule } from "@/config/config"
+import { Plugin } from "../plugin"
+import { Question } from "../question"
+import { Todo } from "../session/todo"
+import { Agent } from "../agent/agent"
+import { Skill } from "../skill"
+import { Session } from "../session/session"
+import { SessionStatus } from "../session/status"
+import { BackgroundJob } from "../background/job"
+import { Provider } from "@/provider/provider"
+import { Git } from "@/git"
+import { RepositoryCache } from "@/reference/repository-cache"
+import { Reference } from "@/reference/reference"
+import { LSP } from "@/lsp/lsp"
+import { Instruction } from "../session/instruction"
+import { AppFileSystem } from "@opencode-ai/core/filesystem"
+import { Bus } from "../bus"
+import { HttpClient } from "effect/unstable/http"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { Ripgrep } from "../file/ripgrep"
+import { Format } from "../format"
+import { Truncate } from "./truncate"
+import { RuntimeFlags } from "@/effect/runtime-flags"
+import { EventV2Bridge } from "@/event-v2-bridge"
+import { InstanceRef } from "@/effect/instance-ref"
+import type { InstanceContext } from "@/project/instance-context"
 
 // ---------------------------------------------------------------------------
 // Mock type matching the config subset used by registry.ts
@@ -128,5 +155,114 @@ describe("Tool Registry — ApplyPatchTool filter for Qwen models", () => {
 
   test("claude model: apply_patch visible by default", () => {
     expect(applyPatchVisibleForModel({}, "claude-sonnet-4-20250514")).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// switch_model builtin gating — runs the REAL ToolRegistry layer with mocked
+// services so the acceptance criteria are proven at the behavior level:
+//   - default config            → "switch_model" in builtin tools list
+//   - dynamicModelSwitch:false  → "switch_model" absent
+//   - the registry layer resolves all of the tool's services (no
+//     unresolved-service errors at construction / registration)
+// ---------------------------------------------------------------------------
+
+const testInstanceContext: InstanceContext = {
+  directory: "/tmp/registry-switch-model-test",
+  worktree: "/tmp/registry-switch-model-test",
+  project: { id: "test-project" },
+} as unknown as InstanceContext
+
+function mockConfigService(config: ConfigModule.Info): ConfigModule.Interface {
+  return {
+    get: () => Effect.succeed(config),
+    directories: () => Effect.succeed<string[]>([]),
+    waitForDependencies: () => Effect.void,
+  } as unknown as ConfigModule.Interface
+}
+
+function mockPluginService(): Plugin.Interface {
+  return {
+    list: () => Effect.succeed([]),
+    trigger: () => Effect.void,
+  } as unknown as Plugin.Interface
+}
+
+function mockRuntimeFlagsService(): RuntimeFlags.Info {
+  return {
+    client: "test",
+    enableQuestionTool: false,
+    experimentalBackgroundSubagents: false,
+    experimentalScout: false,
+    experimentalLspTool: false,
+    experimentalPlanMode: false,
+    enableExa: false,
+    enableParallel: false,
+  } as unknown as RuntimeFlags.Info
+}
+
+// Truncate methods invoked while tool definitions initialize
+function mockTruncateService(): Truncate.Interface {
+  return {
+    cleanup: () => Effect.void,
+    write: (text: string) => Effect.succeed(text),
+    output: (text: string) => Effect.succeed({ content: text, truncated: false }),
+    limits: () => Effect.succeed({ maxLines: 2000, maxBytes: 50 * 1024 }),
+  } as unknown as Truncate.Interface
+}
+
+const NOOP_SERVICE = {}
+
+function registryToolIds(config: ConfigModule.Info): Promise<string[]> {
+  const effect = Effect.gen(function* () {
+    const registry = yield* ToolRegistry.Service
+    return yield* registry.ids()
+  }).pipe(
+    Effect.provide(ToolRegistry.layer),
+    Effect.provideService(ConfigModule.Service, mockConfigService(config)),
+    Effect.provideService(Plugin.Service, mockPluginService()),
+    Effect.provideService(RuntimeFlags.Service, mockRuntimeFlagsService()),
+    // Services only required for context resolution (no methods invoked by ids())
+    Effect.provideService(Question.Service, NOOP_SERVICE as unknown as Question.Interface),
+    Effect.provideService(Todo.Service, NOOP_SERVICE as unknown as Todo.Interface),
+    Effect.provideService(Agent.Service, NOOP_SERVICE as unknown as Agent.Interface),
+    Effect.provideService(Skill.Service, NOOP_SERVICE as unknown as Skill.Interface),
+    Effect.provideService(Session.Service, NOOP_SERVICE as unknown as Session.Interface),
+    Effect.provideService(SessionStatus.Service, NOOP_SERVICE as unknown as SessionStatus.Interface),
+    Effect.provideService(BackgroundJob.Service, NOOP_SERVICE as unknown as BackgroundJob.Interface),
+    Effect.provideService(Provider.Service, NOOP_SERVICE as unknown as Provider.Interface),
+    Effect.provideService(Git.Service, NOOP_SERVICE as unknown as Git.Interface),
+    Effect.provideService(RepositoryCache.Service, NOOP_SERVICE as unknown as RepositoryCache.Interface),
+    Effect.provideService(Reference.Service, NOOP_SERVICE as unknown as Reference.Interface),
+    Effect.provideService(LSP.Service, NOOP_SERVICE as unknown as LSP.Interface),
+    Effect.provideService(Instruction.Service, NOOP_SERVICE as unknown as Instruction.Interface),
+    Effect.provideService(AppFileSystem.Service, NOOP_SERVICE as unknown as AppFileSystem.Interface),
+    Effect.provideService(Bus.Service, NOOP_SERVICE as unknown as Bus.Interface),
+    Effect.provideService(HttpClient.HttpClient, NOOP_SERVICE as unknown as HttpClient.HttpClient),
+  ).pipe(
+    Effect.provideService(ChildProcessSpawner, NOOP_SERVICE as unknown as InstanceType<typeof ChildProcessSpawner>),
+    Effect.provideService(Ripgrep.Service, NOOP_SERVICE as unknown as Ripgrep.Interface),
+    Effect.provideService(Format.Service, NOOP_SERVICE as unknown as Format.Interface),
+    Effect.provideService(Truncate.Service, mockTruncateService()),
+    Effect.provideService(EventV2Bridge.Service, NOOP_SERVICE as unknown as InstanceType<typeof EventV2Bridge.Service>),
+    Effect.provideService(InstanceRef, testInstanceContext),
+  )
+  return Effect.runPromise(effect)
+}
+
+describe("Tool Registry — switch_model builtin gating", () => {
+  test("default config: switch_model is present in the builtin tools list", async () => {
+    const ids = await registryToolIds({})
+    expect(ids).toContain("switch_model")
+  })
+
+  test("dynamicModelSwitch.enabled false: switch_model is absent from the builtin tools list", async () => {
+    const ids = await registryToolIds({ dynamicModelSwitch: { enabled: false } })
+    expect(ids).not.toContain("switch_model")
+  })
+
+  test("dynamicModelSwitch.enabled true: switch_model is present in the builtin tools list", async () => {
+    const ids = await registryToolIds({ dynamicModelSwitch: { enabled: true } })
+    expect(ids).toContain("switch_model")
   })
 })

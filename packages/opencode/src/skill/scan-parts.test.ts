@@ -92,6 +92,7 @@ function createMockSessionService(): SessionModule.Interface {
     setTitle: () => Effect.void,
     setArchived: () => Effect.void,
     setPermission: () => Effect.void,
+    setModel: () => Effect.void,
     setRevert: () => Effect.void,
     clearRevert: () => Effect.void,
     setSummary: () => Effect.void,
