@@ -7,6 +7,8 @@ export const defaultEvidenceThresholds: EvidenceThresholds = {
   selfDiagnosis: 3,
   patternLoop: 2,
   doomLoop: 1,
+  // fabricated_compliance fires once per qualifying turn — one strike is enough for a nudge
+  fabricatedCompliance: 1,
 }
 
 export interface UnstuckConfig {
@@ -22,6 +24,9 @@ export interface UnstuckConfig {
   sentenceLoopThreshold: number
   minSentenceLength: number
   enableSelfDiagnosisDetection: boolean
+  // Enable fabricated-compliance detection (catches "initialized"/"activated" claims with zero tool calls)
+  // DEFAULT OFF (D5) — opt-in per agent via the `unstuck` config block
+  enableFabricatedComplianceDetection: boolean
   enablePatternLoopDetection: boolean
   patternLoopThreshold: number
   // Enable doom-loop detection (same tool called with identical input repeatedly)
@@ -69,6 +74,9 @@ export const defaultConfig: UnstuckConfig = {
   minSentenceLength: 15,
   // Enable self-diagnosis detection (catches "I'm stuck", "I cannot proceed", etc.)
   enableSelfDiagnosisDetection: true,
+  // Enable fabricated-compliance detection (catches "initialized"/"activated" claims with zero tool calls)
+  // DEFAULT OFF (D5) — opt-in per agent via the `unstuck` config block
+  enableFabricatedComplianceDetection: false,
   // Enable pattern loop detection (catches alternating A-B-A-B step patterns)
   enablePatternLoopDetection: true,
   // Number of steps in an alternating pattern to declare a pattern loop
@@ -89,8 +97,11 @@ export const defaultConfig: UnstuckConfig = {
   strategy: "nudge",
   // Maximum number of nudge attempts before giving up and aborting
   maxNudges: 2,
-  // Custom nudge message (overrides the default context-aware nudge generator)
-  nudgeMessage: "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction.",
+  // Custom nudge message (overrides the default context-aware nudge generator).
+  // Default is undefined — the wrapper resolves per-detection-type phrasing first,
+  // then this override, then the generic loop nudge. (Task 8b: keeping the generic
+  // text here made explicit overrides indistinguishable from the default.)
+  nudgeMessage: undefined,
   // Log verbosity: "debug" (all), "info" (detections + interventions), "warn" (interventions only)
   logLevel: "info",
   // Per-detection-type evidence thresholds — how many detections of each type before intervention
@@ -118,4 +129,113 @@ export function mergeConfig(partial: Partial<UnstuckConfig>): UnstuckConfig {
   // pruneCount was removed — strip it if present in input
   delete (merged as any).pruneCount
   return validateUnstuckConfig(merged)
+}
+
+// Per-agent unstuck resolution (Task 8b): agent frontmatter `unstuck:` blocks are
+// promoted to `agent.options.unstuck` (config/agent.ts unknown-key handling) as raw
+// JSON. Validate the shape defensively before merging — invalid shapes are ignored
+// so a malformed agent block can never disable or corrupt loop detection.
+const BOOLEAN_KEYS = [
+  "enabled",
+  "detectToolOnlyLoops",
+  "includeReasoning",
+  "includeText",
+  "enableSentenceLoopDetection",
+  "enableSelfDiagnosisDetection",
+  "enableFabricatedComplianceDetection",
+  "enablePatternLoopDetection",
+  "enableDoomLoopDetection",
+  "enableCrossStreamDoomLoopDetection",
+  "sentenceLoopIncludeReasoning",
+] as const
+
+const NUMBER_KEYS = [
+  "loopThreshold",
+  "toolLoopThreshold",
+  "historySize",
+  "minThinkingLength",
+  "sentenceLoopThreshold",
+  "minSentenceLength",
+  "patternLoopThreshold",
+  "doomLoopThreshold",
+  "crossStreamDoomLoopThreshold",
+  "maxNudges",
+  "evidenceWindow",
+] as const
+
+const STRING_KEYS = ["nudgeMessage"] as const
+
+const STRATEGY_VALUES = ["nudge", "nudge-and-prune", "abort", "warn"] as const
+const LOG_LEVEL_VALUES = ["debug", "info", "warn"] as const
+
+const EVIDENCE_THRESHOLD_KEYS = [
+  "stepLoop",
+  "toolLoop",
+  "sentenceLoop",
+  "selfDiagnosis",
+  "patternLoop",
+  "doomLoop",
+  "fabricatedCompliance",
+] as const
+
+function hasOwn(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key)
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+export function resolveAgentUnstuckConfig(
+  globalUnstuck: Partial<UnstuckConfig> | undefined,
+  agentUnstuck: unknown,
+): UnstuckConfig {
+  const agentPartial: Partial<UnstuckConfig> = {}
+
+  if (isPlainObject(agentUnstuck)) {
+    for (const key of BOOLEAN_KEYS) {
+      if (hasOwn(agentUnstuck, key) && typeof agentUnstuck[key] === "boolean") {
+        ;(agentPartial as Record<string, unknown>)[key] = agentUnstuck[key]
+      }
+    }
+    for (const key of NUMBER_KEYS) {
+      if (hasOwn(agentUnstuck, key) && typeof agentUnstuck[key] === "number" && Number.isFinite(agentUnstuck[key])) {
+        ;(agentPartial as Record<string, unknown>)[key] = agentUnstuck[key]
+      }
+    }
+    if (hasOwn(agentUnstuck, "strategy") && STRATEGY_VALUES.includes(agentUnstuck["strategy"] as never)) {
+      agentPartial.strategy = agentUnstuck["strategy"] as UnstuckConfig["strategy"]
+    }
+    if (hasOwn(agentUnstuck, "logLevel") && LOG_LEVEL_VALUES.includes(agentUnstuck["logLevel"] as never)) {
+      agentPartial.logLevel = agentUnstuck["logLevel"] as UnstuckConfig["logLevel"]
+    }
+    if (hasOwn(agentUnstuck, "nudgeMessage") && typeof agentUnstuck["nudgeMessage"] === "string") {
+      agentPartial.nudgeMessage = agentUnstuck["nudgeMessage"]
+    }
+    if (hasOwn(agentUnstuck, "doomLoopIgnorePatterns") && Array.isArray(agentUnstuck["doomLoopIgnorePatterns"])) {
+      const patterns = (agentUnstuck["doomLoopIgnorePatterns"] as unknown[]).filter(
+        (p): p is string => typeof p === "string",
+      )
+      if (patterns.length > 0) agentPartial.doomLoopIgnorePatterns = patterns
+    }
+    const rawThresholds = agentUnstuck["evidenceThresholds"]
+    if (hasOwn(agentUnstuck, "evidenceThresholds") && isPlainObject(rawThresholds)) {
+      const thresholds: Record<string, number> = {}
+      for (const key of EVIDENCE_THRESHOLD_KEYS) {
+        const value = rawThresholds[key]
+        if (hasOwn(rawThresholds, key) && typeof value === "number" && Number.isFinite(value)) {
+          thresholds[key] = value
+        }
+      }
+      if (Object.keys(thresholds).length > 0) {
+        agentPartial.evidenceThresholds = thresholds
+      }
+    }
+  }
+
+  return mergeConfig({
+    ...globalUnstuck,
+    ...agentPartial,
+    evidenceThresholds: { ...globalUnstuck?.evidenceThresholds, ...agentPartial.evidenceThresholds },
+  })
 }

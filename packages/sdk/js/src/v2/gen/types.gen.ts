@@ -6267,6 +6267,7 @@ export type SessionUpdateData = {
     time?: {
       archived?: number
     }
+    modelOverride?: null
   }
   path: {
     sessionID: string

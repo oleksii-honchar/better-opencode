@@ -102,6 +102,39 @@ function isOrphanedInterruptedTool(part: MessageV2.ToolPart) {
   return part.state.status === "error" && part.state.metadata?.interrupted === true
 }
 
+export type PromptModelRef = { providerID: string; modelID: string }
+
+/**
+ * Prompt model-resolution precedence (D2/A2 "override-first"):
+ *   sessionModelOverride ?? input.model ?? ag.model
+ * The session override is consulted ONLY when the agent declares a
+ * `smartModels` scope AND the override's model belongs to it — an override
+ * must never leak outside the agent's smartModels scope. Returns undefined
+ * when no static candidate applies; the caller falls back to the effectful
+ * currentModel(sessionID).
+ */
+export function resolvePromptModel(args: {
+  override: PromptModelRef | null | undefined
+  agentSmartModels: ReadonlyArray<PromptModelRef> | undefined
+  inputModel?: { providerID: ProviderID; modelID: ModelID }
+  agentModel?: { providerID: ProviderID; modelID: ModelID }
+}): { providerID: ProviderID; modelID: ModelID } | undefined {
+  if (
+    args.override &&
+    args.agentSmartModels &&
+    args.agentSmartModels.length > 0 &&
+    args.agentSmartModels.some(
+      (m) => m.providerID === args.override!.providerID && m.modelID === args.override!.modelID,
+    )
+  ) {
+    return {
+      providerID: ProviderID.make(args.override.providerID),
+      modelID: ModelID.make(args.override.modelID),
+    }
+  }
+  return args.inputModel ?? args.agentModel
+}
+
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts, Image.Error | LLMError>
@@ -586,7 +619,20 @@ export const layer = Layer.effect(
               yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
               throw error
             }
-            const model = input.model ?? agent.model ?? (yield* currentModel(input.sessionID))
+            const shellOverride = Database.use((db) =>
+              db
+                .select({ modelOverride: SessionTable.model_override })
+                .from(SessionTable)
+                .where(eq(SessionTable.id, input.sessionID))
+                .get(),
+            )
+            const model =
+              resolvePromptModel({
+                override: shellOverride?.modelOverride,
+                agentSmartModels: agent.smartModels,
+                inputModel: input.model,
+                agentModel: agent.model,
+              }) ?? (yield* currentModel(input.sessionID))
             const userMsg: MessageV2.User = {
               id: input.messageID ?? MessageID.ascending(),
               sessionID: input.sessionID,
@@ -778,12 +824,22 @@ export const layer = Layer.effect(
 
       const current = Database.use((db) =>
         db
-          .select({ agent: SessionTable.agent, model: SessionTable.model })
+          .select({
+            agent: SessionTable.agent,
+            model: SessionTable.model,
+            modelOverride: SessionTable.model_override,
+          })
           .from(SessionTable)
           .where(eq(SessionTable.id, input.sessionID))
           .get(),
       )
-      const model = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
+      const model =
+        resolvePromptModel({
+          override: current?.modelOverride,
+          agentSmartModels: ag.smartModels,
+          inputModel: input.model,
+          agentModel: ag.model,
+        }) ?? (yield* currentModel(input.sessionID))
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
         !input.variant && ag.variant && same

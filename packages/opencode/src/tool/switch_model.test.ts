@@ -20,6 +20,7 @@ import { SwitchModelTool } from "./switch_model"
 
 let updateMessageCalls: any[] = []
 let setModelCalls: { sessionID: SessionID; model: { providerID: ProviderID; modelID: ModelID } }[] = []
+let setModelOverrideCalls: { sessionID: SessionID; model: { providerID: ProviderID; modelID: ModelID } }[] = []
 let publishedEvents: { event: any; data: any }[] = []
 let getModelCalls: { providerID: ProviderID; modelID: ModelID }[] = []
 let getModelShouldFail: { suggestions?: string[] } | null = null
@@ -78,6 +79,10 @@ function createMockSessionService() {
     },
     setModel: (sessionID: SessionID, model: { providerID: ProviderID; modelID: ModelID }) => {
       setModelCalls.push({ sessionID, model })
+      return Effect.void
+    },
+    setModelOverride: (sessionID: SessionID, model: { providerID: ProviderID; modelID: ModelID }) => {
+      setModelOverrideCalls.push({ sessionID, model })
       return Effect.void
     },
   } as unknown as Session.Interface
@@ -149,7 +154,7 @@ function makeContext(overrides: Partial<Tool.Context> = {}): Tool.Context {
 // ---------------------------------------------------------------------------
 
 function executeTool(
-  params: { model: string },
+  params: { model: string; persist?: boolean },
   ctx: Tool.Context,
   agentInfo: Partial<Agent.Info>
 ) {
@@ -180,6 +185,7 @@ describe("SwitchModelTool", () => {
   beforeEach(() => {
     updateMessageCalls = []
     setModelCalls = []
+    setModelOverrideCalls = []
     publishedEvents = []
     getModelCalls = []
     getModelShouldFail = null
@@ -309,6 +315,90 @@ describe("SwitchModelTool", () => {
     expect(updateMessageCalls).toHaveLength(0)
     expect(setModelCalls).toHaveLength(0)
     expect(publishedEvents).toHaveLength(0)
+  })
+
+  test("persist: true → durable override written via setModelOverride with the switched model", async () => {
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const effect = executeTool(
+      { model: "p1/smart", persist: true },
+      makeContext(),
+      agentInfo
+    )
+
+    const result = await Effect.runPromise(effect)
+    expect(result.output).toContain("p1/smart")
+
+    expect(setModelOverrideCalls).toHaveLength(1)
+    expect(setModelOverrideCalls[0].sessionID).toBe(testSessionID)
+    expect(setModelOverrideCalls[0].model.providerID).toBe(ProviderID.make("p1"))
+    expect(setModelOverrideCalls[0].model.modelID).toBe(ModelID.make("smart"))
+
+    // Normal per-turn writes still happen alongside the override
+    expect(setModelCalls).toHaveLength(1)
+    expect(updateMessageCalls).toHaveLength(1)
+  })
+
+  test("default (no persist) → no override written (regression guard)", async () => {
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const effect = executeTool(
+      { model: "p1/smart" },
+      makeContext(),
+      agentInfo
+    )
+
+    await Effect.runPromise(effect)
+
+    expect(setModelOverrideCalls).toHaveLength(0)
+    // Current behavior exactly unchanged
+    expect(setModelCalls).toHaveLength(1)
+    expect(updateMessageCalls).toHaveLength(1)
+    expect(publishedEvents).toHaveLength(1)
+  })
+
+  test("persist: false behaves identically to absent → no override written", async () => {
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const effect = executeTool(
+      { model: "p1/smart", persist: false },
+      makeContext(),
+      agentInfo
+    )
+
+    await Effect.runPromise(effect)
+    expect(setModelOverrideCalls).toHaveLength(0)
+  })
+
+  test("persist: true on rejected switch → no override written (no side effects)", async () => {
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const effect = executeTool(
+      { model: "p1/nonexistent-model", persist: true },
+      makeContext(),
+      agentInfo
+    )
+
+    const exit = await Effect.runPromiseExit(effect)
+    expect(exit._tag).toBe("Failure")
+    expect(setModelOverrideCalls).toHaveLength(0)
+    expect(setModelCalls).toHaveLength(0)
   })
 
   test("no smart model configured: errors with provider-specific message", async () => {

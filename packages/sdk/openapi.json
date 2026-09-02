@@ -5526,6 +5526,9 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "modelOverride": {
+                    "type": "null"
                   }
                 },
                 "additionalProperties": false

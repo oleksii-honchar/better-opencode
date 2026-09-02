@@ -87,6 +87,12 @@ export function fromRow(row: SessionRow): Info {
           variant: row.model.variant,
         }
       : undefined,
+    modelOverride: row.model_override
+      ? {
+          providerID: ProviderID.make(row.model_override.providerID),
+          modelID: ModelID.make(row.model_override.modelID),
+        }
+      : undefined,
     version: row.version,
     summary,
     cost: row.cost,
@@ -126,6 +132,7 @@ export function toRow(info: Info) {
     title: info.title,
     agent: info.agent,
     model: info.model,
+    model_override: info.modelOverride,
     version: info.version,
     share_url: info.share?.url,
     summary_additions: info.summary?.additions,
@@ -226,6 +233,12 @@ export const Info = Schema.Struct({
   title: Schema.String,
   agent: optionalOmitUndefined(Schema.String),
   model: optionalOmitUndefined(Model),
+  modelOverride: optionalOmitUndefined(
+    Schema.Struct({
+      providerID: ProviderID,
+      modelID: ModelID,
+    }),
+  ),
   version: Schema.String,
   time: Time,
   permission: optionalOmitUndefined(Permission.Ruleset),
@@ -327,6 +340,14 @@ const UpdatedInfo = Schema.Struct({
   title: Schema.optional(Schema.NullOr(Schema.String)),
   agent: Schema.optional(Schema.NullOr(Schema.String)),
   model: Schema.optional(Schema.NullOr(Model)),
+  modelOverride: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        providerID: ProviderID,
+        modelID: ModelID,
+      }),
+    ),
+  ),
   version: Schema.optional(Schema.NullOr(Schema.String)),
   time: Schema.optional(UpdatedTime),
   permission: Schema.optional(Schema.NullOr(Permission.Ruleset)),
@@ -474,6 +495,11 @@ export interface Interface {
   readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
   readonly setPermission: (input: { sessionID: SessionID; permission: Permission.Ruleset }) => Effect.Effect<void>
   readonly setModel: (sessionID: SessionID, model: { providerID: ProviderID; modelID: ModelID }) => Effect.Effect<void>
+  readonly setModelOverride: (
+    sessionID: SessionID,
+    model: { providerID: ProviderID; modelID: ModelID },
+  ) => Effect.Effect<void>
+  readonly clearModelOverride: (sessionID: SessionID) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
     revert: Info["revert"]
@@ -763,6 +789,17 @@ export const layer: Layer.Layer<
       yield* patch(sessionID, { model: { id: model.modelID, providerID: model.providerID } })
     })
 
+    const setModelOverride = Effect.fn("Session.setModelOverride")(function* (
+      sessionID: SessionID,
+      model: { providerID: ProviderID; modelID: ModelID },
+    ) {
+      yield* patch(sessionID, { modelOverride: { providerID: model.providerID, modelID: model.modelID } })
+    })
+
+    const clearModelOverride = Effect.fn("Session.clearModelOverride")(function* (sessionID: SessionID) {
+      yield* patch(sessionID, { time: { updated: Date.now() }, modelOverride: null })
+    })
+
     const setRevert = Effect.fn("Session.setRevert")(function* (input: {
       sessionID: SessionID
       revert: Info["revert"]
@@ -870,6 +907,8 @@ export const layer: Layer.Layer<
       setArchived,
       setPermission,
       setModel,
+      setModelOverride,
+      clearModelOverride,
       setRevert,
       clearRevert,
       setSummary,

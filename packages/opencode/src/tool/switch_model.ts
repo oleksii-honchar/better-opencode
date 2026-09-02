@@ -18,6 +18,12 @@ const Parameters = Schema.Struct({
   model: Schema.String.annotate({
     description: "Target smart model for the current provider, e.g. 'p1/smart'",
   }),
+  persist: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "persist: model stays for the rest of the session until the user re-pins; default false = remainder of this turn only",
+    }),
+  ),
 })
 
 export const SwitchModelTool = Tool.define(
@@ -104,6 +110,11 @@ export const SwitchModelTool = Tool.define(
 
       // Set the session default model
       yield* sessions.setModel(ctx.sessionID, { providerID, modelID })
+
+      // Durable override when persisting (survives turns until user re-pin)
+      if (params.persist) {
+        yield* sessions.setModelOverride(ctx.sessionID, { providerID, modelID })
+      }
 
       // Publish the ModelSwitched event
       yield* events.publish(SessionEvent.ModelSwitched, {

@@ -25,6 +25,27 @@ export function detectSelfDiagnosis(text: string): boolean {
   return patterns.some((p) => p.test(text))
 }
 
+// Fabricated-compliance detection: scans assistant text for compliance-claim phrases
+// ("initialized", "activated", "Persona Active", "Setup complete", "Bootstrapping
+// Initiated", ...). Only meaningful when the turn has ZERO tool parts — claiming
+// completion without calling any tools is a fabricated compliance signal.
+// Returns the first matched claim phrase, or undefined.
+export function detectComplianceClaim(text: string): string | undefined {
+  const patterns: Array<{ pattern: RegExp; claim: string }> = [
+    { pattern: /persona\s+active/i, claim: "Persona Active" },
+    { pattern: /setup\s+complete/i, claim: "Setup complete" },
+    { pattern: /bootstrapping\s+initiated/i, claim: "Bootstrapping Initiated" },
+    { pattern: /\binitialized\b/i, claim: "initialized" },
+    { pattern: /\bactivated\b/i, claim: "activated" },
+    { pattern: /\bbootstrap(?:ped)?\s+(?:the\s+)?(?:session|environment|agent)\b/i, claim: "bootstrapped" },
+    { pattern: /\bcompliance\s+(?:achieved|complete|confirmed)\b/i, claim: "compliance confirmed" },
+  ]
+  for (const { pattern, claim } of patterns) {
+    if (pattern.test(text)) return claim
+  }
+  return undefined
+}
+
 // Synchronous hash function using FNV-1a — no external dependencies, no async
 export function fnv1a(text: string): string {
   let hash = 0x811c9dc5
@@ -52,26 +73,12 @@ export function computeInputFingerprint(input: Record<string, unknown>): string 
   return fnv1a(JSON.stringify(input))
 }
 
-// Fingerprint the subset of UnstuckConfig that affects model wrapping behavior.
+// Fingerprint the full UnstuckConfig — any field that affects model wrapping behavior
+// (including per-agent overrides like enableFabricatedComplianceDetection) must change
+// the fingerprint, otherwise agents sharing a model would collide on the cached wrapper.
 // Used to build cache keys so config changes invalidate the cache.
-export function computeUnstuckFingerprint(config: {
-  enabled: boolean
-  strategy: string
-  maxNudges: number
-  evidenceThresholds: EvidenceThresholds
-  sentenceLoopIncludeReasoning: boolean
-  doomLoopIgnorePatterns: string[]
-}): string {
-  return fnv1a(
-    JSON.stringify({
-      enabled: config.enabled,
-      strategy: config.strategy,
-      maxNudges: config.maxNudges,
-      evidenceThresholds: config.evidenceThresholds,
-      sentenceLoopIncludeReasoning: config.sentenceLoopIncludeReasoning,
-      doomLoopIgnorePatterns: config.doomLoopIgnorePatterns,
-    }),
-  )
+export function computeUnstuckFingerprint(config: UnstuckConfig): string {
+  return fnv1a(JSON.stringify(config))
 }
 
 export function computeToolSignature(
@@ -360,6 +367,23 @@ export class LoopDetectorImpl implements LoopDetector {
       }
     }
 
+    // Check for fabricated compliance: compliance-claim text while the turn had ZERO tool parts
+    if (config.enableFabricatedComplianceDetection && this.currentTools.length === 0) {
+      const claim = detectComplianceClaim(this.currentText) ?? detectComplianceClaim(this.currentReasoning)
+      if (claim) {
+        log.info("finalizeStep — fabricated compliance detected", {
+          type: "fabricated_compliance",
+          claim,
+          threshold: 1,
+        })
+        return {
+          type: "fabricated_compliance",
+          threshold: 1,
+          claim,
+        }
+      }
+    }
+
     // Reset for next step
     this.currentReasoning = ""
     this.currentText = ""
@@ -552,6 +576,9 @@ export class EvidenceAccumulatorImpl implements EvidenceAccumulator {
     }
     if (this.countByType("doom_loop") >= (thresholds.doomLoop ?? 1)) {
       return { met: true, type: "doom_loop" }
+    }
+    if (this.countByType("fabricated_compliance") >= (thresholds.fabricatedCompliance ?? 1)) {
+      return { met: true, type: "fabricated_compliance" }
     }
     return { met: false }
   }

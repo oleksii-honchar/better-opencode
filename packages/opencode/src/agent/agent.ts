@@ -65,6 +65,13 @@ export const Info = Schema.Struct({
   ).annotate({
     description: "Provider-scoped smart models for in-flight switching, parsed from config",
   }),
+  startupContract: Schema.optional(
+    Schema.Struct({
+      scaffold: Schema.optional(Schema.Boolean),
+    }),
+  ).annotate({
+    description: "Startup contract the agent must satisfy before its first reply (e.g. session scaffold)",
+  }),
   modelPreset: Schema.optional(Schema.String),
   variant: Schema.optional(Schema.String),
   prompt: Schema.optional(Schema.String),
@@ -366,6 +373,7 @@ export const layer = Layer.effect(
         item.name = value.name ?? item.name
         item.steps = value.steps ?? item.steps
         item.allowedMcpCategories = value.allowedMcpCategories
+        item.startupContract = value.startupContract ?? item.startupContract
         item.options = mergeDeep(item.options, value.options ?? {})
         item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
       }

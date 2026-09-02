@@ -4,7 +4,7 @@ id: ADR-0100
 title: "In-flight Agent-Driven Model Switching via a `switch_model` Tool"
 status: accepted
 createdAt: "2026-09-01T15:48:45Z"
-updatedAt: "2026-09-01T15:48:45Z"
+updatedAt: "2026-09-01T21:16:00Z"
 tags: [model-resolution, tool, runloop, agent, architecture]
 supersedes: []
 superseded_by: []
@@ -75,3 +75,10 @@ Supporting design decisions (folded here):
 - **Trade-off:** Switch granularity is the **next loop iteration** (next LLM stream), not mid-stream — provider streams execute provider-side tools internally.
 - **Guarded by:** provider-scoped `smartModels` ([[adrs/0101-provider-scoped-smart-models.adr.md]]) and the `dynamicModelSwitch` gate ([[adrs/0102-dynamic-model-switch-config-gate.adr.md]]).
 - **Status note:** Implemented and reviewer-verified on branch `feat/260901-model-in-flight` (commit `5fbe5024d`).
+- **v2 note (2026-09-01, D2.5):** the persistence contract gained an explicit opt-in —
+  `switch_model persist: true` writes a **durable session `modelOverride`** (column
+  `SessionTable.model_override` + additive migration `20260901194500_add_session_model_override`)
+  that outranks `input.model` until an explicit user re-pin clears it; the default (no `persist`)
+  keeps the v1 per-turn behavior. The v1 "explicit per-prompt model always wins" precedence
+  (Decision item 4 / Consequences above) is amended to **"explicit user re-pin wins"** — full
+  record in [[specifications/0020-in-flight-model-switching.spec.md]] (Amendment v2).

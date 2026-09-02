@@ -1,4 +1,4 @@
-export { defaultConfig, mergeConfig } from "./config"
+export { defaultConfig, mergeConfig, resolveAgentUnstuckConfig } from "./config"
 export type { UnstuckConfig } from "./config"
 export { LoopDetectedError } from "./error"
 export type { LoopDetectedInfo, StepRecord } from "./error"

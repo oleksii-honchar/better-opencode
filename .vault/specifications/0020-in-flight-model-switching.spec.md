@@ -4,8 +4,8 @@ id: SPEC-0020
 title: "In-flight Model Switching via a `switch_model` Tool"
 status: approved
 createdAt: "2026-09-01T15:48:45Z"
-updatedAt: "2026-09-01T15:48:45Z"
-tags: [model-resolution, tool, runloop, agent, v1]
+updatedAt: "2026-09-01T21:16:00Z"
+tags: [model-resolution, tool, runloop, agent, v1, v2]
 adr_refs:
   - ADR-0100
   - ADR-0101
@@ -86,3 +86,25 @@ anomalyco/opencode #8278 (tool to switch models), #8456 (config routing), #10633
 - `switch_model` rejects cross-provider / non-configured targets (allowed list returned).
 - `ModelNotFoundError.suggestions` returned for unknown models.
 - Feature is a no-op when an agent has no `smartModels` or when `dynamicModelSwitch.enabled === false`.
+
+## Amendment v2 (2026-09-01) — persistence contract + precedence change (D2.5)
+
+Implemented on branch `feat/260901-model-in-flight` (session "Small-Model Session-Rules
+Compliance", decision D2.5). Four changes to the v1 record above:
+
+- **Precedence (amends Constraints "explicit per-prompt `model` always wins"):** the contract is
+  now **"explicit user re-pin wins"** — the persisted override outranks `input.model`, and only an
+  explicit user model selection (TUI model picker, `/model`, ACP selection sites) clears it.
+- **`persist: true`:** `switch_model` gains an optional `persist` param; when set it writes a
+  **durable session `modelOverride`** (`Session.Service.setModelOverride` / `clearModelOverride`)
+  that outranks `input.model` in `prompt.ts` resolution — consulted only when the agent declares a
+  `smartModels` scope containing the override model — until the user re-pins.
+- **Default `persist: false` keeps v1 semantics:** a switch without `persist` still applies to the
+  current turn only (per-turn revert), so v1 consumers are unaffected.
+- **Storage correction:** v1 implied session fields need no schema work; that turned out wrong —
+  the durable override is a **column**, `SessionTable.model_override` (nullable JSON), added by the
+  additive migration `20260901194500_add_session_model_override` (zero backfill), mapped to
+  `Session.Info.modelOverride` and persisted by the `SessionEvent.ModelSwitched` projector.
+
+See also the v2 note in [[adrs/0100-in-flight-model-switch-tool.adr.md]] and the amended
+`SMART_MODELS:` guidance text in `session/system.ts`.

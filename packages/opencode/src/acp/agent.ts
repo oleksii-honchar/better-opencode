@@ -38,6 +38,8 @@ import { pathToFileURL } from "url"
 import { Filesystem } from "@/util/filesystem"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { ACPSessionManager } from "./session"
+import { Session } from "@/session/session"
+import { SessionID } from "@/session/schema"
 import type { ACPConfig } from "./types"
 import { ACPRuntime } from "./runtime"
 import { Provider } from "@/provider/provider"
@@ -1223,6 +1225,12 @@ export class Agent implements ACPAgent {
     const selection = parseModelSelection(params.modelId, providers)
     this.sessionManager.setModel(session.id, selection.model)
     this.sessionManager.setVariant(session.id, selection.variant)
+    // D2 "user wins": an explicit user model selection clears any durable
+    // switch_model override on the session.
+    ACPRuntime.runDirectory({
+      directory: session.cwd,
+      effect: Session.use.clearModelOverride(SessionID.make(session.id)),
+    }).catch((error) => log.error("failed to clear model override after user selection", { error }))
 
     const entries = sortProvidersByName(providers)
     const availableVariants = modelVariantsFromProviders(entries, selection.model)
@@ -1275,6 +1283,12 @@ export class Agent implements ACPAgent {
       const selection = parseModelSelection(params.value, providers)
       this.sessionManager.setModel(session.id, selection.model)
       this.sessionManager.setVariant(session.id, selection.variant)
+      // D2 "user wins": an explicit user model selection clears any durable
+      // switch_model override on the session.
+      ACPRuntime.runDirectory({
+        directory: session.cwd,
+        effect: Session.use.clearModelOverride(SessionID.make(session.id)),
+      }).catch((error) => log.error("failed to clear model override after user selection", { error }))
     } else if (params.configId === "effort") {
       if (typeof params.value !== "string") throw RequestError.invalidParams("effort value must be a string")
       const current = session.model ?? (await defaultModel(this.config, session.cwd))
