@@ -129,6 +129,16 @@ describe("SystemPrompt.environment — smart-model list + switching guidance", (
     expect(out).toContain("switch_model")
   })
 
+  test("guidance states persist semantics: current turn only unless persist: true, then until user re-pin", async () => {
+    const out = await runEnvironment(makeModel(P1), makeAgent({ smartModels: SMART_MODELS_2 }), true)
+    expect(out).toContain("persist: true")
+    expect(out).toContain("current turn only")
+    expect(out).toContain("until the user re-pins")
+    // RC4 root cause: the v1 "temporarily" wording was ambiguous about what
+    // "temporarily" meant; it must not come back.
+    expect(out).not.toContain("temporarily use a more capable model")
+  })
+
   test("running on p2 model: SMART_MODELS lists only p2/smart", async () => {
     const out = await runEnvironment(makeModel(P2), makeAgent({ smartModels: SMART_MODELS_2 }), true)
     expect(out).toContain("SMART_MODELS: p2/smart")

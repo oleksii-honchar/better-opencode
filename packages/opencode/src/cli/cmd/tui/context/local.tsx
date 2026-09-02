@@ -134,6 +134,18 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         pending: false,
       }
 
+      const route = useRoute()
+
+      // D2 "user wins": an explicit user model selection clears any durable
+      // switch_model override on the current session.
+      function clearSessionModelOverride() {
+        const routeData = route.data
+        if (routeData.type !== "session") return
+        void sdk.client.session
+          .update({ sessionID: routeData.sessionID, modelOverride: null })
+          .catch(() => {})
+      }
+
       function save() {
         if (!modelStore.ready) {
           state.pending = true
@@ -252,6 +264,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           const a = agent.current()
           if (!a) return
           setModelStore("model", a.name, { ...val })
+          clearSessionModelOverride()
         },
         cycleFavorite(direction: 1 | -1) {
           const favorites = modelStore.favorite.filter((item) => isModelValid(item))
@@ -287,6 +300,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             uniq.map((x) => ({ providerID: x.providerID, modelID: x.modelID })),
           )
           save()
+          clearSessionModelOverride()
         },
         set(model: { providerID: string; modelID: string }, options?: { recent?: boolean }) {
           batch(() => {
@@ -301,6 +315,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             const a = agent.current()
             if (!a) return
             setModelStore("model", a.name, model)
+            clearSessionModelOverride()
             if (options?.recent) {
               const uniq = uniqueBy([model, ...modelStore.recent], (x) => `${x.providerID}/${x.modelID}`)
               if (uniq.length > 10) uniq.pop()

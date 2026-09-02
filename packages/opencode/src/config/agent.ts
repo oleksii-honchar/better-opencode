@@ -63,6 +63,16 @@ const AgentSchema = Schema.StructWithRest(
     }),
     maxSteps: Schema.optional(PositiveInt).annotate({ description: "@deprecated Use 'steps' field instead." }),
     permission: Schema.optional(ConfigPermission.Info),
+    startupContract: Schema.optional(
+      Schema.Struct({
+        scaffold: Schema.optional(Schema.Boolean).annotate({
+          description:
+            "When true, the agent must scaffold its session (folder + session.md + history record) before answering.",
+        }),
+      }),
+    ).annotate({
+      description: "Startup contract the agent must satisfy before its first reply (e.g. session scaffold).",
+    }),
   }),
   [Schema.Record(Schema.String, Schema.Any)],
 )
@@ -86,6 +96,7 @@ const KNOWN_KEYS = new Set([
   "options",
   "modelPreset",
   "permission",
+  "startupContract",
   "disable",
   "tools",
 ])

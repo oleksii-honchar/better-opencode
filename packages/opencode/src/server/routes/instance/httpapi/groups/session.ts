@@ -51,6 +51,8 @@ export const UpdatePayload = Schema.Struct({
       archived: Schema.optional(Session.ArchivedTimestamp),
     }),
   ),
+  // D2 "user wins": pass `null` to clear the durable switch_model override
+  modelOverride: Schema.optional(Schema.Null),
 })
 export const ForkPayload = Schema.Struct(Struct.omit(Session.ForkInput.fields, ["sessionID"]))
 export const InitPayload = Schema.Struct({

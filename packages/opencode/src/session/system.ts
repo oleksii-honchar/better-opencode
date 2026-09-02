@@ -84,7 +84,7 @@ export const layer = Layer.effect(
         if (smartModels.length > 0 && (modelSwitchEnabled ?? true)) {
           env.push(
             `SMART_MODELS: ${smartModels.map((m) => `${m.providerID}/${m.modelID}`).join(", ")}`,
-            "For especially complex tasks — intricate architecture decisions, difficult debugging, or critical implementation choices — you may call the switch_model tool to temporarily use a more capable model. For routine work, keep using your current model.",
+            "For especially complex tasks — intricate architecture decisions, difficult debugging, or critical implementation choices — you may call the switch_model tool to use a more capable model. The switch applies to the current turn only unless you pass persist: true to switch_model, and a persisted switch stays until the user re-pins a model in the UI. For routine work, keep using your current model.",
           )
         }
         return env

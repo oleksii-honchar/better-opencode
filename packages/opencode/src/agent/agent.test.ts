@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { Agent } from "@/agent/agent"
+import { ConfigAgent } from "@/config/agent"
 import { Auth } from "@/auth"
 import { Config } from "@/config/config"
 import { ConsoleState } from "@/config/console-state"
@@ -229,24 +230,10 @@ describe("unstuck index — doom_loop type exports", () => {
 // smartModels — per-agent provider-scoped smart models for in-flight switching
 // ---------------------------------------------------------------------------
 
-function createMockConfigWithSmartModels(): Config.Interface {
+function createMockConfigWithAgents(agents: Record<string, unknown>): Config.Interface {
   const mockInfo: Config.Info = {
     permission: {},
-    agent: {
-      smartAgent: {
-        name: "smartAgent",
-        mode: "subagent",
-        smartModels: ["p1/smart", "p2/smart"],
-        options: {},
-        permission: {},
-      },
-      noSmartAgent: {
-        name: "noSmartAgent",
-        mode: "subagent",
-        options: {},
-        permission: {},
-      },
-    },
+    agent: agents,
   } as Config.Info
   return {
     get: Effect.fn("MockConfigSmart.get")(function* () {
@@ -271,7 +258,24 @@ function createMockConfigWithSmartModels(): Config.Interface {
 }
 
 const smartModelMockLayers = Layer.mergeAll(
-  Layer.succeed(Config.Service, createMockConfigWithSmartModels()),
+  Layer.succeed(
+    Config.Service,
+    createMockConfigWithAgents({
+      smartAgent: {
+        name: "smartAgent",
+        mode: "subagent",
+        smartModels: ["p1/smart", "p2/smart"],
+        options: {},
+        permission: {},
+      },
+      noSmartAgent: {
+        name: "noSmartAgent",
+        mode: "subagent",
+        options: {},
+        permission: {},
+      },
+    }),
+  ),
   Layer.succeed(Auth.Service, createMockAuth()),
   Layer.succeed(Plugin.Service, createMockPlugin()),
   Layer.succeed(Skill.Service, createMockSkill()),
@@ -297,5 +301,56 @@ describe("Agent — smartModels parsing", () => {
     )
 
     expect(agent.smartModels).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// startupContract — per-agent scaffold startup contract
+// ---------------------------------------------------------------------------
+
+describe("Agent — startupContract parsing", () => {
+  test("agent config with startupContract: { scaffold: true } surfaces on Agent.Info", async () => {
+    const cfgLayers = Layer.mergeAll(
+      Layer.succeed(
+        Config.Service,
+        createMockConfigWithAgents({
+          scaffoldAgent: {
+            name: "scaffoldAgent",
+            mode: "subagent",
+            startupContract: { scaffold: true },
+            options: {},
+            permission: {},
+          },
+        }),
+      ),
+      Layer.succeed(Auth.Service, createMockAuth()),
+      Layer.succeed(Plugin.Service, createMockPlugin()),
+      Layer.succeed(Skill.Service, createMockSkill()),
+      Layer.succeed(Provider.Service, createMockProvider()),
+      Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags()),
+    )
+    const agent = await Effect.runPromise(
+      Effect.provide(Agent.use.get("scaffoldAgent"), Layer.provide(Agent.layer, cfgLayers)),
+    )
+    expect(agent.startupContract).toEqual({ scaffold: true })
+  })
+
+  test("absent startupContract parses as undefined (existing agents unaffected)", async () => {
+    const agent = await Effect.runPromise(
+      Effect.provide(Agent.use.get("noSmartAgent"), Layer.provide(Agent.layer, smartModelMockLayers)),
+    )
+    expect(agent.startupContract).toBeUndefined()
+  })
+
+  test("startupContract is a known key — not promoted into options", () => {
+    const parsed = Schema.decodeSync(ConfigAgent.Info)({
+      name: "knownKeysAgent",
+      mode: "subagent",
+      startupContract: { scaffold: true },
+      options: {},
+      permission: {},
+    })
+    expect(parsed.startupContract).toEqual({ scaffold: true })
+    expect(parsed.options?.startupContract).toBeUndefined()
   })
 })

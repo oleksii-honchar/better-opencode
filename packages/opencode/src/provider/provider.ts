@@ -28,7 +28,7 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { wrapWithLoopDetection, mergeConfig, CrossStreamDoomLoopManagerImpl, computeUnstuckFingerprint } from "../plugin/unstuck"
+import { wrapWithLoopDetection, resolveAgentUnstuckConfig, CrossStreamDoomLoopManagerImpl, computeUnstuckFingerprint } from "../plugin/unstuck"
 
 const log = Log.create({ service: "provider" })
 
@@ -1016,7 +1016,7 @@ export interface Interface {
   readonly list: () => Effect.Effect<Record<ProviderID, Info>>
   readonly getProvider: (providerID: ProviderID) => Effect.Effect<Info>
   readonly getModel: (providerID: ProviderID, modelID: ModelID) => Effect.Effect<Model, ModelNotFoundError>
-  readonly getLanguage: (model: Model) => Effect.Effect<LanguageModelV3, ModelNotFoundError>
+  readonly getLanguage: (model: Model, unstuckOverride?: unknown) => Effect.Effect<LanguageModelV3, ModelNotFoundError>
   readonly closest: (
     providerID: ProviderID,
     query: string[],
@@ -1716,11 +1716,14 @@ export const layer = Layer.effect(
       return info
     })
 
-    const getLanguage = Effect.fn("Provider.getLanguage")(function* (model: Model) {
+    const getLanguage = Effect.fn("Provider.getLanguage")(function* (model: Model, unstuckOverride?: unknown) {
       const s = yield* InstanceState.get(state)
       const envs = yield* env.all()
       const cfg = yield* config.get()
-      const unstuckConfig = mergeConfig(cfg.unstuck ?? {})
+      // Task 8b: merge the serving agent's unstuck block (agent.options.unstuck, raw JSON
+      // promoted from agent frontmatter) over the global config — agent-level precedence,
+      // invalid shapes ignored (resolveAgentUnstuckConfig validates defensively).
+      const unstuckConfig = resolveAgentUnstuckConfig(cfg.unstuck, unstuckOverride)
       const unstuckHash = computeUnstuckFingerprint(unstuckConfig)
       const key = `${model.providerID}/${model.id}?unstuck=${unstuckHash}`
       if (s.models.has(key)) return s.models.get(key)!

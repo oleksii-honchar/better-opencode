@@ -15,12 +15,16 @@ type Message = {
   [key: string]: unknown
 }
 
-function defaultNudgeMessage(info: LoopDetectedInfo): string {
+function defaultNudgeMessage(info: LoopDetectedInfo): string | undefined {
   if (info.type === "sentence_loop") {
     return `You are repeating the sentence "${info.sentence}" — this is a loop. Continue from your current task state instead of re-planning from scratch.`
   }
   if (info.type === "self_diagnosis_loop") {
     return "You've acknowledged being stuck. Break out of this pattern and take a fundamentally different approach."
+  }
+  if (info.type === "fabricated_compliance") {
+    const claimInfo = info.claim ? ` ("${info.claim}")` : ""
+    return `You claimed ${info.claim ?? "completion"}${claimInfo} without calling tools; execute or state the blocker.`
   }
   if (info.type === "pattern_loop") {
     return "You are oscillating between two states — this is a pattern loop. Break out and take a fundamentally different approach."
@@ -29,8 +33,13 @@ function defaultNudgeMessage(info: LoopDetectedInfo): string {
     const toolInfo = info.toolName ? ` '${info.toolName}'` : ""
     return `You keep calling the same tool${toolInfo} with the identical input repeatedly — this is a doom loop. Stop and change your approach: fix the input or try a different tool.`
   }
-  return "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction."
+  // step_loop and other types have no detection-specific phrasing — fall through to
+  // the configured nudgeMessage (or the generic default below at the call site).
+  return undefined
 }
+
+const GENERIC_NUDGE =
+  "You appear to be stuck in a loop — repeating the same thinking or tool calls. Break out of the pattern and take a different direction."
 
 function mapStreamChunk(chunk: LanguageModelV3StreamPart, toolNameMap: Map<string, string>): StreamChunk | undefined {
   // Map the AI SDK LanguageModelV3StreamPart to our StreamChunk type
@@ -387,7 +396,10 @@ export function wrapWithLoopDetection(
             log.debug("applying nudge", { nudgeCount, maxNudges: config.maxNudges })
 
             // Inject nudge user message
-            const nudgeMessage = config.nudgeMessage ?? defaultNudgeMessage(error.info)
+            // Explicit custom nudgeMessage wins (existing contract); then per-detection-type
+            // phrasing; then the generic loop nudge. defaultConfig.nudgeMessage is undefined,
+            // so agents that don't set a custom message get the type-specific text.
+            const nudgeMessage = config.nudgeMessage ?? defaultNudgeMessage(error.info) ?? GENERIC_NUDGE
             const originalPrompt = currentArgs.prompt as Message[]
             const nudgedMessages: Message[] = [
               ...originalPrompt,

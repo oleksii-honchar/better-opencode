@@ -170,6 +170,8 @@ function createMockSessionService(): import("@/session/session").Interface {
     setArchived: () => Effect.void,
     setPermission: () => Effect.void,
     setModel: () => Effect.void,
+    setModelOverride: () => Effect.void,
+    clearModelOverride: () => Effect.void,
     setRevert: () => Effect.void,
     clearRevert: () => Effect.void,
     setSummary: () => Effect.void,

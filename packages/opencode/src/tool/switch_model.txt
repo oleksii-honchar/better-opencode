@@ -9,3 +9,5 @@ When to use:
 - Creative writing or brainstorming
 
 The available smart models depend on your current provider and configuration.
+
+persist: model stays for the rest of the session until the user re-pins; default false = remainder of this turn only

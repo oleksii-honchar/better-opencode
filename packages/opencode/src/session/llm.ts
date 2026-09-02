@@ -222,7 +222,7 @@ const live: Layer.Layer<
 
       const [language, cfg, item, info] = yield* Effect.all(
         [
-          provider.getLanguage(input.model),
+          provider.getLanguage(input.model, (input.agent.options as Record<string, unknown> | undefined)?.unstuck),
           config.get(),
           provider.getProvider(input.model.providerID),
           auth.get(input.model.providerID),

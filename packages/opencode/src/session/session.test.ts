@@ -193,3 +193,111 @@ describe("Session — setModel", () => {
     expect(model.providerID).toBe(providerID)
   })
 })
+
+
+describe("Session — setModelOverride / clearModelOverride", () => {
+  test("setModelOverride writes the durable override via SyncEvent Updated", async () => {
+    const calls: SyncRunCall[] = []
+    const sessionID = "ses_test_set_override" as SessionID
+    const providerID = ProviderID.make("p1")
+    const modelID = ModelID.make("smart")
+
+    const mockLayers = Layer.mergeAll(
+      Layer.succeed(BackgroundJob.Service, createMockBackgroundJob()),
+      Layer.succeed(Bus.Service, createMockBus()),
+      Layer.succeed(Storage.Service, createMockStorage()),
+      Layer.succeed(SyncEvent.Service, createMockSyncEvent(calls)),
+      Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags()),
+    )
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const session = yield* Session.Service
+          yield* session.setModelOverride(sessionID, { providerID, modelID })
+        }),
+        Layer.provide(Session.layer, mockLayers),
+      ),
+    )
+
+    expect(calls.length).toBe(1)
+    const call = calls[0]
+    expect(call.def).toBe(Event.Updated)
+    expect(call.data.sessionID).toBe(sessionID)
+    expect(call.data.info.modelOverride).toEqual({ providerID, modelID })
+  })
+
+  test("clearModelOverride sets modelOverride to null (field cleared, not undefined)", async () => {
+    const calls: SyncRunCall[] = []
+    const sessionID = "ses_test_clear_override" as SessionID
+
+    const mockLayers = Layer.mergeAll(
+      Layer.succeed(BackgroundJob.Service, createMockBackgroundJob()),
+      Layer.succeed(Bus.Service, createMockBus()),
+      Layer.succeed(Storage.Service, createMockStorage()),
+      Layer.succeed(SyncEvent.Service, createMockSyncEvent(calls)),
+      Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags()),
+    )
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const session = yield* Session.Service
+          yield* session.clearModelOverride(sessionID)
+        }),
+        Layer.provide(Session.layer, mockLayers),
+      ),
+    )
+
+    expect(calls.length).toBe(1)
+    const call = calls[0]
+    expect(call.def).toBe(Event.Updated)
+    expect(call.data.sessionID).toBe(sessionID)
+    // The projector contract: null clears a field, undefined is rejected
+    expect(call.data.info.modelOverride).toBe(null)
+  })
+
+  test("user re-pin flow: user model selection + clearModelOverride leaves model set and override null (D2 user wins)", async () => {
+    const calls: SyncRunCall[] = []
+    const sessionID = "ses_test_user_repin" as SessionID
+    const overrideModel = { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") }
+    const userPinned = { providerID: ProviderID.make("p1"), modelID: ModelID.make("user-pick") }
+
+    const mockLayers = Layer.mergeAll(
+      Layer.succeed(BackgroundJob.Service, createMockBackgroundJob()),
+      Layer.succeed(Bus.Service, createMockBus()),
+      Layer.succeed(Storage.Service, createMockStorage()),
+      Layer.succeed(SyncEvent.Service, createMockSyncEvent(calls)),
+      Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags()),
+    )
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const session = yield* Session.Service
+          // Agent-side persisted switch (switch_model persist:true)
+          yield* session.setModelOverride(sessionID, overrideModel)
+          // User explicitly re-pins a model in the UI
+          yield* session.setModel(sessionID, userPinned)
+          // ...which clears the durable override (user wins)
+          yield* session.clearModelOverride(sessionID)
+        }),
+        Layer.provide(Session.layer, mockLayers),
+      ),
+    )
+
+    // Three Updated events: override set → user model set → override cleared
+    expect(calls.length).toBe(3)
+    const [overrideSet, modelSet, overrideCleared] = calls
+    expect(overrideSet.def).toBe(Event.Updated)
+    expect(overrideSet.data.info.modelOverride).toEqual(overrideModel)
+
+    expect(modelSet.def).toBe(Event.Updated)
+    // The user's model is the resolved session model
+    expect(modelSet.data.info.model).toEqual({ id: userPinned.modelID, providerID: userPinned.providerID })
+
+    expect(overrideCleared.def).toBe(Event.Updated)
+    // ...and the durable override is cleared, not stale
+    expect(overrideCleared.data.info.modelOverride).toBe(null)
+  })
+})
