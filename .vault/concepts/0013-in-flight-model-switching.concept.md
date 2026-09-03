@@ -5,7 +5,7 @@ title: "In-flight Model Switching"
 summary: "Agent-driven model switching mid-turn via a `switch_model` tool that rides the runLoop's per-iteration model re-resolution."
 status: active
 createdAt: "2026-09-01T15:48:45Z"
-updatedAt: "2026-09-01T15:48:45Z"
+updatedAt: "2026-09-03T06:40:00Z"
 tags: [model-resolution, tool, runloop, agent]
 see_also:
   - "concepts/0007-model-resolution-order.concept.md"
@@ -40,7 +40,10 @@ model for the remainder of the task. Implemented in better-opencode as a `switch
    durable default via `currentModel()` (prompt.ts:~750-766).
 3. `ModelSwitched` is published (existing event).
 4. **Provider-scoped candidates** (ADR-0101): `smartModels.filter(m => m.providerID === lastUser.model.providerID)`.
-5. **Gated** by `dynamicModelSwitch.enabled ?? true` (ADR-0102, root config, default-on).
+5. **Switch-back escape hatch** (2026-09-03): the session's *original* model (`ORIGINAL_MODEL:`
+   in the environment) is a valid target even when not in `smartModels`; the tool records it on the
+   first escalation and a persisted switch-back clears any prior override.
+6. **Gated** by `dynamicModelSwitch.enabled ?? true` (ADR-0102, root config, default-on).
 
 ### Granularity caveat
 

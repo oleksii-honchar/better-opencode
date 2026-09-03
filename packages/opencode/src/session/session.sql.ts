@@ -51,6 +51,10 @@ export const SessionTable = sqliteTable(
       providerID: string
       modelID: string
     }>(),
+    model_original: text({ mode: "json" }).$type<{
+      providerID: string
+      modelID: string
+    }>(),
     workspace_folders: text({ mode: "json" }).$type<string[]>(),
     ...Timestamps,
     time_compacting: integer(),

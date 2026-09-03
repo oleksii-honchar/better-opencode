@@ -52,6 +52,7 @@ export const SwitchModelTool = Tool.define(
       }
 
       const currentProvider = lastUser.model.providerID
+      const currentModelID = lastUser.model.modelID
 
       // Get the agent's smart models
       const agent = yield* agents.get(ctx.agent)
@@ -67,20 +68,45 @@ export const SwitchModelTool = Tool.define(
         )
       }
 
-      // Validate the target is in the provider-scoped candidate set
+      // The original model this session started on (captured on first switch).
+      // Switching back to it is always allowed — it is not a smart-model candidate
+      // by design (users must not be forced to list their weak model as a smart one).
+      const session = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
+      const originalModel =
+        session.modelOriginal ??
+        (lastUser.model.providerID === currentProvider &&
+        lastUser.model.modelID === currentModelID
+          ? { providerID: ProviderID.make(currentProvider), modelID: ModelID.make(currentModelID) }
+          : undefined)
+
+      const isSwitchBack =
+        originalModel !== undefined &&
+        originalModel.providerID === providerID &&
+        originalModel.modelID === modelID
+
+      // Validate the target is either the original model (switch-back) or in the
+      // provider-scoped candidate set
       const isCandidate = candidates.some(
         (c) => c.providerID === providerID && c.modelID === modelID
       )
 
-      if (!isCandidate) {
-        const allowedList = candidates
-          .map((c) => `${c.providerID}/${c.modelID}`)
-          .join(", ")
+      if (!isSwitchBack && !isCandidate) {
+        const allowedList = [...candidates.map((c) => `${c.providerID}/${c.modelID}`),
+          ...(originalModel ? [`${originalModel.providerID}/${originalModel.modelID}`] : [])].join(", ")
         return yield* Effect.fail(
           new Error(
-            `Not an available smart model for provider ${providerID}. Allowed: ${allowedList}`
+            `Not an available model for provider ${providerID}. Allowed: ${allowedList}`
           )
         )
+      }
+
+      // Record the original model on first escalation (before we mutate lastUser).
+      // Only set it if this is not already a switch-back and no original is stored yet.
+      if (!isSwitchBack && !session.modelOriginal && sessions.setModelOriginal) {
+        yield* sessions.setModelOriginal(ctx.sessionID, {
+          providerID: ProviderID.make(lastUser.model.providerID),
+          modelID: ModelID.make(lastUser.model.modelID),
+        })
       }
 
       // Validate the model exists in the catalog. On ModelNotFoundError the
@@ -111,9 +137,15 @@ export const SwitchModelTool = Tool.define(
       // Set the session default model
       yield* sessions.setModel(ctx.sessionID, { providerID, modelID })
 
-      // Durable override when persisting (survives turns until user re-pin)
+      // Durable override when persisting (survives turns until user re-pin).
+      // Switch-back restores the session default: clear any previous override
+      // rather than writing a new one.
       if (params.persist) {
-        yield* sessions.setModelOverride(ctx.sessionID, { providerID, modelID })
+        if (isSwitchBack) {
+          yield* sessions.clearModelOverride(ctx.sessionID)
+        } else {
+          yield* sessions.setModelOverride(ctx.sessionID, { providerID, modelID })
+        }
       }
 
       // Publish the ModelSwitched event
