@@ -10,4 +10,6 @@ When to use:
 
 The available smart models depend on your current provider and configuration.
 
-persist: model stays for the rest of the session until the user re-pins; default false = remainder of this turn only
+`persist:` model stays for the rest of the session until the user re-pins; default false = remainder of this turn only
+
+After the smart model has handled the complex round, switch back to this session's original model (the ORIGINAL_MODEL shown in the environment) to resume routine work — even if it is not listed in SMART_MODELS. Use `persist: false` for a short escalation (the next user turn already reverts); use `persist: true` only when the rest of the session genuinely needs the stronger model, and remember to switch back explicitly afterwards when you do.

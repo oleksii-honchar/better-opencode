@@ -21,9 +21,12 @@ import { SwitchModelTool } from "./switch_model"
 let updateMessageCalls: any[] = []
 let setModelCalls: { sessionID: SessionID; model: { providerID: ProviderID; modelID: ModelID } }[] = []
 let setModelOverrideCalls: { sessionID: SessionID; model: { providerID: ProviderID; modelID: ModelID } }[] = []
+let clearModelOverrideCalls: SessionID[] = []
+let setModelOriginalCalls: { sessionID: SessionID; model: { providerID: ProviderID; modelID: ModelID } }[] = []
 let publishedEvents: { event: any; data: any }[] = []
 let getModelCalls: { providerID: ProviderID; modelID: ModelID }[] = []
 let getModelShouldFail: { suggestions?: string[] } | null = null
+let sessionModelOriginal: { providerID: ProviderID; modelID: ModelID } | null = null
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -85,6 +88,18 @@ function createMockSessionService() {
       setModelOverrideCalls.push({ sessionID, model })
       return Effect.void
     },
+    clearModelOverride: (sessionID: SessionID) => {
+      clearModelOverrideCalls.push(sessionID)
+      return Effect.void
+    },
+    setModelOriginal: (sessionID: SessionID, model: { providerID: ProviderID; modelID: ModelID }) => {
+      setModelOriginalCalls.push({ sessionID, model })
+      return Effect.void
+    },
+    get: (_id: SessionID) => Effect.succeed({
+      id: _id,
+      modelOriginal: sessionModelOriginal,
+    } as any),
   } as unknown as Session.Interface
 }
 
@@ -186,9 +201,12 @@ describe("SwitchModelTool", () => {
     updateMessageCalls = []
     setModelCalls = []
     setModelOverrideCalls = []
+    clearModelOverrideCalls = []
+    setModelOriginalCalls = []
     publishedEvents = []
     getModelCalls = []
     getModelShouldFail = null
+    sessionModelOriginal = null
   })
 
   test("successful switch: updates message, sets session model, publishes event, returns confirmation", async () => {
@@ -420,9 +438,97 @@ describe("SwitchModelTool", () => {
     })
     expect(errorStr).toContain("no smart model configured for provider p1")
 
-    // No side effects
+// No side effects (original test block — keep the pre-existing paren balance)
     expect(updateMessageCalls).toHaveLength(0)
     expect(setModelCalls).toHaveLength(0)
     expect(publishedEvents).toHaveLength(0)
+  })
+
+  test("switch-back to original model succeeds even though not in smartModels", async () => {
+    // Session already has an original model recorded (p1/fast — the same as the current user message model).
+    sessionModelOriginal = { providerID: ProviderID.make("p1"), modelID: ModelID.make("fast") }
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const effect = executeTool(
+      { model: "p1/fast" },
+      makeContext(),
+      agentInfo
+    )
+
+    const result = await Effect.runPromise(effect)
+    expect(result.output).toContain("p1/fast")
+
+    // Last user message updated to the original model
+    expect(updateMessageCalls).toHaveLength(1)
+    expect(updateMessageCalls[0].model.modelID).toBe(ModelID.make("fast"))
+
+    // Session default set
+    expect(setModelCalls).toHaveLength(1)
+    expect(setModelCalls[0].model.modelID).toBe(ModelID.make("fast"))
+
+    // No new override written (it is the default, not an override)
+    expect(setModelOverrideCalls).toHaveLength(0)
+
+    // getModel still called for catalog validation
+    expect(getModelCalls).toHaveLength(1)
+  })
+
+  test("persisted switch-back clears any prior modelOverride", async () => {
+    sessionModelOriginal = { providerID: ProviderID.make("p1"), modelID: ModelID.make("fast") }
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const effect = executeTool(
+      { model: "p1/fast", persist: true },
+      makeContext(),
+      agentInfo
+    )
+
+    await Effect.runPromise(effect)
+
+    expect(clearModelOverrideCalls).toHaveLength(1)
+    expect(clearModelOverrideCalls[0]).toBe(testSessionID)
+
+    // The session default model was still set (and no new override)
+    expect(setModelCalls).toHaveLength(1)
+    expect(setModelOverrideCalls).toHaveLength(0)
+  })
+
+  test("non-original non-smart target still rejected with allowed list including original", async () => {
+    sessionModelOriginal = { providerID: ProviderID.make("p1"), modelID: ModelID.make("fast") }
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const effect = executeTool(
+      { model: "p1/nonexistent" },
+      makeContext(),
+      agentInfo
+    )
+
+    const exit = await Effect.runPromiseExit(effect)
+    expect(exit._tag).toBe("Failure")
+    const failure = exit as any
+    const errorStr = JSON.stringify(failure.cause, (_key: string, val: any) => {
+      if (val instanceof Error) return val.message
+      return val
+    })
+    // Allowed list includes both the smart model and the original
+    expect(errorStr).toContain("p1/smart")
+    expect(errorStr).toContain("p1/fast")
+
+// No side effects
+    expect(updateMessageCalls).toHaveLength(0)
+    expect(setModelCalls).toHaveLength(0)
+    expect(setModelOverrideCalls).toHaveLength(0)
   })
 })

@@ -4,7 +4,7 @@ id: SPEC-0020
 title: "In-flight Model Switching via a `switch_model` Tool"
 status: approved
 createdAt: "2026-09-01T15:48:45Z"
-updatedAt: "2026-09-01T21:16:00Z"
+updatedAt: "2026-09-03T06:40:00Z"
 tags: [model-resolution, tool, runloop, agent, v1, v2]
 adr_refs:
   - ADR-0100
@@ -108,3 +108,52 @@ Compliance", decision D2.5). Four changes to the v1 record above:
 
 See also the v2 note in [[adrs/0100-in-flight-model-switch-tool.adr.md]] and the amended
 `SMART_MODELS:` guidance text in `session/system.ts`.
+
+## Amendment v3 (2026-09-03) — switch-back to the original model
+
+Implemented on the current session (Simple-Session "verify smart model switch-back"). The design
+goal: after switching to a smart model, the agent must be able to switch **back** to whatever model
+it was on — without being forced to list its weak/default model in `smartModels`.
+
+### Behavior
+
+- **Session original model:** a new nullable session column `model_original`
+  (`Session.Info.modelOriginal`), written by the `switch_model` tool on the **first escalation**
+  (the then-current model, i.e. what the session was running on before the first switch). Additive
+  migration `20260903120000_add_session_model_original`, zero backfill.
+- **Context injection:** `SystemPrompt.environment()` emits `ORIGINAL_MODEL: <provider>/<model>`
+  plus guidance whenever the session has a recorded original model. It is independent of the
+  smartModels block — it appears even when the current provider has zero smart candidates (the
+  exact failure mode that motivated this change).
+- **Candidate rule change:** the switch target may be **either** the session's original model
+  (switch-back — always allowed, still validated against the provider catalog) **or** a
+  provider-scoped `smartModels` candidate. Anything else is rejected with an allowed list that now
+  also includes the original model.
+- **Durable override semantics:** a persisted (`persist: true`) switch **to a smart model** writes
+  `modelOverride` as before; a persisted **switch-back to the original** clears the
+  `modelOverride` (the original model is the session default, not an override).
+- **No-op guard:** when a session has no recorded original and no smart models for the current
+  provider, the tool still fails with `no smart model configured for provider <p>` (unchanged).
+
+### Files
+
+- `packages/opencode/src/tool/switch_model.ts` — candidate rule + `model_original` write + override
+  clear on switch-back.
+- `packages/opencode/src/tool/switch_model.txt` — tool description now **explicitly instructs the
+  agent to switch back to the original model after a smart round** (and when to prefer
+  `persist: false` vs a `persist: true` that must be followed by an explicit switch-back).
+- `packages/opencode/src/session/session.ts`, `session.sql.ts` — `modelOriginal` mapping + column.
+- `packages/opencode/src/session/system.ts`, `prompt.ts` — `ORIGINAL_MODEL:` injection + wiring
+  (guidance tells the agent to prefer escalation only for the complex round and switch back after).
+- `packages/opencode/migration/20260903120000_add_session_model_original/` — additive migration.
+- Tests: `switch_model.test.ts` (switch-back success, persist-clears-override, non-original
+  rejected with allowed list incl. original), `system.test.ts` (ORIGINAL_MODEL with/without
+  SMART_MODELS), all green; `tsc --noEmit` clean.
+
+### Validation
+
+- `switch_model` "p1/fast" succeeds when `model_original = p1/fast` even though `fast ∉ smartModels`.
+- `persist: true` switch-back calls `clearModelOverride` (no new override written).
+- Non-original / non-smart target still rejected; allowed list includes the original.
+- ORIGINAL_MODEL line appears even with no provider-scoped smartModels (proves the user's original
+  failure scenario is fixed).

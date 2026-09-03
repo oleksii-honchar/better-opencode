@@ -1666,7 +1666,7 @@ export const layer = Layer.effect(
             const modelSwitchEnabled = (yield* config.get()).dynamicModelSwitch?.enabled ?? true
             const [skills, env, instructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
-              sys.environment(model, sessionID, session.parentID, session.workspaceFolders, agent, modelSwitchEnabled),
+              sys.environment(model, sessionID, session.parentID, session.workspaceFolders, agent, modelSwitchEnabled, session.modelOriginal),
               instruction.system().pipe(Effect.orDie),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])

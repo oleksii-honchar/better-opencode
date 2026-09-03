@@ -4,7 +4,7 @@ id: ADR-0100
 title: "In-flight Agent-Driven Model Switching via a `switch_model` Tool"
 status: accepted
 createdAt: "2026-09-01T15:48:45Z"
-updatedAt: "2026-09-01T21:16:00Z"
+updatedAt: "2026-09-03T06:40:00Z"
 tags: [model-resolution, tool, runloop, agent, architecture]
 supersedes: []
 superseded_by: []
@@ -82,3 +82,8 @@ Supporting design decisions (folded here):
   keeps the v1 per-turn behavior. The v1 "explicit per-prompt model always wins" precedence
   (Decision item 4 / Consequences above) is amended to **"explicit user re-pin wins"** — full
   record in [[specifications/0020-in-flight-model-switching.spec.md]] (Amendment v2).
+- **v3 note (2026-09-03):** the tool now supports **switch-back to the session's original model**
+  (recorded in `SessionTable.model_original`; see [[adrs/0101-provider-scoped-smart-models.adr.md]]
+  Amendment). The original model is carved out of the smart-only candidate rule, exposed to the
+  agent as `ORIGINAL_MODEL:` in the environment, and a persisted switch-back clears any prior
+  override. ADR-0101 and SPEC-0020 (Amendment v3) carry the full record.

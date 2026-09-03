@@ -41,6 +41,7 @@ export interface Interface {
     workspaceFolders?: string[],
     agent?: Agent.Info,
     modelSwitchEnabled?: boolean,
+    originalModel?: { providerID: string; modelID: string },
   ) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
 }
@@ -61,6 +62,7 @@ export const layer = Layer.effect(
         workspaceFolders?: string[],
         agent?: Agent.Info,
         modelSwitchEnabled?: boolean,
+        originalModel?: { providerID: string; modelID: string },
       ) {
         log.info(`workspaceFolders=${JSON.stringify(workspaceFolders)}`, { sessionID })
         const ctx = yield* InstanceState.context
@@ -80,11 +82,19 @@ export const layer = Layer.effect(
             `</env>`,
           ].join("\n"),
         ]
-        const smartModels = agent?.smartModels?.filter((m) => m.providerID === model.providerID) ?? []
+const smartModels = agent?.smartModels?.filter((m) => m.providerID === model.providerID) ?? []
         if (smartModels.length > 0 && (modelSwitchEnabled ?? true)) {
           env.push(
             `SMART_MODELS: ${smartModels.map((m) => `${m.providerID}/${m.modelID}`).join(", ")}`,
-            "For especially complex tasks — intricate architecture decisions, difficult debugging, or critical implementation choices — you may call the switch_model tool to use a more capable model. The switch applies to the current turn only unless you pass persist: true to switch_model, and a persisted switch stays until the user re-pins a model in the UI. For routine work, keep using your current model.",
+            "For especially complex tasks — intricate architecture decisions, difficult debugging, or critical implementation choices — you may call the switch_model tool to use a more capable model. The switch applies to the current turn only unless you pass persist: true to switch_model,and a persisted switch stays until the user re-pins a model in the UI. For routine work, keep using your current model.",
+          )
+        }
+        // The original model is exposed regardless of whether the current provider
+        // has smart models — switch-back is independent of the smart candidate set.
+        if (originalModel && (modelSwitchEnabled ?? true)) {
+          env.push(
+            `ORIGINAL_MODEL: ${originalModel.providerID}/${originalModel.modelID}`,
+            "This is the model this session was running on before any switch_model call. Prefer escalating to a smart model only for the complex round; after it completes, switch back to this original model for routine work. You may switch back to it at any time (even if it is not in SMART_MODELS) by calling switch_model with that model ID.",
           )
         }
         return env

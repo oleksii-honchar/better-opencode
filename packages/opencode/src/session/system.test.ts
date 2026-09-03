@@ -93,10 +93,10 @@ const mockInstanceContext: InstanceContext = {
   workspaceFolders: ["/test-dir"],
 }
 
-async function runEnvironment(model: Provider.Model, agent: Agent.Info, modelSwitchEnabled: boolean): Promise<string> {
+async function runEnvironment(model: Provider.Model, agent: Agent.Info, modelSwitchEnabled: boolean, originalModel?: { providerID: string; modelID: string }): Promise<string> {
   const program = Effect.gen(function* () {
     const sys = yield* SystemPrompt.Service
-    const env = yield* sys.environment(model, undefined, undefined, undefined, agent, modelSwitchEnabled)
+    const env = yield* sys.environment(model, undefined, undefined, undefined, agent, modelSwitchEnabled, originalModel)
     return env.join("\n")
   })
 
@@ -168,8 +168,38 @@ describe("SystemPrompt.environment — smart-model list + switching guidance", (
     expect(out).not.toContain("switch_model")
   })
 
-  test("existing environment content unchanged (header still present)", async () => {
+test("existing environment content unchanged (header still present)", async () => {
     const out = await runEnvironment(makeModel(P1), makeAgent({ smartModels: SMART_MODELS_2 }), true)
     expect(out).toContain("Here is some useful information about the environment you are running in:")
+  })
+
+  test("originalModel present: ORIGINAL_MODEL line lists it and guidance allows switch-back", async () => {
+    const out = await runEnvironment(
+      makeModel(P2),
+      makeAgent({}),
+      true,
+      { providerID: P1, modelID: ModelID.make("fast") },
+    )
+    expect(out).toContain("ORIGINAL_MODEL: p1/fast")
+    expect(out).toContain("switch back")
+  })
+
+  test("originalModel present even with no smartModels for current provider (switch-back independent)", async () => {
+    const out = await runEnvironment(
+      makeModel(P1),
+      makeAgent({ smartModels: [{ providerID: P2, modelID: ModelID.make("smart") }] }),
+      true,
+      { providerID: P1, modelID: ModelID.make("fast") },
+    )
+    // SMART_MODELS list absent (no p1 candidates) — but ORIGINAL_MODEL still shown
+    expect(out).not.toContain("SMART_MODELS: ")
+    expect(out).toContain("ORIGINAL_MODEL: p1/fast")
+    // And the switch_model guidance still present for the original-model escape hatch
+    expect(out).toContain("switch_model")
+  })
+
+  test("no originalModel: maybe certainly no ORIGINAL_MODEL line", async () => {
+    const out = await runEnvironment(makeModel(P1), makeAgent({ smartModels: SMART_MODELS_2 }), true)
+    expect(out).not.toContain("ORIGINAL_MODEL")
   })
 })

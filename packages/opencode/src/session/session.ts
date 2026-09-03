@@ -93,6 +93,12 @@ export function fromRow(row: SessionRow): Info {
           modelID: ModelID.make(row.model_override.modelID),
         }
       : undefined,
+    modelOriginal: row.model_original
+      ? {
+          providerID: ProviderID.make(row.model_original.providerID),
+          modelID: ModelID.make(row.model_original.modelID),
+        }
+      : undefined,
     version: row.version,
     summary,
     cost: row.cost,
@@ -133,6 +139,7 @@ export function toRow(info: Info) {
     agent: info.agent,
     model: info.model,
     model_override: info.modelOverride,
+    model_original: info.modelOriginal,
     version: info.version,
     share_url: info.share?.url,
     summary_additions: info.summary?.additions,
@@ -234,6 +241,12 @@ export const Info = Schema.Struct({
   agent: optionalOmitUndefined(Schema.String),
   model: optionalOmitUndefined(Model),
   modelOverride: optionalOmitUndefined(
+    Schema.Struct({
+      providerID: ProviderID,
+      modelID: ModelID,
+    }),
+  ),
+  modelOriginal: optionalOmitUndefined(
     Schema.Struct({
       providerID: ProviderID,
       modelID: ModelID,
@@ -341,6 +354,14 @@ const UpdatedInfo = Schema.Struct({
   agent: Schema.optional(Schema.NullOr(Schema.String)),
   model: Schema.optional(Schema.NullOr(Model)),
   modelOverride: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        providerID: ProviderID,
+        modelID: ModelID,
+      }),
+    ),
+  ),
+  modelOriginal: Schema.optional(
     Schema.NullOr(
       Schema.Struct({
         providerID: ProviderID,
@@ -500,6 +521,10 @@ export interface Interface {
     model: { providerID: ProviderID; modelID: ModelID },
   ) => Effect.Effect<void>
   readonly clearModelOverride: (sessionID: SessionID) => Effect.Effect<void>
+  readonly setModelOriginal?: (
+    sessionID: SessionID,
+    model: { providerID: ProviderID; modelID: ModelID },
+  ) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
     revert: Info["revert"]
@@ -800,6 +825,13 @@ export const layer: Layer.Layer<
       yield* patch(sessionID, { time: { updated: Date.now() }, modelOverride: null })
     })
 
+    const setModelOriginal = Effect.fn("Session.setModelOriginal")(function* (
+      sessionID: SessionID,
+      model: { providerID: ProviderID; modelID: ModelID },
+    ) {
+      yield* patch(sessionID, { modelOriginal: { providerID: model.providerID, modelID: model.modelID } })
+    })
+
     const setRevert = Effect.fn("Session.setRevert")(function* (input: {
       sessionID: SessionID
       revert: Info["revert"]
@@ -909,6 +941,7 @@ export const layer: Layer.Layer<
       setModel,
       setModelOverride,
       clearModelOverride,
+      setModelOriginal,
       setRevert,
       clearRevert,
       setSummary,
