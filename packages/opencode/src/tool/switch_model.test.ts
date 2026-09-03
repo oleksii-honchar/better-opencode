@@ -27,6 +27,7 @@ let publishedEvents: { event: any; data: any }[] = []
 let getModelCalls: { providerID: ProviderID; modelID: ModelID }[] = []
 let getModelShouldFail: { suggestions?: string[] } | null = null
 let sessionModelOriginal: { providerID: ProviderID; modelID: ModelID } | null = null
+let sessionModel: { providerID: ProviderID; modelID: ModelID } | null = null
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -99,6 +100,7 @@ function createMockSessionService() {
     get: (_id: SessionID) => Effect.succeed({
       id: _id,
       modelOriginal: sessionModelOriginal,
+      model: sessionModel,
     } as any),
   } as unknown as Session.Interface
 }
@@ -207,6 +209,7 @@ describe("SwitchModelTool", () => {
     getModelCalls = []
     getModelShouldFail = null
     sessionModelOriginal = null
+    sessionModel = null
   })
 
   test("successful switch: updates message, sets session model, publishes event, returns confirmation", async () => {
@@ -530,5 +533,40 @@ describe("SwitchModelTool", () => {
     expect(updateMessageCalls).toHaveLength(0)
     expect(setModelCalls).toHaveLength(0)
     expect(setModelOverrideCalls).toHaveLength(0)
+  })
+
+  test("regression: session default model is the original when lastUser is already the smart model (no modelOriginal yet)", async () => {
+    // Reproduces ses_f99f40cf9ffepd2EL5AU0ErdJ5:
+    // session.model (durable default) = weak model p1/fast ... wait, this fixture
+    // uses session.model = fast and lastUser = smart. First switch to smart must
+    // NOT be treated as a switch-back, and must record the original.
+    // Real Session.Info.model shape uses { id, providerID, variant }
+    sessionModel = { providerID: ProviderID.make("p1"), id: "fast" } as any
+    // lastUser.model comes from makeUserMsg() which returns p1/... here we need
+    // lastUser to be the SMART model already. Override the context messages.
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    // Current messages: last user message is running the smart model already
+    // (realistic: session pinned/turned to smart, but session default is fast)
+    const context = makeContext({
+      messages: [
+        makeUserMsg(ProviderID.make("p1"), ModelID.make("smart")),
+        makeAssistantMsg(),
+      ],
+    })
+
+    // First escalation: switch to p1/smart should NOT be switch-back (session default is fast)
+    const effect = executeTool({ model: "p1/smart" }, context, agentInfo)
+    const result = await Effect.runPromise(effect)
+    expect(result.output).toContain("p1/smart")
+    // Original model must be recorded (session default fast)
+    expect(setModelOriginalCalls).toHaveLength(1)
+    expect(setModelOriginalCalls[0].model.modelID).toBe(ModelID.make("fast"))
+    // No switch-back override semantics
+    expect(clearModelOverrideCalls).toHaveLength(0)
   })
 })

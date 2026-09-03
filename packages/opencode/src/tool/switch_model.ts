@@ -71,13 +71,22 @@ export const SwitchModelTool = Tool.define(
       // The original model this session started on (captured on first switch).
       // Switching back to it is always allowed — it is not a smart-model candidate
       // by design (users must not be forced to list their weak model as a smart one).
+      // Prefer the durable session default (session.model); only fall back to
+      // lastUser.model when no session default exists.
       const session = yield* sessions.get(ctx.sessionID).pipe(Effect.orDie)
       const originalModel =
         session.modelOriginal ??
-        (lastUser.model.providerID === currentProvider &&
-        lastUser.model.modelID === currentModelID
-          ? { providerID: ProviderID.make(currentProvider), modelID: ModelID.make(currentModelID) }
-          : undefined)
+        (session.model
+          ? {
+              providerID: session.model.providerID,
+              modelID: ModelID.make(session.model.id),
+            }
+          : lastUser.model
+            ? {
+                providerID: ProviderID.make(lastUser.model.providerID),
+                modelID: ModelID.make(lastUser.model.modelID),
+              }
+            : undefined)
 
       const isSwitchBack =
         originalModel !== undefined &&
@@ -102,10 +111,12 @@ export const SwitchModelTool = Tool.define(
 
       // Record the original model on first escalation (before we mutate lastUser).
       // Only set it if this is not already a switch-back and no original is stored yet.
-      if (!isSwitchBack && !session.modelOriginal && sessions.setModelOriginal) {
+      // The original is the derived `originalModel` — NOT lastUser.model, which may
+      // already be the smart model (session pinned to smart, durable default weak).
+      if (!isSwitchBack && !session.modelOriginal && sessions.setModelOriginal && originalModel) {
         yield* sessions.setModelOriginal(ctx.sessionID, {
-          providerID: ProviderID.make(lastUser.model.providerID),
-          modelID: ModelID.make(lastUser.model.modelID),
+          providerID: ProviderID.make(originalModel.providerID),
+          modelID: ModelID.make(originalModel.modelID),
         })
       }
 
