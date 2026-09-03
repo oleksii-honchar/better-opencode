@@ -111,7 +111,10 @@ function createMockBus(): Bus.Interface & { published: Array<{ name: string; dat
     subscribeAll: Effect.fn("MockBus.subscribeAll")(function* () {
       return Stream.empty
     }),
-    subscribeCallback: Effect.fn("MockBus.subscribeCallback")(function* <D extends BusEvent.Definition>(_def: D, _cb: unknown) {
+    subscribeCallback: Effect.fn("MockBus.subscribeCallback")(function* <D extends BusEvent.Definition>(
+      _def: D,
+      _cb: unknown,
+    ) {
       return () => {}
     }),
     subscribeAllCallback: Effect.fn("MockBus.subscribeAllCallback")(function* (_cb: unknown) {
@@ -186,10 +189,32 @@ function createMockSession(): Session.Interface {
       return part
     }),
     updatePartDelta: Effect.fn("MockSession.updatePartDelta")(function* () {}),
-    findMessage: Effect.fn("MockSession.findMessage")(function* (_sessionID: SessionID, _pred: (msg: MessageV2.WithParts) => boolean) {
+    findMessage: Effect.fn("MockSession.findMessage")(function* (
+      _sessionID: SessionID,
+      _pred: (msg: MessageV2.WithParts) => boolean,
+    ) {
       return Option.none<MessageV2.WithParts>()
     }),
   }
+}
+
+// ---------------------------------------------------------------------------
+// Capturing Session.Service — records every part written via updatePart so the
+// overflow replay path (media file parts → `[Attached mime: name]` text parts)
+// can be asserted behaviorally.
+// ---------------------------------------------------------------------------
+
+function createCapturingMockSession(): { session: Session.Interface; capturedParts: MessageV2.Part[] } {
+  const capturedParts: MessageV2.Part[] = []
+  const base = createMockSession()
+  const session: Session.Interface = {
+    ...base,
+    updatePart: Effect.fn("MockSession.updatePart")(function* <T extends MessageV2.Part>(part: T) {
+      capturedParts.push(part)
+      return part
+    }),
+  }
+  return { session, capturedParts }
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +226,7 @@ function createMockAgent(): Agent.Interface {
     name: "compaction",
     description: "Mock agent",
     mode: "all",
-        permission: [{ permission: "all", pattern: "*", action: "allow" as const }],
+    permission: [{ permission: "all", pattern: "*", action: "allow" as const }],
     options: {},
   }
   return {
@@ -229,7 +254,11 @@ function createMockAgent(): Agent.Interface {
 
 function createMockPlugin(): Plugin.Interface {
   return {
-    trigger: Effect.fn("MockPlugin.trigger")(function* <Name, Input, Output>(_name: Name, _input: Input, output: Output) {
+    trigger: Effect.fn("MockPlugin.trigger")(function* <Name, Input, Output>(
+      _name: Name,
+      _input: Input,
+      output: Output,
+    ) {
       return output
     }),
     list: Effect.fn("MockPlugin.list")(function* () {
@@ -410,10 +439,16 @@ function createMockRuntimeFlags(): RuntimeFlags.Info {
 
 function createMockEventV2Bridge(): EventV2.Interface {
   return {
-    publish: Effect.fn("MockEventV2Bridge.publish")(function* <D extends EventV2.Definition>(_def: D, _data: unknown, _opts: unknown) {
+    publish: Effect.fn("MockEventV2Bridge.publish")(function* <D extends EventV2.Definition>(
+      _def: D,
+      _data: unknown,
+      _opts: unknown,
+    ) {
       return {} as EventV2.Payload<D>
     }),
-    publishEvent: Effect.fn("MockEventV2Bridge.publishEvent")(function* <D extends EventV2.Definition>(_event: EventV2.Payload<D>) {
+    publishEvent: Effect.fn("MockEventV2Bridge.publishEvent")(function* <D extends EventV2.Definition>(
+      _event: EventV2.Payload<D>,
+    ) {
       return _event
     }),
     subscribe: <D extends EventV2.Definition>(_def: D) => Stream.empty as Stream.Stream<EventV2.Payload<D>>,
@@ -461,6 +496,64 @@ function buildCompactionMessages(parentID: MessageID, sessionID: SessionID): Mes
 }
 
 // ---------------------------------------------------------------------------
+// Layer assembly for SessionCompaction (shared by the promotion tests and the
+// overflow-replay media tests). `sessionService` is injectable so a test can
+// capture updatePart writes (replay placeholder assertions).
+// ---------------------------------------------------------------------------
+
+function createAllLayers(
+  skillService: Skill.Interface,
+  busService: Bus.Interface,
+  sessionService: Session.Interface = createMockSession(),
+) {
+  const mockBusLayer = Layer.succeed(Bus.Service, busService)
+  const mockSessionLayer = Layer.succeed(Session.Service, sessionService)
+  const mockAgentLayer = Layer.succeed(Agent.Service, createMockAgent())
+  const mockPluginLayer = Layer.succeed(Plugin.Service, createMockPlugin())
+  const mockConfigLayer = Layer.succeed(Config.Service, createMockConfig())
+  const mockProviderLayer = Layer.succeed(Provider.Service, createMockProvider())
+  const mockProcessorLayer = Layer.succeed(SessionProcessor.Service, createMockSessionProcessor())
+  const mockFlagsLayer = Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags())
+  const mockEventsLayer = Layer.succeed(EventV2Bridge.Service, createMockEventV2Bridge())
+  const mockSkillLayer = Layer.succeed(Skill.Service, skillService)
+  const mockSessionMetadataLayer = Layer.succeed(SessionMetadataService, {
+    getMetadata: (_sessionID: string) =>
+      Effect.succeed({
+        dynamicSkillsScanned: new Set<string>(),
+        dynamicSkillsRegistered: {},
+        injectedSkills: new Set<string>(),
+      }),
+    addScannedDirectory: Effect.fn("MockSessionMetadata.addScannedDirectory")(function* () {}),
+    addRegisteredSkill: Effect.fn("MockSessionMetadata.addRegisteredSkill")(function* () {}),
+    wasDirectoryScanned: Effect.fn("MockSessionMetadata.wasDirectoryScanned")(function* () {
+      return false
+    }),
+    getRegisteredSkills: Effect.fn("MockSessionMetadata.getRegisteredSkills")(function* () {
+      return []
+    }),
+    wasSkillInjected: Effect.fn("MockSessionMetadata.wasSkillInjected")(function* () {
+      return false
+    }),
+    addInjectedSkill: Effect.fn("MockSessionMetadata.addInjectedSkill")(function* () {}),
+    clearMetadata: Effect.fn("MockSessionMetadata.clearMetadata")(function* () {}),
+  })
+
+  return Compaction.layer.pipe(
+    Layer.provide(mockBusLayer),
+    Layer.provide(mockSessionLayer),
+    Layer.provide(mockAgentLayer),
+    Layer.provide(mockPluginLayer),
+    Layer.provide(mockConfigLayer),
+    Layer.provide(mockProviderLayer),
+    Layer.provide(mockProcessorLayer),
+    Layer.provide(mockFlagsLayer),
+    Layer.provide(mockEventsLayer),
+    Layer.provide(mockSkillLayer),
+    Layer.provide(mockSessionMetadataLayer),
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -476,53 +569,6 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
     worktree: "/test-worktree",
     project: mockProject,
     workspaceFolders: ["/test-dir"],
-  }
-
-  function createAllLayers(skillService: Skill.Interface, busService: Bus.Interface) {
-    const mockBusLayer = Layer.succeed(Bus.Service, busService)
-    const mockSessionLayer = Layer.succeed(Session.Service, createMockSession())
-    const mockAgentLayer = Layer.succeed(Agent.Service, createMockAgent())
-    const mockPluginLayer = Layer.succeed(Plugin.Service, createMockPlugin())
-    const mockConfigLayer = Layer.succeed(Config.Service, createMockConfig())
-    const mockProviderLayer = Layer.succeed(Provider.Service, createMockProvider())
-    const mockProcessorLayer = Layer.succeed(SessionProcessor.Service, createMockSessionProcessor())
-    const mockFlagsLayer = Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags())
-    const mockEventsLayer = Layer.succeed(EventV2Bridge.Service, createMockEventV2Bridge())
-    const mockSkillLayer = Layer.succeed(Skill.Service, skillService)
-    const mockSessionMetadataLayer = Layer.succeed(
-      SessionMetadataService,
-      {
-        getMetadata: (_sessionID: string) =>
-          Effect.succeed({ dynamicSkillsScanned: new Set<string>(), dynamicSkillsRegistered: {}, injectedSkills: new Set<string>() }),
-        addScannedDirectory: Effect.fn("MockSessionMetadata.addScannedDirectory")(function* () {}),
-        addRegisteredSkill: Effect.fn("MockSessionMetadata.addRegisteredSkill")(function* () {}),
-        wasDirectoryScanned: Effect.fn("MockSessionMetadata.wasDirectoryScanned")(function* () {
-          return false
-        }),
-        getRegisteredSkills: Effect.fn("MockSessionMetadata.getRegisteredSkills")(function* () {
-          return []
-        }),
-        wasSkillInjected: Effect.fn("MockSessionMetadata.wasSkillInjected")(function* () {
-          return false
-        }),
-        addInjectedSkill: Effect.fn("MockSessionMetadata.addInjectedSkill")(function* () {}),
-        clearMetadata: Effect.fn("MockSessionMetadata.clearMetadata")(function* () {}),
-      },
-    )
-
-    return Compaction.layer.pipe(
-      Layer.provide(mockBusLayer),
-      Layer.provide(mockSessionLayer),
-      Layer.provide(mockAgentLayer),
-      Layer.provide(mockPluginLayer),
-      Layer.provide(mockConfigLayer),
-      Layer.provide(mockProviderLayer),
-      Layer.provide(mockProcessorLayer),
-      Layer.provide(mockFlagsLayer),
-      Layer.provide(mockEventsLayer),
-      Layer.provide(mockSkillLayer),
-      Layer.provide(mockSessionMetadataLayer),
-    )
   }
 
   test("promoteDynamicToStartup is called after Event.Compacted is published", async () => {
@@ -570,10 +616,7 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
 
     const allLayers = createAllLayers(skillService, mockBus)
     const result = await Effect.runPromise(
-      Effect.provide(
-        Effect.provideService(program, InstanceRef, mockInstanceContext),
-        allLayers,
-      ),
+      Effect.provide(Effect.provideService(program, InstanceRef, mockInstanceContext), allLayers),
     )
 
     // Compaction should complete successfully
@@ -635,10 +678,7 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
 
     const allLayers = createAllLayers(skillService, mockBus)
     const result = await Effect.runPromise(
-      Effect.provide(
-        Effect.provideService(program, InstanceRef, mockInstanceContext),
-        allLayers,
-      ),
+      Effect.provide(Effect.provideService(program, InstanceRef, mockInstanceContext), allLayers),
     )
 
     // Compaction should still complete despite promotion failure
@@ -701,15 +741,132 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
     const allLayers = createAllLayers(skillService, mockBus)
     const startTime = Date.now()
     const result = await Effect.runPromise(
-      Effect.provide(
-        Effect.provideService(program, InstanceRef, mockInstanceContext),
-        allLayers,
-      ),
+      Effect.provide(Effect.provideService(program, InstanceRef, mockInstanceContext), allLayers),
     )
     const elapsed = Date.now() - startTime
 
     // Compaction should complete quickly (< 500ms), promotion is forked
     expect(result.result).toBe("continue")
     expect(elapsed).toBeLessThan(500)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Overflow replay — media file parts are replayed as generic placeholders
+// ---------------------------------------------------------------------------
+
+describe("SessionCompaction — overflow replay media placeholder", () => {
+  const mockProject: Project.Info = {
+    id: ProjectID.make("proj-test"),
+    worktree: "/test-worktree",
+    time: { created: Date.now(), updated: Date.now() },
+    sandboxes: [],
+  }
+  const mockInstanceContext: InstanceContext = {
+    directory: "/test-dir",
+    worktree: "/test-worktree",
+    project: mockProject,
+    workspaceFolders: ["/test-dir"],
+  }
+
+  function makeUserInfo(id: MessageID, sessionID: SessionID): MessageV2.User {
+    return {
+      id,
+      role: "user",
+      sessionID,
+      agent: "test",
+      model: { providerID: ProviderID.make("mock-provider"), modelID: ModelID.make("mock-model") },
+      time: { created: Date.now() },
+    }
+  }
+
+  test("replays media file parts as generic [Attached mime: name] text parts", async () => {
+    const mockBus = createMockBus()
+    const skillService = createMockSkillService()
+    const { session, capturedParts } = createCapturingMockSession()
+
+    const sessionID = SessionID.descending()
+    const parentID = MessageID.ascending()
+    const earlierID = MessageID.ascending()
+    const replayID = MessageID.ascending()
+
+    // Earlier user message — keeps the overflow path's "has content" check true.
+    const earlier: MessageV2.WithParts = {
+      info: makeUserInfo(earlierID, sessionID),
+      parts: [
+        {
+          id: PartID.ascending(),
+          messageID: earlierID,
+          sessionID,
+          type: "text",
+          text: "Keep this message before the replay target",
+          time: { start: Date.now(), end: Date.now() },
+        },
+      ],
+    }
+
+    // Replay target: user message with media file parts (the compaction parent
+    // sits after it; overflow replays these parts into the follow-up turn).
+    const mediaFile = (suffix: string, mime: string, filename: string, url: string): MessageV2.FilePart => ({
+      id: PartID.make(`prt-replay-${suffix}`),
+      messageID: replayID,
+      sessionID,
+      type: "file",
+      mime,
+      filename,
+      url,
+    })
+
+    const replayMsg: MessageV2.WithParts = {
+      info: makeUserInfo(replayID, sessionID),
+      parts: [
+        mediaFile("video", "video/mp4", "movie.mp4", "file:///tmp/movie.mp4"),
+        mediaFile("audio", "audio/mpeg", "clip.mp3", "file:///tmp/clip.mp3"),
+        mediaFile("image", "image/png", "shot.png", "file:///tmp/shot.png"),
+        {
+          id: PartID.ascending(),
+          messageID: replayID,
+          sessionID,
+          type: "text",
+          text: "user prompt text survives replay",
+          time: { start: Date.now(), end: Date.now() },
+        },
+      ],
+    }
+
+    const messages: MessageV2.WithParts[] = [earlier, replayMsg, ...buildCompactionMessages(parentID, sessionID)]
+
+    const program = Effect.gen(function* () {
+      const compaction = yield* Compaction.Service
+      const result = yield* compaction.process({
+        parentID,
+        messages,
+        sessionID,
+        auto: true,
+        overflow: true,
+      })
+      yield* Effect.sleep(50)
+      return { result }
+    })
+
+    const allLayers = createAllLayers(skillService, mockBus, session)
+    const result = await Effect.runPromise(
+      Effect.provide(Effect.provideService(program, InstanceRef, mockInstanceContext), allLayers),
+    )
+
+    expect(result.result).toBe("continue")
+
+    // Each media file part is replayed as the generic placeholder text part
+    const texts = capturedParts.flatMap((p) => (p.type === "text" && p.text.startsWith("[Attached ") ? [p.text] : []))
+    expect(texts).toContain("[Attached video/mp4: movie.mp4]")
+    expect(texts).toContain("[Attached audio/mpeg: clip.mp3]")
+    expect(texts).toContain("[Attached image/png: shot.png]")
+    expect(texts).toHaveLength(3)
+
+    // No media file part is replayed as a file part (all stripped to text)
+    expect(capturedParts.filter((p) => p.type === "file")).toHaveLength(0)
+
+    // Non-media parts replay unchanged
+    expect(capturedParts.some((p) => p.type === "text" && p.text === "user prompt text survives replay")).toBe(true)
   })
 })

@@ -1,21 +1,24 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Exit } from "effect"
 import { Image } from "@/image/image"
-import type { MessageV2 } from "@/session/message-v2"
 import {
   normalizeToolResultAttachments,
   shouldNormalizeToolAttachment,
   toolResultOmissionSuffix,
 } from "@/session/processor"
 
+type Attachment = { mime: string; url: string }
+
 // ---------------------------------------------------------------------------
 // Task 3 — Widen tool-result normalization gate for media passthrough.
 // The normalization decision must stay explicitly media-aware: images keep
-// resize, `video/*`/`audio/*` pass through un-normalized (temp files — no+// resize, no omission message), non-media passthrough unchanged, and the+// omission counter/message applies only to failed image resizes.
+// resize, `video/*`/`audio/*` pass through un-normalized (temp files — no
+// resize, no omission message), non-media passthrough unchanged, and the
+// omission counter/message applies only to failed image resizes.
 // --------------------------------------------------------------------------
 
-function filePart(mime: string, url = `opencode://attachment/${mime.replace("/", "-")}`): MessageV2.FilePart {
-  return { type: "file", mime, url }
+function filePart(mime: string, url = `opencode://attachment/${mime.replace("/", "-")}`): Attachment {
+  return { mime, url }
 }
 
 describe("shouldNormalizeToolAttachment", () => {
@@ -36,7 +39,7 @@ describe("shouldNormalizeToolAttachment", () => {
   })
 })
 
-function successValue(exit: Exit.Exit<MessageV2.FilePart, Image.Error>): MessageV2.FilePart {
+function successValue(exit: Exit.Exit<Attachment, Image.Error>): Attachment {
   if (!Exit.isSuccess(exit)) throw new Error(`expected success, got ${JSON.stringify(exit)}`)
   return exit.value
 }
@@ -46,8 +49,8 @@ describe("normalizeToolResultAttachments", () => {
     const video = filePart("video/mp4", "opencode://attachment/video.mp4")
     const audio = filePart("audio/mpeg", "opencode://attachment/audio.mp3")
     const text = filePart("text/plain", "opencode://attachment/notes.txt")
-    const calls: MessageV2.FilePart[] = []
-    const normalize = (attachment: MessageV2.FilePart) => {
+    const calls: Attachment[] = []
+    const normalize = (attachment: Attachment) => {
       calls.push(attachment)
       return Effect.succeed({ ...attachment, url: "mutated" })
     }
@@ -66,8 +69,8 @@ describe("normalizeToolResultAttachments", () => {
 
   test("image attachments still route to image normalization (resize path)", () => {
     const image = filePart("image/png", "data:image/png;base64,AAAA")
-    const calls: MessageV2.FilePart[] = []
-    const normalize = (attachment: MessageV2.FilePart) => {
+    const calls: Attachment[] = []
+    const normalize = (attachment: Attachment) => {
       calls.push(attachment)
       return Effect.succeed({ ...attachment, url: "data:image/png;base64,resized" })
     }
@@ -87,7 +90,7 @@ describe("normalizeToolResultAttachments", () => {
     const audio = filePart("audio/mpeg", "opencode://attachment/audio.mp3")
     const imageOk = filePart("image/png", "data:image/png;base64,AAAA")
     const imageFail = filePart("image/jpeg", "data:image/jpeg;base64,BBBB")
-    const normalize = (attachment: MessageV2.FilePart) =>
+    const normalize = (attachment: Attachment) =>
       attachment.mime === "image/jpeg"
         ? Effect.fail(
             new Image.SizeError({

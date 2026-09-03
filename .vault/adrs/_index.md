@@ -114,3 +114,7 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0100-in-flight-model-switch-tool.adr.md]] — In-flight Agent-Driven Model Switching via a `switch_model` Tool (ADR-0100, status: accepted)
 - [[0101-provider-scoped-smart-models.adr.md]] — Provider-Scoped `smartModels` as the In-flight Switch Candidate Set (ADR-0101, status: accepted)
 - [[0102-dynamic-model-switch-config-gate.adr.md]] — `dynamicModelSwitch` Root Config Gate — Default On (Opt-Out) (ADR-0102, status: accepted)
+
+- [[0103-media-in-chat-ismedia-extension.adr.md]] — ADR-0103 (accepted): extend isMedia/FilePart, no new part type
+- [[0104-provider-media-capability-map.adr.md]] — ADR-0104 (accepted): provider capability map for tool-result media
+- [[0105-display-first-render-pipeline.adr.md]] — ADR-0105 (accepted): display-first render pipeline

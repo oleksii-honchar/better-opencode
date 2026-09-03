@@ -32,3 +32,5 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 - [[0018-retry-truncated-provider-streams.spec.md]] — Retry Truncated Provider Streams — Fix Sub-Agent Abrupt Stop (kind: bugfix, status: accepted)
 - [[0019-mcp-oauth-auth-reliability.spec.md]] — MCP OAuth Auth Reliability (kind: bugfix, status: completed)
 - [[0020-in-flight-model-switching.spec.md]] — In-flight Model Switching via a `switch_model` Tool (kind: feature, status: approved)
+
+- [[0021-agent-media-in-chat.spec.md]] — SPEC-0021 (approved): Agent Media Posting in Chat
