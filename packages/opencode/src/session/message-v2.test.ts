@@ -1,6 +1,15 @@
 import { describe, test, expect } from "bun:test"
 import type { ModelMessage } from "ai"
-import { repairOrphanedToolResults, countAssemblyParts } from "@/session/message-v2"
+import {
+  repairOrphanedToolResults,
+  countAssemblyParts,
+  SYNTHETIC_ATTACHMENT_PROMPT,
+  toModelMessages,
+} from "@/session/message-v2"
+import { WithParts } from "@/session/message-v2"
+import { MessageID, PartID, SessionID } from "@/session/schema"
+import { ModelID, ProviderID } from "@/provider/schema"
+import type { Provider } from "@/provider/provider"
 
 // ---------------------------------------------------------------------------
 // Hand-built fixtures — minimal but realistic ModelMessage shapes derived
@@ -381,5 +390,208 @@ describe("countAssemblyParts", () => {
     const counts = countAssemblyParts(input)
     expect(input).toEqual(before)
     expect(counts).toEqual({ toolCallCount: 1, toolResultCount: 2, orphanCount: 1 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Provider capability matrix — tool-result media routing
+//
+// Drives the converter (`toModelMessages`) with representative `model.api.npm`
+// values and asserts which attachments land in tool-result content (the
+// assistant message's `tool-*` part output) vs the synthetic user message
+// (`SYNTHETIC_ATTACHMENT_PROMPT` + file parts). Behavior-level assertions
+// only — no logger calls, no internal-map assertions.
+// ---------------------------------------------------------------------------
+
+const MEDIA = {
+  image: { mime: "image/png", url: "file:///tmp/attachment.png", filename: "attachment.png" },
+  video: { mime: "video/mp4", url: "file:///tmp/attachment.mp4", filename: "attachment.mp4" },
+  audio: { mime: "audio/mpeg", url: "file:///tmp/attachment.mp3", filename: "attachment.mp3" },
+} as const
+
+function makeModel(npm: string, id = "test-model"): Provider.Model {
+  return {
+    id: ModelID.make(id),
+    providerID: ProviderID.make("test-provider"),
+    api: { id, url: "http://test", npm },
+    name: id,
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: false,
+      toolcall: false,
+      input: { text: true, audio: false, image: false, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: 128000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+    release_date: "2024-01-01",
+  }
+}
+
+function makeAssistantToolWithAttachments(attachments: Array<{ mime: string; url: string; filename?: string }>): WithParts {
+  const msgID = MessageID.make("msg-tool-result")
+  const partID = PartID.make("prt-tool-result")
+  return {
+    info: {
+      id: msgID,
+      role: "assistant",
+      sessionID: SessionID.make("ses-test"),
+      time: { created: Date.now(), completed: Date.now() },
+      modelID: ModelID.make("test-model"),
+      providerID: ProviderID.make("test-provider"),
+      mode: "default",
+      agent: "test",
+      path: { cwd: "/tmp", root: "/tmp" },
+      cost: 0,
+      tokens: {
+        input: 0,
+        output: 0,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      },
+    },
+    parts: [
+      {
+        id: partID,
+        messageID: msgID,
+        sessionID: SessionID.make("ses-test"),
+        type: "tool",
+        callID: "call_1",
+        tool: "test-tool",
+        state: {
+          status: "completed",
+          input: {},
+          output: "ok",
+          title: "test tool",
+          metadata: {},
+          time: { start: Date.now(), end: Date.now() },
+          attachments,
+        },
+      },
+    ],
+  }
+}
+
+function toolResultOutputAttachments(messages: ModelMessage[]) {
+  const assistant = messages.find((m) => m.role === "assistant")
+  if (!assistant || typeof assistant.content === "string") return []
+  const toolResult = assistant.content.find((part) => part.type === "tool-result")
+  if (!toolResult || toolResult.output.type !== "content") return []
+  return toolResult.output.value.filter((p) => p.type === "media" || p.type === "file-data")
+}
+
+function syntheticUserMessage(messages: ModelMessage[]) {
+  return messages.find(
+    (m) =>
+      m.role === "user" &&
+      Array.isArray(m.content) &&
+      m.content.some((p) => p.type === "text" && p.text === SYNTHETIC_ATTACHMENT_PROMPT),
+  )
+}
+
+describe("provider capability map — tool-result media routing", () => {
+  const allMedia = [MEDIA.image, MEDIA.video, MEDIA.audio]
+
+  test("MCP-style full-media providers keep video/audio/image in tool-result content", async () => {
+    for (const npm of ["@ai-sdk/anthropic", "@ai-sdk/openai", "@ai-sdk/google-vertex/anthropic"]) {
+      const messages = await toModelMessages([makeAssistantToolWithAttachments(allMedia)], makeModel(npm))
+      const kept = toolResultOutputAttachments(messages)
+      expect(kept.map((p) => ("mediaType" in p ? p.mediaType : p.mediaType))).toEqual([
+        "image/png",
+        "video/mp4",
+        "audio/mpeg",
+      ])
+      expect(syntheticUserMessage(messages)).toBeUndefined()
+    }
+  })
+
+  test("bedrock keeps only image attachments in tool-result content; video/audio extracted", async () => {
+    const npm = "@ai-sdk/amazon-bedrock"
+    const messages = await toModelMessages([makeAssistantToolWithAttachments(allMedia)], makeModel(npm))
+    const kept = toolResultOutputAttachments(messages)
+    expect(kept.map((p) => ("mediaType" in p ? p.mediaType : p.mediaType))).toEqual(["image/png"])
+    const synthetic = syntheticUserMessage(messages)
+    expect(synthetic).toBeDefined()
+    const files = synthetic!.content.filter((p) => p.type === "file")
+    expect(files.map((p) => p.mediaType)).toEqual(["video/mp4", "audio/mpeg"])
+  })
+
+  test("xai keeps only image attachments in tool-result content; video/audio extracted", async () => {
+    const npm = "@ai-sdk/xai"
+    const messages = await toModelMessages([makeAssistantToolWithAttachments(allMedia)], makeModel(npm))
+    const kept = toolResultOutputAttachments(messages)
+    expect(kept.map((p) => ("mediaType" in p ? p.mediaType : p.mediaType))).toEqual(["image/png"])
+    const synthetic = syntheticUserMessage(messages)
+    expect(synthetic).toBeDefined()
+    const files = synthetic!.content.filter((p) => p.type === "file")
+    expect(files.map((p) => p.mediaType)).toEqual(["video/mp4", "audio/mpeg"])
+  })
+
+  test("google keeps media only for gemini-3 models; non-gemini-3 models extract", async () => {
+    const gemini3 = await toModelMessages(
+      [makeAssistantToolWithAttachments(allMedia)],
+      makeModel("@ai-sdk/google", "gemini-3-pro"),
+    )
+    const keptGemini3 = toolResultOutputAttachments(gemini3)
+    expect(keptGemini3.map((p) => ("mediaType" in p ? p.mediaType : p.mediaType))).toEqual([
+      "image/png",
+      "video/mp4",
+      "audio/mpeg",
+    ])
+    expect(syntheticUserMessage(gemini3)).toBeUndefined()
+
+    const gemini25 = await toModelMessages(
+      [makeAssistantToolWithAttachments(allMedia)],
+      makeModel("@ai-sdk/google", "gemini-2.5-flash"),
+    )
+    const keptGemini25 = toolResultOutputAttachments(gemini25)
+    expect(keptGemini25).toEqual([])
+    const syntheticGemini25 = syntheticUserMessage(gemini25)
+    expect(syntheticGemini25).toBeDefined()
+    const files = syntheticGemini25!.content.filter((p) => p.type === "file")
+    expect(files.map((p) => p.mediaType)).toEqual(["image/png", "video/mp4", "audio/mpeg"])
+  })
+
+  test("moonshot (openai-compatible) keeps video+audio file parts in tool-result content", async () => {
+    const npm = "@ai-sdk/openai-compatible"
+    const messages = await toModelMessages([makeAssistantToolWithAttachments(allMedia)], makeModel(npm, "moonshot-v1"))
+    const kept = toolResultOutputAttachments(messages)
+    expect(kept.map((p) => ("mediaType" in p ? p.mediaType : p.mediaType))).toEqual([
+      "image/png",
+      "video/mp4",
+      "audio/mpeg",
+    ])
+    expect(syntheticUserMessage(messages)).toBeUndefined()
+  })
+
+  test("default/unknown provider extracts all isMedia attachments to the synthetic user message", async () => {
+    const npm = "unknown-provider"
+    const messages = await toModelMessages([makeAssistantToolWithAttachments(allMedia)], makeModel(npm))
+    const kept = toolResultOutputAttachments(messages)
+    expect(kept).toEqual([])
+    const synthetic = syntheticUserMessage(messages)
+    expect(synthetic).toBeDefined()
+    const files = synthetic!.content.filter((p) => p.type === "file")
+    expect(files.map((p) => p.mediaType)).toEqual(["image/png", "video/mp4", "audio/mpeg"])
+    const textParts = synthetic!.content.filter((p) => p.type === "text")
+    expect(textParts.map((p) => p.text)).toEqual([SYNTHETIC_ATTACHMENT_PROMPT])
+  })
+
+  test("non-media attachments stay in tool-result content regardless of provider", async () => {
+    const nonMedia = [{ mime: "text/plain", url: "file:///tmp/note.txt", filename: "note.txt" }]
+    const messages = await toModelMessages(
+      [makeAssistantToolWithAttachments([...allMedia, ...nonMedia])],
+      makeModel("unknown-provider"),
+    )
+    const synthetic = syntheticUserMessage(messages)
+    const syntheticFiles = synthetic ? synthetic.content.filter((p) => p.type === "file") : []
+    expect(syntheticFiles.map((p) => p.mediaType)).toEqual(["image/png", "video/mp4", "audio/mpeg"])
+    // text/plain is not isMedia → never extracted
+    expect(syntheticFiles.map((p) => p.mediaType)).not.toContain("text/plain")
   })
 })
