@@ -349,11 +349,7 @@ describe("countAssemblyParts", () => {
         },
       ],
     } as unknown as ModelMessage
-    const input: ModelMessage[] = [
-      makeAssistantToolCall("call_1"),
-      malformedUserAsToolResult,
-      makeToolResult("call_1"),
-    ]
+    const input: ModelMessage[] = [makeAssistantToolCall("call_1"), malformedUserAsToolResult, makeToolResult("call_1")]
     const counts = countAssemblyParts(input)
     expect(counts.toolResultCount).toBe(1)
     expect(counts.toolCallCount).toBe(1)
@@ -382,11 +378,7 @@ describe("countAssemblyParts", () => {
   })
 
   test("is pure — does not mutate input", () => {
-    const input: ModelMessage[] = [
-      makeAssistantToolCall("call_1"),
-      makeToolResult("call_1"),
-      makeToolResult("orphan"),
-    ]
+    const input: ModelMessage[] = [makeAssistantToolCall("call_1"), makeToolResult("call_1"), makeToolResult("orphan")]
     const before = input.slice()
     const counts = countAssemblyParts(input)
     expect(input).toEqual(before)
@@ -534,11 +526,7 @@ describe("provider capability map — tool-result media routing", () => {
     for (const npm of ["@ai-sdk/anthropic", "@ai-sdk/openai", "@ai-sdk/google-vertex/anthropic"]) {
       const messages = await toModelMessages([makeAssistantToolWithAttachments(allMedia)], makeModel(npm))
       const kept = toolResultOutputAttachments(messages)
-      expect(kept.map((p) => p.mediaType)).toEqual([
-        "image/png",
-        "video/mp4",
-        "audio/mpeg",
-      ])
+      expect(kept.map((p) => p.mediaType)).toEqual(["image/png", "video/mp4", "audio/mpeg"])
       expect(syntheticUserMessage(messages)).toBeUndefined()
     }
   })
@@ -571,11 +559,7 @@ describe("provider capability map — tool-result media routing", () => {
       makeModel("@ai-sdk/google", "gemini-3-pro"),
     )
     const keptGemini3 = toolResultOutputAttachments(gemini3)
-    expect(keptGemini3.map((p) => p.mediaType)).toEqual([
-      "image/png",
-      "video/mp4",
-      "audio/mpeg",
-    ])
+    expect(keptGemini3.map((p) => p.mediaType)).toEqual(["image/png", "video/mp4", "audio/mpeg"])
     expect(syntheticUserMessage(gemini3)).toBeUndefined()
 
     const gemini25 = await toModelMessages(
@@ -627,5 +611,95 @@ describe("provider capability map — tool-result media routing", () => {
     expect(syntheticFiles.map((p) => p.mediaType)).toEqual(["image/png", "video/mp4", "audio/mpeg"])
     // text/plain is not isMedia → never extracted
     expect(syntheticFiles.map((p) => p.mediaType)).not.toContain("text/plain")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// stripMedia — user file-part stripping and replay placeholder copy
+//
+// Compaction calls toModelMessagesEffect(..., { stripMedia: true }). User file
+// parts that are media (image/video/audio/pdf — the `isMedia` set, ADR-1)
+// become the generic replay placeholder `[Attached <mime>: <name>]`, and
+// tool-result attachments are cleared entirely. Behavior assertions only —
+// no logger-call assertions.
+// ---------------------------------------------------------------------------
+
+function makeUserWithFiles(text: string, files: FilePart[]): WithParts {
+  const msgID = MessageID.make("msg-user-files")
+  return {
+    info: {
+      id: msgID,
+      role: "user",
+      sessionID: SessionID.make("ses-test"),
+      time: { created: Date.now() },
+      agent: "test",
+      model: { providerID: ProviderID.make("test-provider"), modelID: ModelID.make("test-model") },
+    },
+    parts: [
+      {
+        id: PartID.make("prt-user-text"),
+        messageID: msgID,
+        sessionID: SessionID.make("ses-test"),
+        type: "text",
+        text,
+      },
+      ...files.map((file) => ({ ...file, messageID: msgID })),
+    ],
+  }
+}
+
+/** Text content of a user ModelMessage, whether content is a plain string or a part array. */
+function textContentOf(message: ModelMessage | undefined): string {
+  if (!message) return ""
+  if (typeof message.content === "string") return message.content
+  return message.content
+    .filter((p) => p.type === "text")
+    .map((p) => p.text)
+    .join("\n")
+}
+
+describe("stripMedia — user file-part stripping & replay placeholder copy", () => {
+  test("with stripMedia enabled, video/mp4 and audio/mpeg user file parts become generic placeholders", async () => {
+    const messages = await toModelMessages(
+      [makeUserWithFiles("here is the media", [MEDIA.image, MEDIA.video, MEDIA.audio])],
+      makeModel("unknown-provider"),
+      { stripMedia: true },
+    )
+    const userMsg = messages.find((m) => m.role === "user")
+    const text = textContentOf(userMsg)
+    expect(text).toContain("[Attached image/png: attachment.png]")
+    expect(text).toContain("[Attached video/mp4: attachment.mp4]")
+    expect(text).toContain("[Attached audio/mpeg: attachment.mp3]")
+    // No media file part survives the strip
+    expect(filePartsOf(userMsg)).toEqual([])
+    // The pre-existing plain text is preserved
+    expect(text).toContain("here is the media")
+  })
+
+  test("without stripMedia, video/audio user file parts remain real file parts", async () => {
+    const messages = await toModelMessages(
+      [makeUserWithFiles("here is the media", [MEDIA.video, MEDIA.audio])],
+      makeModel("unknown-provider"),
+    )
+    const userMsg = messages.find((m) => m.role === "user")
+    const files = filePartsOf(userMsg)
+    expect(files.map((p) => p.mediaType)).toEqual(["video/mp4", "audio/mpeg"])
+    const text = textContentOf(userMsg)
+    expect(text).toContain("here is the media")
+    expect(text).not.toContain("[Attached")
+  })
+
+  test("with stripMedia enabled, tool-result attachments are cleared for all media (no synthetic extraction)", async () => {
+    const messages = await toModelMessages(
+      [makeAssistantToolWithAttachments([MEDIA.image, MEDIA.video, MEDIA.audio])],
+      makeModel("unknown-provider"),
+      { stripMedia: true },
+    )
+    expect(toolResultOutputAttachments(messages)).toEqual([])
+    expect(syntheticUserMessage(messages)).toBeUndefined()
+  })
+
+  test("SYNTHETIC_ATTACHMENT_PROMPT copy is unchanged", () => {
+    expect(SYNTHETIC_ATTACHMENT_PROMPT).toBe("Attached media from tool result:")
   })
 })

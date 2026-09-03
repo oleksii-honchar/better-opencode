@@ -72,7 +72,7 @@ export interface Interface {
  * explicit so future media types cannot be silently routed into the image
  * resizer.
  */
-export const shouldNormalizeToolAttachment = (attachment: Pick<MessageV2.FilePart, "mime">): boolean => {
+export const shouldNormalizeToolAttachment = (attachment: { mime: string }): boolean => {
   if (attachment.mime.startsWith("video/") || attachment.mime.startsWith("audio/")) return false
   return attachment.mime.startsWith("image/")
 }
@@ -86,10 +86,10 @@ export const shouldNormalizeToolAttachment = (attachment: Pick<MessageV2.FilePar
  * attachment so the caller can count failures (omission message) and collect
  * successes (attachments) separately.
  */
-export const normalizeToolResultAttachments = (
-  attachments: MessageV2.FilePart[],
-  normalizeImage: (attachment: MessageV2.FilePart) => Effect.Effect<MessageV2.FilePart, Image.Error>,
-): Effect.Effect<Exit.Exit<MessageV2.FilePart, Image.Error>[]> =>
+export const normalizeToolResultAttachments = <T extends { mime: string }>(
+  attachments: T[],
+  normalizeImage: (attachment: T) => Effect.Effect<T, Image.Error>,
+): Effect.Effect<Exit.Exit<T, Image.Error>[]> =>
   Effect.forEach(attachments, (attachment) =>
     shouldNormalizeToolAttachment(attachment)
       ? normalizeImage(attachment).pipe(
@@ -99,7 +99,7 @@ export const normalizeToolResultAttachments = (
           ),
           Effect.exit,
         )
-      : Effect.succeed(Exit.succeed<MessageV2.FilePart>(attachment)),
+      : Effect.succeed(Exit.succeed<T>(attachment)),
   )
 
 /**
@@ -507,12 +507,10 @@ export const layer = Layer.effect(
             )
             const omitted = normalized.filter(Exit.isFailure).length
             const attachments = normalized.filter(Exit.isSuccess).map((item) => item.value)
+            const suffix = toolResultOmissionSuffix(omitted)
             const output = {
               ...rawOutput,
-              output: (() => {
-                const suffix = toolResultOmissionSuffix(omitted)
-                return suffix === undefined ? rawOutput.output : `${rawOutput.output}${suffix}`
-              })(),
+              output: suffix === undefined ? rawOutput.output : `${rawOutput.output}${suffix}`,
               attachments: attachments.length ? attachments : undefined,
             }
             // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
