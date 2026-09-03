@@ -1664,9 +1664,14 @@ export const layer = Layer.effect(
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
             const modelSwitchEnabled = (yield* config.get()).dynamicModelSwitch?.enabled ?? true
+            const originalModel =
+              session.modelOriginal ??
+              (session.model
+                ? { providerID: session.model.providerID, modelID: session.model.id }
+                : undefined)
             const [skills, env, instructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
-              sys.environment(model, sessionID, session.parentID, session.workspaceFolders, agent, modelSwitchEnabled, session.modelOriginal),
+              sys.environment(model, sessionID, session.parentID, session.workspaceFolders, agent, modelSwitchEnabled, originalModel),
               instruction.system().pipe(Effect.orDie),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
