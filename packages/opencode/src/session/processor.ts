@@ -62,6 +62,56 @@ export interface Interface {
   readonly create: (input: Input) => Effect.Effect<Handle>
 }
 
+/**
+ * Decide whether a tool-result attachment goes through image normalization.
+ *
+ * Media-aware gate: only `image/*` attachments are candidates for resize.
+ * `video/*` and `audio/*` arrive as already-materialized temp-file URLs and
+ * must pass through un-normalized (no resize attempt, no omission message);
+ * non-media attachments pass through unchanged as well. The decision is kept
+ * explicit so future media types cannot be silently routed into the image
+ * resizer.
+ */
+export const shouldNormalizeToolAttachment = (attachment: Pick<MessageV2.FilePart, "mime">): boolean => {
+  if (attachment.mime.startsWith("video/") || attachment.mime.startsWith("audio/")) return false
+  return attachment.mime.startsWith("image/")
+}
+
+/**
+ * Normalize each attachment per {@link shouldNormalizeToolAttachment}.
+ *
+ * Images run through `normalizeImage` (resize); a `ResizerUnavailableError`
+ * falls back to the original attachment (existing behavior). Every non-image
+ * attachment passes through untouched as a success Exit. Returns the Exit per
+ * attachment so the caller can count failures (omission message) and collect
+ * successes (attachments) separately.
+ */
+export const normalizeToolResultAttachments = (
+  attachments: MessageV2.FilePart[],
+  normalizeImage: (attachment: MessageV2.FilePart) => Effect.Effect<MessageV2.FilePart, Image.Error>,
+): Effect.Effect<Exit.Exit<MessageV2.FilePart, Image.Error>[]> =>
+  Effect.forEach(attachments, (attachment) =>
+    shouldNormalizeToolAttachment(attachment)
+      ? normalizeImage(attachment).pipe(
+          Effect.catchIf(
+            (error) => error instanceof Image.ResizerUnavailableError,
+            () => Effect.succeed(attachment),
+          ),
+          Effect.exit,
+        )
+      : Effect.succeed(Exit.succeed<MessageV2.FilePart>(attachment)),
+  )
+
+/**
+ * Omission-message suffix appended to tool output when image resizes fail.
+ * Images only — video/audio never count toward the omission counter (they are
+ * never normalized, so they can never fail to normalize).
+ */
+export const toolResultOmissionSuffix = (omitted: number): string | undefined =>
+  omitted === 0
+    ? undefined
+    : `\n\n[${omitted} image${omitted === 1 ? "" : "s"} omitted: could not be resized below the image size limit.]`
+
 type ToolCall = {
   partID: MessageV2.ToolPart["id"]
   messageID: MessageV2.ToolPart["messageID"]
@@ -452,25 +502,17 @@ export const layer = Layer.effect(
           case "tool-result": {
             const toolCall = yield* readToolCall(value.id)
             const rawOutput = toolResultOutput(value)
-            const normalized = yield* Effect.forEach(rawOutput.attachments ?? [], (attachment) =>
-              attachment.mime.startsWith("image/")
-                ? image.normalize(attachment).pipe(
-                    Effect.catchIf(
-                      (error) => error instanceof Image.ResizerUnavailableError,
-                      () => Effect.succeed(attachment),
-                    ),
-                    Effect.exit,
-                  )
-                : Effect.succeed(Exit.succeed<MessageV2.FilePart>(attachment)),
+            const normalized = yield* normalizeToolResultAttachments(rawOutput.attachments ?? [], (attachment) =>
+              image.normalize(attachment),
             )
             const omitted = normalized.filter(Exit.isFailure).length
             const attachments = normalized.filter(Exit.isSuccess).map((item) => item.value)
             const output = {
               ...rawOutput,
-              output:
-                omitted === 0
-                  ? rawOutput.output
-                  : `${rawOutput.output}\n\n[${omitted} image${omitted === 1 ? "" : "s"} omitted: could not be resized below the image size limit.]`,
+              output: (() => {
+                const suffix = toolResultOmissionSuffix(omitted)
+                return suffix === undefined ? rawOutput.output : `${rawOutput.output}${suffix}`
+              })(),
               attachments: attachments.length ? attachments : undefined,
             }
             // TODO(v2): Temporary dual-write while migrating session messages to v2 events.

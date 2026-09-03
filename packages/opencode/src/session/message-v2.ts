@@ -759,24 +759,37 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
   // Track media from tool results that need to be injected as user messages
   // for providers that don't support that media type in tool results.
   //
-  // OpenAI-compatible APIs only support string content in tool results, so we need
-  // to extract media and inject as user messages. Some SDKs only support a subset
-  // of media in tool results; e.g. Bedrock supports images but not PDFs there.
+  // Per-provider capability map for media in tool-result content, keyed by
+  // `model.api.npm` (the AI SDK provider package). Each entry answers "does
+  // this provider accept this attachment's media type inside tool-result
+  // content?" Media the provider does not accept is extracted to a synthetic
+  // user message below (ADR-2) — never injected into tool-result content.
+  //
+  // OpenAI-compatible APIs historically only support string content in tool
+  // results, so media was extracted to user messages. Moonshot (Kimi) and
+  // other openai-compatible providers now accept native file parts
+  // (video/audio) in tool results; only those flow through for
+  // `@ai-sdk/openai-compatible`. Some SDKs only support a subset of media in
+  // tool results; e.g. Bedrock/xAI support images but not video/audio there.
   //
   // Only apply this workaround if the model actually supports that media input -
   // otherwise unsupportedParts() will turn it into a user-visible error.
-  const supportsMediaInToolResult = (attachment: { mime: string }) => {
-    if (model.api.npm === "@ai-sdk/anthropic") return true
-    if (model.api.npm === "@ai-sdk/openai") return true
-    if (model.api.npm === "@ai-sdk/amazon-bedrock") return attachment.mime.startsWith("image/")
-    if (model.api.npm === "@ai-sdk/xai") return attachment.mime.startsWith("image/")
-    if (model.api.npm === "@ai-sdk/google-vertex/anthropic") return true
-    if (model.api.npm === "@ai-sdk/google") {
+  const mediaInToolResultCapability: Record<string, (attachment: { mime: string }) => boolean> = {
+    "@ai-sdk/anthropic": () => true,
+    "@ai-sdk/openai": () => true,
+    "@ai-sdk/google-vertex/anthropic": () => true,
+    "@ai-sdk/amazon-bedrock": (attachment) => attachment.mime.startsWith("image/"),
+    "@ai-sdk/xai": (attachment) => attachment.mime.startsWith("image/"),
+    "@ai-sdk/google": (attachment) => {
       const id = model.api.id.toLowerCase()
       return id.includes("gemini-3") && !id.includes("gemini-2")
-    }
-    return false
+    },
+    "@ai-sdk/openai-compatible": (attachment) =>
+      attachment.mime.startsWith("video/") || attachment.mime.startsWith("audio/"),
   }
+
+  const supportsMediaInToolResult = (attachment: { mime: string }) =>
+    mediaInToolResultCapability[model.api.npm]?.(attachment) ?? false
 
   const toModelOutput = (options: { toolCallId: string; input: unknown; output: unknown }) => {
     const output = options.output
