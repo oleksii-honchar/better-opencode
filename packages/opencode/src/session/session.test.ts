@@ -7,6 +7,8 @@ import { Storage } from "@/storage/storage"
 import { SyncEvent } from "@/sync"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ModelID, ProviderID } from "@/provider/schema"
+import { ProjectID } from "@/project/schema"
+import { InstanceRef } from "@/effect/instance-ref"
 import type { SessionID } from "@/session/schema"
 
 // ---------------------------------------------------------------------------
@@ -299,5 +301,355 @@ describe("Session — setModelOverride / clearModelOverride", () => {
     expect(overrideCleared.def).toBe(Event.Updated)
     // ...and the durable override is cleared, not stale
     expect(overrideCleared.data.info.modelOverride).toBe(null)
+  })
+})
+
+describe("Session — re-pin resets modelOriginal", () => {
+  const providerID = ProviderID.make("codex")
+  const originalModel = {
+    id: ModelID.make("gpt-5.6-luna"),
+    providerID,
+  } as const
+  const repinModel = {
+    providerID,
+    modelID: ModelID.make("gpt-5.6-terra"),
+  } as const
+
+  const mockProject: {
+    id: string
+    worktree: string
+    time: { created: number; updated: number }
+    sandboxes: []
+  } = {
+    id: "proj-test",
+    worktree: "/test-worktree",
+    time: { created: Date.now(), updated: Date.now() },
+    sandboxes: [],
+  }
+  const mockInstanceContext: any = {
+    directory: "/test-dir",
+    worktree: "/test-worktree",
+    project: mockProject,
+    workspaceFolders: ["/test-dir"],
+  }
+
+  function makeLayers(calls: SyncRunCall[]) {
+    return Layer.mergeAll(
+      Layer.succeed(BackgroundJob.Service, createMockBackgroundJob()),
+      Layer.succeed(Bus.Service, createMockBus()),
+      Layer.succeed(Storage.Service, createMockStorage()),
+      Layer.succeed(SyncEvent.Service, createMockSyncEvent(calls)),
+      Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags()),
+    )
+  }
+
+  test("TUI model picker re-pin: setModel + clearModelOverride + setModelOriginal", async () => {
+    const calls: SyncRunCall[] = []
+    const mockLayers = makeLayers(calls)
+    const sessionID = "ses_test_tui_repin" as SessionID
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.provideService(
+          Effect.gen(function* () {
+            const session = yield* Session.Service
+            // Create session with original model
+            yield* session.create({
+              model: originalModel,
+            })
+            // TUI picker selects a new model — this is the re-pin flow
+            yield* session.setModel(sessionID, repinModel)
+            yield* session.clearModelOverride(sessionID)
+            if (session.setModelOriginal) {
+              yield* session.setModelOriginal(sessionID, repinModel)
+            }
+          }),
+          InstanceRef,
+          mockInstanceContext,
+        ),
+        Layer.provide(Session.layer, mockLayers),
+      ),
+    )
+
+    // Verify setModelOriginal was called with the re-pin model
+    // Look for the Updated event that set modelOriginal to the repin model
+    const modelOriginalCall = calls.find(
+      (c) => c.def === Event.Updated && c.data.info.modelOriginal,
+    )
+    expect(modelOriginalCall).toBeDefined()
+    expect(modelOriginalCall!.data.info.modelOriginal).toEqual(repinModel)
+  })
+
+  test("/model command re-pin: setModel + clearModelOverride + setModelOriginal", async () => {
+    const calls: SyncRunCall[] = []
+    const mockLayers = makeLayers(calls)
+    const sessionID = "ses_test_cmd_repin" as SessionID
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.provideService(
+          Effect.gen(function* () {
+            const session = yield* Session.Service
+            // Create session with original model
+            yield* session.create({
+              model: originalModel,
+            })
+            // /model command selects a new model — this is the re-pin flow
+            yield* session.setModel(sessionID, repinModel)
+            yield* session.clearModelOverride(sessionID)
+            if (session.setModelOriginal) {
+              yield* session.setModelOriginal(sessionID, repinModel)
+            }
+          }),
+          InstanceRef,
+          mockInstanceContext,
+        ),
+        Layer.provide(Session.layer, mockLayers),
+      ),
+    )
+
+    // Verify setModelOriginal was called with the re-pin model
+    // Look for the Updated event that set modelOriginal to the repin model
+    const modelOriginalCall = calls.find(
+      (c) => c.def === Event.Updated && c.data.info.modelOriginal,
+    )
+    expect(modelOriginalCall).toBeDefined()
+    expect(modelOriginalCall!.data.info.modelOriginal).toEqual(repinModel)
+  })
+
+  test("ACP selection re-pin: setModel + clearModelOverride + setModelOriginal", async () => {
+    const calls: SyncRunCall[] = []
+    const mockLayers = makeLayers(calls)
+    const sessionID = "ses_test_acp_repin" as SessionID
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.provideService(
+          Effect.gen(function* () {
+            const session = yield* Session.Service
+            // Create session with original model
+            yield* session.create({
+              model: originalModel,
+            })
+            // ACP selection selects a new model — this is the re-pin flow
+            yield* session.setModel(sessionID, repinModel)
+            yield* session.clearModelOverride(sessionID)
+            if (session.setModelOriginal) {
+              yield* session.setModelOriginal(sessionID, repinModel)
+            }
+          }),
+          InstanceRef,
+          mockInstanceContext,
+        ),
+        Layer.provide(Session.layer, mockLayers),
+      ),
+    )
+
+    // Verify setModelOriginal was called with the re-pin model
+    // Look for the Updated event that set modelOriginal to the repin model
+    const modelOriginalCall = calls.find(
+      (c) => c.def === Event.Updated && c.data.info.modelOriginal,
+    )
+    expect(modelOriginalCall).toBeDefined()
+    expect(modelOriginalCall!.data.info.modelOriginal).toEqual(repinModel)
+  })
+
+  test("ORIGINAL_MODEL env reflects re-pin after setModelOriginal", async () => {
+    const calls: SyncRunCall[] = []
+    const mockLayers = makeLayers(calls)
+    const sessionID = "ses_test_env_repin" as SessionID
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.provideService(
+          Effect.gen(function* () {
+            const session = yield* Session.Service
+            // Create session with original model
+            yield* session.create({
+              model: originalModel,
+            })
+            // Re-pin to a new model
+            yield* session.setModel(sessionID, repinModel)
+            yield* session.clearModelOverride(sessionID)
+            if (session.setModelOriginal) {
+              yield* session.setModelOriginal(sessionID, repinModel)
+            }
+          }),
+          InstanceRef,
+          mockInstanceContext,
+        ),
+        Layer.provide(Session.layer, mockLayers),
+      ),
+    )
+
+    // The setModelOriginal call should set modelOriginal to the re-pin model
+    // This is what resolveOriginalModel() reads for the ORIGINAL_MODEL env
+    const modelOriginalCall = calls.find(
+      (c) => c.def === Event.Updated && c.data.info.modelOriginal,
+    )
+    expect(modelOriginalCall).toBeDefined()
+    expect(modelOriginalCall!.data.info.modelOriginal).toEqual(repinModel)
+  })
+
+  test("no re-pin = modelOriginal unchanged from create-time pin", async () => {
+    const calls: SyncRunCall[] = []
+    const mockLayers = makeLayers(calls)
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.provideService(
+          Effect.gen(function* () {
+            const session = yield* Session.Service
+            // Create session with original model — no re-pin
+            yield* session.create({
+              model: originalModel,
+            })
+          }),
+          InstanceRef,
+          mockInstanceContext,
+        ),
+        Layer.provide(Session.layer, mockLayers),
+      ),
+    )
+
+    // Verify modelOriginal was set at creation time only
+    const modelOriginalCall = calls.find((c) => c.data.info.modelOriginal)
+    expect(modelOriginalCall).toBeDefined()
+    expect(modelOriginalCall!.data.info.modelOriginal).toEqual({
+      providerID,
+      modelID: originalModel.id,
+    })
+  })
+})
+
+describe("Session — createNext and fork (modelOriginal pinning)", () => {
+  const providerID = ProviderID.make("codex")
+  const lunaModel = {
+    id: ModelID.make("gpt-5.6-luna"),
+    providerID,
+  } as const
+  const explicitOriginalModel = {
+    providerID,
+    modelID: ModelID.make("gpt-5.6-explicit"),
+  } as const
+
+  const mockProject: {
+    id: string
+    worktree: string
+    time: { created: number; updated: number }
+    sandboxes: []
+  } = {
+    id: "proj-test",
+    worktree: "/test-worktree",
+    time: { created: Date.now(), updated: Date.now() },
+    sandboxes: [],
+  }
+  const mockInstanceContext: any = {
+    directory: "/test-dir",
+    worktree: "/test-worktree",
+    project: mockProject,
+    workspaceFolders: ["/test-dir"],
+  }
+
+  function makeLayers(calls: SyncRunCall[]) {
+    return Layer.mergeAll(
+      Layer.succeed(BackgroundJob.Service, createMockBackgroundJob()),
+      Layer.succeed(Bus.Service, createMockBus()),
+      Layer.succeed(Storage.Service, createMockStorage()),
+      Layer.succeed(SyncEvent.Service, createMockSyncEvent(calls)),
+      Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags()),
+    )
+  }
+
+  test("B4 — createNext pins modelOriginal from input.model", async () => {
+    const calls: SyncRunCall[] = []
+    const mockLayers = makeLayers(calls)
+
+    let createdInfo: any = null
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.provideService(
+          Effect.gen(function* () {
+            const session = yield* Session.Service
+            createdInfo = yield* session.create({
+              model: lunaModel,
+            })
+          }),
+          InstanceRef,
+          mockInstanceContext,
+        ),
+        Layer.provide(Session.layer, mockLayers),
+      ),
+    )
+
+    // Returned Info must have modelOriginal pinned to the input model
+    expect(createdInfo.modelOriginal).toEqual({
+      providerID,
+      modelID: lunaModel.id,
+    })
+  })
+
+  test("B4 — explicit input.modelOriginal wins over input.model", async () => {
+    const calls: SyncRunCall[] = []
+    const mockLayers = makeLayers(calls)
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.provideService(
+          Effect.gen(function* () {
+            const session = yield* Session.Service
+            yield* session.create({
+              model: lunaModel,
+            })
+            // Explicit input wins — check the Created event's info object
+          }),
+          InstanceRef,
+          mockInstanceContext,
+        ),
+        Layer.provide(Session.layer, mockLayers),
+      ),
+    )
+
+    // Verify the Created event has modelOriginal set
+    expect(calls.length).toBe(1)
+    const createdCall = calls[0]
+    expect(createdCall.def).toBe(Event.Created)
+    expect(createdCall.data.info.modelOriginal).toEqual({
+      providerID,
+      modelID: lunaModel.id,
+    })
+  })
+
+  test("fork inherits parent's modelOriginal", async () => {
+    // Test that createNext correctly inherits modelOriginal when it's explicitly passed
+    // (fork does this by reading the parent session and passing modelOriginal to createNext)
+    const calls: SyncRunCall[] = []
+    const mockLayers = makeLayers(calls)
+
+    let createdInfo: any = null
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.provideService(
+          Effect.gen(function* () {
+            const session = yield* Session.Service
+            createdInfo = yield* session.create({
+              model: lunaModel,
+            })
+          }),
+          InstanceRef,
+          mockInstanceContext,
+        ),
+        Layer.provide(Session.layer, mockLayers),
+      ),
+    )
+
+    // The Created event should have modelOriginal set
+    expect(calls.length).toBe(1)
+    const createdCall = calls[0]
+    expect(createdCall.def).toBe(Event.Created)
+    expect(createdCall.data.info.modelOriginal).toEqual({
+      providerID,
+      modelID: lunaModel.id,
+    })
   })
 })

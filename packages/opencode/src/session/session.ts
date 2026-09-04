@@ -586,6 +586,7 @@ export const layer: Layer.Layer<
       title?: string
       agent?: string
       model?: Schema.Schema.Type<typeof Model>
+      modelOriginal?: { providerID: ProviderID; modelID: ModelID }
       parentID?: SessionID
       workspaceID?: WorkspaceID
       directory: string
@@ -606,6 +607,7 @@ export const layer: Layer.Layer<
         title: input.title ?? createDefaultTitle(!!input.parentID),
         agent: input.agent,
         model: input.model,
+        modelOriginal: input.modelOriginal ?? (input.model ? { providerID: input.model.providerID, modelID: input.model.id } : undefined),
         permission: input.permission ? [...input.permission] : undefined,
         workspaceFolders: input.workspaceFolders,
         cost: 0,
@@ -753,6 +755,7 @@ export const layer: Layer.Layer<
         title,
         agent: original.agent,
         workspaceFolders: original.workspaceFolders,
+        modelOriginal: original.modelOriginal,
       })
       const msgs = yield* messages({ sessionID: input.sessionID })
       const idMap = new Map<string, MessageID>()

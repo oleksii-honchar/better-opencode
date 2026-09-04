@@ -4,7 +4,7 @@ id: ADR-0101
 title: "Provider-Scoped `smartModels` as the In-flight Switch Candidate Set"
 status: accepted
 createdAt: "2026-09-01T15:48:45Z"
-updatedAt: "2026-09-03T06:40:00Z"
+updatedAt: "2026-09-04T12:35:00Z"
 tags: [model-resolution, configuration, provider, agent]
 supersedes: []
 superseded_by: []
@@ -60,23 +60,32 @@ smartModels: [p1/smart]  # smart model for provider p1 → only visible while ru
 - **Trade-off:** Users must configure `smartModels` per agent for the feature to do anything; an agent with none is a no-op for switching (safe).
 - **Trade-off:** Cross-provider escalation is intentionally impossible via this tool.
 
-## Amendment 2026-09-03 — switch-back to the session's original model
+## Amendment 2026-09-04 — v4: switch-back fix (capture-before-validation, canonical-at-create, re-pin resets original, persist gating)
 
-The candidate set is **augmented** by the session's *original* model (the model the session was
-running on before the first `switch_model` call), recorded in a new session column
-`model_original` (migration `20260903120000_add_session_model_original`). The `switch_model` tool
-accepts a target equal to `model_original` even when it is not in `smartModels` — intentionally,
-because users must not be forced to list their weak/default model as a smart candidate to be able
-to return to it.
+Supersedes the 2026-09-03 Amendment.
 
-- **Context:** `SystemPrompt.environment()` emits `ORIGINAL_MODEL: <provider>/<model>` + guidance
-  whenever the session has a recorded original model — independent of whether the current provider
-  has any `smartModels`.
-- **First escalation:** on the first switch that is *not* a switch-back, the tool records the
-  then-current model as `model_original`.
-- **Persisted switch-back:** `switch_model persist: true` targeting the original model **clears**
-  any prior `modelOverride` (restoring the session default) instead of writing a new override.
-- **Guardrail retained:** switch-back is only to the session's own original model; arbitrary
-  non-smart targets remain rejected (the allowed-list error now also names the original model).
-  Cross-provider *escalation* is still impossible — switch-back to the original model is the only
-  cross-provider case, and it is legitimate (the session *was* running on that model).
+### The bug
+
+The v3 design (switch-back to original) was correct, but the **ordering** of original-capture was wrong: `switch_model` recorded `model_original` **post-validation** on first non-switch-back escalation. This meant:
+
+1. A session whose very first `switch_model` call targeted the original model (switch-back) deadlocked — validation ran before the original was recorded, so the original was never in the allowed list.
+2. A legacy session with a polluted `session.model` (prior `setModel` call had overwritten it to the smart model) could never recover the true original — the `originalModel` fallback read `session.model`, which was already the smart model.
+
+### The fix (ADR-0106 through ADR-0110)
+
+**ADR-0106 — Capture original before validation:** In `switch_model`, resolve the pre-switch original from the **first user message's model** (which truthfully carries the session's starting model) and record it via `setModelOriginal` **before** allowed-list validation. This fixes both the first-call switch-back deadlock and the polluted-`session.model` recovery.
+
+**ADR-0107 — Pin original at session creation:** `Session.createNext` now sets `modelOriginal: input.modelOriginal ?? input.model` — every session records its original at birth. The migration + P1 remain as healing/backstop for pre-change sessions.
+
+**ADR-0108 — Additive backfill migration:** New migration `2026090312xxxx_add_backfill_session_model_original` sets `model_original` from the first user message's model for all existing rows with `model_original IS NULL`. Idempotent, never touches `session.model` or `model_override`.
+
+**ADR-0109 — Re-pin resets original (human-approved):** User model-re-pin sites (TUI picker, `/model`, ACP selection) that clear `modelOverride` now also set `model_original` to the chosen model. Switch-back, env, and allowed-list all track the user's latest choice after re-pin.
+
+**ADR-0110 — Gate `setModel` on `persist` + flip default to `persist:false` (human-approved):** `switch_model` schema's `persist` field now defaults to `false`. `persist:false` (or omitted) writes only `updateMessage`; durable `session.model` is unchanged. `persist:true` writes durable `session.model` as today. `model_original` is untouched by either branch. This stops the "per-turn smart switch leaks into durable default" bug.
+
+### Consequences
+
+- The reported switch-back deadlock is fixed. First-call switch-back works. Legacy polluted sessions are healed by migration.
+- The `ORIGINAL_MODEL` env line is truthful from turn 1 (pinned at creation).
+- Agents must explicitly escalate with `persist: true` for session-wide persistence — per-turn switches no longer pollute the durable default.
+- The `smartModels` guardrail is preserved: switch-back to the session's own original is still the only non-smart allowed target.

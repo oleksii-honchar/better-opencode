@@ -1231,6 +1231,18 @@ export class Agent implements ACPAgent {
       directory: session.cwd,
       effect: Session.use.clearModelOverride(SessionID.make(session.id)),
     }).catch((error) => log.error("failed to clear model override after user selection", { error }))
+    // ADR-0109: re-pin resets modelOriginal so ORIGINAL_MODEL env reflects
+    // the user's current choice and switch-back targets the re-pinned model.
+    const setModelOriginalEffect = (Session.use as any).setModelOriginal
+    if (setModelOriginalEffect) {
+      ACPRuntime.runDirectory({
+        directory: session.cwd,
+        effect: setModelOriginalEffect(SessionID.make(session.id), {
+          providerID: selection.model.providerID,
+          modelID: selection.model.modelID,
+        }),
+      }).catch((error) => log.error("failed to set model original after user re-pin", { error }))
+    }
 
     const entries = sortProvidersByName(providers)
     const availableVariants = modelVariantsFromProviders(entries, selection.model)
@@ -1289,6 +1301,18 @@ export class Agent implements ACPAgent {
         directory: session.cwd,
         effect: Session.use.clearModelOverride(SessionID.make(session.id)),
       }).catch((error) => log.error("failed to clear model override after user selection", { error }))
+      // ADR-0109: re-pin resets modelOriginal so ORIGINAL_MODEL env reflects
+      // the user's current choice and switch-back targets the re-pinned model.
+      const setModelOriginalEffect = (Session.use as any).setModelOriginal
+      if (setModelOriginalEffect) {
+        ACPRuntime.runDirectory({
+          directory: session.cwd,
+          effect: setModelOriginalEffect(SessionID.make(session.id), {
+            providerID: selection.model.providerID,
+            modelID: selection.model.modelID,
+          }),
+        }).catch((error) => log.error("failed to set model original after user re-pin", { error }))
+      }
     } else if (params.configId === "effort") {
       if (typeof params.value !== "string") throw RequestError.invalidParams("effort value must be a string")
       const current = session.model ?? (await defaultModel(this.config, session.cwd))

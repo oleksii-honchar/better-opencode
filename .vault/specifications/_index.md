@@ -2,7 +2,7 @@
 type: index
 title: "Specifications"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-09-01T15:56:13Z"
+updatedAt: "2026-09-04T12:35:00Z"
 tags: []
 ---
 
