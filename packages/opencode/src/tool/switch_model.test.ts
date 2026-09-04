@@ -235,10 +235,8 @@ describe("SwitchModelTool", () => {
     expect(updateMessageCalls[0].model.providerID).toBe(ProviderID.make("p1"))
     expect(updateMessageCalls[0].model.modelID).toBe(ModelID.make("smart"))
 
-    // Session row model is set
-    expect(setModelCalls).toHaveLength(1)
-    expect(setModelCalls[0].model.providerID).toBe(ProviderID.make("p1"))
-    expect(setModelCalls[0].model.modelID).toBe(ModelID.make("smart"))
+    // Session row model is NOT set (persist defaults to false)
+    expect(setModelCalls).toHaveLength(0)
 
     // ModelSwitched event is published with correct payload
     expect(publishedEvents).toHaveLength(1)
@@ -380,8 +378,8 @@ describe("SwitchModelTool", () => {
     await Effect.runPromise(effect)
 
     expect(setModelOverrideCalls).toHaveLength(0)
-    // Current behavior exactly unchanged
-    expect(setModelCalls).toHaveLength(1)
+    // T7: setModel only called when persist: true; default is turn-scoped
+    expect(setModelCalls).toHaveLength(0)
     expect(updateMessageCalls).toHaveLength(1)
     expect(publishedEvents).toHaveLength(1)
   })
@@ -469,9 +467,8 @@ describe("SwitchModelTool", () => {
     expect(updateMessageCalls).toHaveLength(1)
     expect(updateMessageCalls[0].model.modelID).toBe(ModelID.make("fast"))
 
-    // Session default set
-    expect(setModelCalls).toHaveLength(1)
-    expect(setModelCalls[0].model.modelID).toBe(ModelID.make("fast"))
+    // Session default NOT set (persist defaults to false)
+    expect(setModelCalls).toHaveLength(0)
 
     // No new override written (it is the default, not an override)
     expect(setModelOverrideCalls).toHaveLength(0)
@@ -559,14 +556,168 @@ describe("SwitchModelTool", () => {
       ],
     })
 
-    // First escalation: switch to p1/smart should NOT be switch-back (session default is fast)
+    // First escalation: switch to p1/smart. With P1 capture-before-validation,
+    // the original is captured from the FIRST user message (smart), not the
+    // session default (fast). This is the correct P1 behavior.
     const effect = executeTool({ model: "p1/smart" }, context, agentInfo)
     const result = await Effect.runPromise(effect)
     expect(result.output).toContain("p1/smart")
-    // Original model must be recorded (session default fast)
+    // Original model captured from first user message (P1 behavior)
     expect(setModelOriginalCalls).toHaveLength(1)
-    expect(setModelOriginalCalls[0].model.modelID).toBe(ModelID.make("fast"))
+    expect(setModelOriginalCalls[0].model.modelID).toBe(ModelID.make("smart"))
     // No switch-back override semantics
     expect(clearModelOverrideCalls).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task 7 — P7: Gate setModel on persist + flip default to persist:false
+// (ADR-0110, turn-scoped override prevents session model pollution)
+// ---------------------------------------------------------------------------
+
+describe("SwitchModelTool — Task 7 persist gating (ADR-0110)", () => {
+  beforeEach(() => {
+    updateMessageCalls = []
+    setModelCalls = []
+    setModelOverrideCalls = []
+    clearModelOverrideCalls = []
+    setModelOriginalCalls = []
+    publishedEvents = []
+    getModelCalls = []
+    getModelShouldFail = null
+    sessionModelOriginal = null
+    sessionModel = null
+  })
+
+  test("T7-B8: default (no persist) writes only to updateMessage, not setModel", async () => {
+    sessionModel = { providerID: ProviderID.make("p1"), id: "fast" } as any
+    sessionModelOriginal = { providerID: ProviderID.make("p1"), modelID: ModelID.make("fast") }
+
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const context = makeContext({
+      messages: [
+        makeUserMsg(ProviderID.make("p1"), ModelID.make("fast")),
+        makeAssistantMsg(),
+      ],
+    })
+
+    const effect = executeTool({ model: "p1/smart" }, context, agentInfo)
+    await Effect.runPromise(effect)
+
+    expect(updateMessageCalls).toHaveLength(1)
+    expect(updateMessageCalls[0].model.modelID).toBe(ModelID.make("smart"))
+    // NEW: setModel should NOT be called when persist is false (default)
+    expect(setModelCalls).toHaveLength(0)
+    expect(setModelOverrideCalls).toHaveLength(0)
+  })
+
+  test("T7-B9: persist: true writes to both updateMessage and setModel", async () => {
+    sessionModel = { providerID: ProviderID.make("p1"), id: "fast" } as any
+    sessionModelOriginal = { providerID: ProviderID.make("p1"), modelID: ModelID.make("fast") }
+
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const context = makeContext({
+      messages: [
+        makeUserMsg(ProviderID.make("p1"), ModelID.make("fast")),
+        makeAssistantMsg(),
+      ],
+    })
+
+    const effect = executeTool({ model: "p1/smart", persist: true }, context, agentInfo)
+    await Effect.runPromise(effect)
+
+    expect(updateMessageCalls).toHaveLength(1)
+    expect(setModelCalls).toHaveLength(1)
+    expect(setModelCalls[0].model.modelID).toBe(ModelID.make("smart"))
+    expect(setModelOverrideCalls).toHaveLength(1)
+  })
+
+  test("T7: persist: false writes only to updateMessage, not setModel", async () => {
+    sessionModel = { providerID: ProviderID.make("p1"), id: "fast" } as any
+    sessionModelOriginal = { providerID: ProviderID.make("p1"), modelID: ModelID.make("fast") }
+
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const context = makeContext({
+      messages: [
+        makeUserMsg(ProviderID.make("p1"), ModelID.make("fast")),
+        makeAssistantMsg(),
+      ],
+    })
+
+    const effect = executeTool({ model: "p1/smart", persist: false }, context, agentInfo)
+    await Effect.runPromise(effect)
+
+    expect(updateMessageCalls).toHaveLength(1)
+    expect(setModelCalls).toHaveLength(0)
+    expect(setModelOverrideCalls).toHaveLength(0)
+  })
+
+  test("T7-B2: switch-back succeeds after turn-scoped switch", async () => {
+    sessionModel = { providerID: ProviderID.make("p1"), id: "fast" } as any
+    sessionModelOriginal = { providerID: ProviderID.make("p1"), modelID: ModelID.make("fast") }
+
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const context = makeContext({
+      messages: [
+        makeUserMsg(ProviderID.make("p1"), ModelID.make("fast")),
+        makeAssistantMsg(),
+      ],
+    })
+
+    // First: escalate (turn-scoped, persist: false)
+    const effect1 = executeTool({ model: "p1/smart" }, context, agentInfo)
+    await Effect.runPromise(effect1)
+    expect(setModelCalls).toHaveLength(0)  // No setModel call
+
+    // Now try to switch back — should succeed because session model is not polluted
+    const effect2 = executeTool({ model: "p1/fast" }, context, agentInfo)
+    const result2 = await Effect.runPromise(effect2)
+    expect(result2.output).toContain("p1/fast")
+  })
+
+  test("T7-order: original captured before validation (Task 1 preserved)", async () => {
+    sessionModel = { providerID: ProviderID.make("p1"), id: "smart" } as any
+    sessionModelOriginal = null
+
+    const agentInfo = {
+      smartModels: [
+        { providerID: ProviderID.make("p1"), modelID: ModelID.make("smart") },
+      ],
+    }
+
+    const context = makeContext({
+      messages: [
+        makeUserMsg(ProviderID.make("p1"), ModelID.make("fast")),
+        makeAssistantMsg(),
+      ],
+    })
+
+    // Target is not in smart models and not the original — should fail
+    // but setModelOriginal should have been called first
+    const effect = executeTool({ model: "p1/nonexistent" }, context, agentInfo)
+    const exit = await Effect.runPromiseExit(effect)
+    expect(exit._tag).toBe("Failure")
+    expect(setModelOriginalCalls).toHaveLength(1)
+    expect(setModelOriginalCalls[0].model.modelID).toBe(ModelID.make("fast"))
   })
 })

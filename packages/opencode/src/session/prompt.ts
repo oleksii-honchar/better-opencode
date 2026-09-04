@@ -135,6 +135,51 @@ export function resolvePromptModel(args: {
   return args.inputModel ?? args.agentModel
 }
 
+/**
+ * Original-model resolution for the ORIGINAL_MODEL env emission.
+ * Fallback chain:
+ *   1. session.modelOriginal (canonical, set at create/switch-back/re-pin)
+ *   2. First user message's model (truthful fallback for legacy rows without modelOriginal)
+ *   3. session.model (last resort — may be polluted by prior switch_model calls)
+ */
+export function resolveOriginalModel(
+  session: {
+    modelOriginal?: { providerID: string; modelID: string } | null
+    model?: { providerID: string; id: string } | null
+  },
+  messages: Array<{ info: { role: string; model?: { providerID: string; modelID: string } } }>,
+): PromptModelRef | undefined {
+  // 1. Canonical store — set at session create / switch-back / re-pin
+  if (session.modelOriginal) {
+    return {
+      providerID: session.modelOriginal.providerID,
+      modelID: session.modelOriginal.modelID,
+    }
+  }
+
+  // 2. First user message's model — truthful fallback for legacy rows
+  // that were created before the modelOriginal column was added.
+  let firstUserModel: { providerID: string; modelID: string } | undefined
+  for (const msg of messages) {
+    if (msg.info.role !== "user") continue
+    const m = msg.info.model
+    if (!m?.providerID || !m.modelID) continue
+    firstUserModel = { providerID: m.providerID, modelID: m.modelID }
+    break
+  }
+  if (firstUserModel) return firstUserModel
+
+  // 3. session.model — last resort, may be polluted by switch_model
+  if (session.model) {
+    return {
+      providerID: session.model.providerID,
+      modelID: session.model.id,
+    }
+  }
+
+  return undefined
+}
+
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts, Image.Error | LLMError>
@@ -1664,11 +1709,7 @@ export const layer = Layer.effect(
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
             const modelSwitchEnabled = (yield* config.get()).dynamicModelSwitch?.enabled ?? true
-            const originalModel =
-              session.modelOriginal ??
-              (session.model
-                ? { providerID: session.model.providerID, modelID: session.model.id }
-                : undefined)
+            const originalModel = resolveOriginalModel(session, msgs)
             const [skills, env, instructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model, sessionID, session.parentID, session.workspaceFolders, agent, modelSwitchEnabled, originalModel),

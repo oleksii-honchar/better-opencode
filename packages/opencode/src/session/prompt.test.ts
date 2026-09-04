@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { ModelID, ProviderID } from "@/provider/schema"
-import { resolvePromptModel } from "./prompt"
+import { resolvePromptModel, resolveOriginalModel } from "./prompt"
 
 // The prompt model-resolution precedence (D2 "override-first", spec A2):
 //   sessionModelOverride ?? input.model ?? ag.model ?? currentModel(sessionID)
@@ -93,5 +93,93 @@ describe("resolvePromptModel — override-first precedence (Task 4)", () => {
       agentModel: undefined,
     })
     expect(resolved).toBeUndefined()
+  })
+})
+
+describe("resolveOriginalModel — fallback chain (Task 4)", () => {
+  test("B4 env (with SMART_MODELS): session.modelOriginal wins and is used for ORIGINAL_MODEL env", () => {
+    const session = {
+      modelOriginal: { providerID: ProviderID.make("p1"), modelID: ModelID.make("luna") },
+      model: { providerID: ProviderID.make("p1"), id: ModelID.make("terra"), name: "terra" } as any,
+    }
+    const resolved = resolveOriginalModel(session as any, [])
+    expect(resolved).toEqual({ providerID: "p1", modelID: "luna" })
+  })
+
+  test("B4 env (without SMART_MODELS): session.modelOriginal still wins (env emission independent of SMART_MODELS)", () => {
+    const session = {
+      modelOriginal: { providerID: ProviderID.make("p1"), modelID: ModelID.make("luna") },
+      model: { providerID: ProviderID.make("p1"), id: ModelID.make("terra"), name: "terra" } as any,
+    }
+    const resolved = resolveOriginalModel(session as any, [])
+    expect(resolved).toEqual({ providerID: "p1", modelID: "luna" })
+  })
+
+  test("Fallback #2: modelOriginal=null, first user message model wins over polluted session.model", () => {
+    const session = {
+      modelOriginal: null,
+      model: { providerID: ProviderID.make("p1"), id: ModelID.make("terra"), name: "terra" } as any,
+    }
+    const msgs = [
+      {
+        info: {
+          id: "msg-1",
+          role: "user",
+          model: { providerID: ProviderID.make("p1"), modelID: ModelID.make("luna") },
+        } as any,
+        parts: [],
+      },
+    ]
+    const resolved = resolveOriginalModel(session as any, msgs as any)
+    expect(resolved).toEqual({ providerID: "p1", modelID: "luna" })
+  })
+
+  test("Fallback #3: modelOriginal=null, no first user message model — falls back to session.model", () => {
+    const session = {
+      modelOriginal: null,
+      model: { providerID: ProviderID.make("p1"), id: ModelID.make("terra"), name: "terra" } as any,
+    }
+    const msgs = [
+      {
+        info: { id: "msg-1", role: "user", model: null } as any,
+        parts: [],
+      },
+    ]
+    const resolved = resolveOriginalModel(session as any, msgs as any)
+    expect(resolved).toEqual({ providerID: "p1", modelID: "terra" })
+  })
+
+  test("All fallbacks null: returns undefined", () => {
+    const session = {
+      modelOriginal: null,
+      model: null,
+    }
+    const msgs = [
+      {
+        info: { id: "msg-1", role: "user", model: null } as any,
+        parts: [],
+      },
+    ]
+    const resolved = resolveOriginalModel(session as any, msgs as any)
+    expect(resolved).toBeUndefined()
+  })
+
+  test("Non-user messages ignored when finding first user message model", () => {
+    const session = {
+      modelOriginal: null,
+      model: { providerID: ProviderID.make("p1"), id: ModelID.make("terra"), name: "terra" } as any,
+    }
+    const msgs = [
+      {
+        info: { id: "msg-1", role: "assistant", model: { providerID: ProviderID.make("p1"), modelID: ModelID.make("luna") } } as any,
+        parts: [],
+      },
+      {
+        info: { id: "msg-2", role: "user", model: { providerID: ProviderID.make("p1"), modelID: ModelID.make("fast") } } as any,
+        parts: [],
+      },
+    ]
+    const resolved = resolveOriginalModel(session as any, msgs as any)
+    expect(resolved).toEqual({ providerID: "p1", modelID: "fast" })
   })
 })

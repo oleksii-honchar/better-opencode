@@ -4,7 +4,7 @@ id: SPEC-0020
 title: "In-flight Model Switching via a `switch_model` Tool"
 status: approved
 createdAt: "2026-09-01T15:48:45Z"
-updatedAt: "2026-09-03T06:40:00Z"
+updatedAt: "2026-09-04T12:35:00Z"
 tags: [model-resolution, tool, runloop, agent, v1, v2]
 adr_refs:
   - ADR-0100
@@ -109,51 +109,34 @@ Compliance", decision D2.5). Four changes to the v1 record above:
 See also the v2 note in [[adrs/0100-in-flight-model-switch-tool.adr.md]] and the amended
 `SMART_MODELS:` guidance text in `session/system.ts`.
 
-## Amendment v3 (2026-09-03) — switch-back to the original model
+## Amendment v4 (2026-09-04) — switch-back fix (capture-before-validation, canonical-at-create, backfill migration, re-pin resets original, persist gating)
 
-Implemented on the current session (Simple-Session "verify smart model switch-back"). The design
-goal: after switching to a smart model, the agent must be able to switch **back** to whatever model
-it was on — without being forced to list its weak/default model in `smartModels`.
+Supersedes Amendment v3 (2026-09-03).
 
-### Behavior
+The v3 design (switch-back to original model) was correct but the **original-capture ordering** was wrong: `switch_model` recorded `model_original` post-validation on first non-switch-back escalation. This deadlocked first-call switch-back and left polluted-`session.model` sessions unrecoverable.
 
-- **Session original model:** a new nullable session column `model_original`
-  (`Session.Info.modelOriginal`), written by the `switch_model` tool on the **first escalation**
-  (the then-current model, i.e. what the session was running on before the first switch). Additive
-  migration `20260903120000_add_session_model_original`, zero backfill.
-- **Context injection:** `SystemPrompt.environment()` emits `ORIGINAL_MODEL: <provider>/<model>`
-  plus guidance whenever the session has a recorded original model. It is independent of the
-  smartModels block — it appears even when the current provider has zero smart candidates (the
-  exact failure mode that motivated this change).
-- **Candidate rule change:** the switch target may be **either** the session's original model
-  (switch-back — always allowed, still validated against the provider catalog) **or** a
-  provider-scoped `smartModels` candidate. Anything else is rejected with an allowed list that now
-  also includes the original model.
-- **Durable override semantics:** a persisted (`persist: true`) switch **to a smart model** writes
-  `modelOverride` as before; a persisted **switch-back to the original** clears the
-  `modelOverride` (the original model is the session default, not an override).
-- **No-op guard:** when a session has no recorded original and no smart models for the current
-  provider, the tool still fails with `no smart model configured for provider <p>` (unchanged).
+**The fix:**
 
-### Files
+1. **Capture before validation (P1, ADR-0106):** In `tool/switch_model.ts`, resolve the pre-switch original from the **first user message's model** and write it via `setModelOriginal` **before** allowed-list validation. The write is not conditioned on "differs from target" — it must record the original exactly in the switch-back case. `originalModel` is recomputed from the now-set `model_original` (never the polluted `session.model` fallback).
 
-- `packages/opencode/src/tool/switch_model.ts` — candidate rule + `model_original` write + override
-  clear on switch-back.
-- `packages/opencode/src/tool/switch_model.txt` — tool description now **explicitly instructs the
-  agent to switch back to the original model after a smart round** (and when to prefer
-  `persist: false` vs a `persist: true` that must be followed by an explicit switch-back).
-- `packages/opencode/src/session/session.ts`, `session.sql.ts` — `modelOriginal` mapping + column.
-- `packages/opencode/src/session/system.ts`, `prompt.ts` — `ORIGINAL_MODEL:` injection + wiring
-  (guidance tells the agent to prefer escalation only for the complex round and switch back after).
-- `packages/opencode/migration/20260903120000_add_session_model_original/` — additive migration.
-- Tests: `switch_model.test.ts` (switch-back success, persist-clears-override, non-original
-  rejected with allowed list incl. original), `system.test.ts` (ORIGINAL_MODEL with/without
-  SMART_MODELS), all green; `tsc --noEmit` clean.
+2. **Pin at session creation (P2, ADR-0107):** `Session.createNext` sets `modelOriginal: input.modelOriginal ?? input.model`. Every session records its original at birth. `Session.fork` passes `original.modelOriginal`. This is the **canonical store**; migration + P1 remain as healing/backstop for pre-change sessions.
 
-### Validation
+3. **Backfill migration (P3, ADR-0108):** Additive migration `2026090312xxxx_add_backfill_session_model_original` sets `model_original` from the first user message's model (`message.data` JSON → `modelID`/`providerID`) for all existing rows with `model_original IS NULL`. Idempotent, never touches `session.model` or `model_override`, skips rows without a first user message model.
 
-- `switch_model` "p1/fast" succeeds when `model_original = p1/fast` even though `fast ∉ smartModels`.
-- `persist: true` switch-back calls `clearModelOverride` (no new override written).
-- Non-original / non-smart target still rejected; allowed list includes the original.
-- ORIGINAL_MODEL line appears even with no provider-scoped smartModels (proves the user's original
-  failure scenario is fixed).
+4. **Re-pin resets original (P6, ADR-0109, human-approved):** User model-re-pin sites (TUI picker, `/model`, ACP selection) that clear `modelOverride` now also set `model_original` to the chosen model. Switch-back, env, allowed-list all track the user's latest choice.
+
+5. **Persist gating (P7, ADR-0110, human-approved):** Tool schema's `persist` defaults to `false`. `persist:false` (or omitted) writes only `updateMessage` (per-turn); durable `session.model` unchanged. `persist:true` writes durable `session.model` as today. `model_original` is untouched by either branch. This stops the "per-turn smart switch leaks into durable default" bug.
+
+**Behavior changes (concrete scenarios):**
+
+- **B1 (happy switch-back, reported bug):** `session.model=terra` (polluted), `model_original=NULL`, first user msg model=luna → `switch_model luna` → P1 records luna → `originalModel=luna` → `isSwitchBack=true` → allowed → switch-back succeeds.
+- **B2 (first-call switch-back):** fresh session, `model_original=NULL`, first msg=luna, `session.model=luna` → `switch_model luna` → P1 records luna before validation → `isSwitchBack=true` → allowed (deadlock avoided).
+- **B3 (legacy session, migration):** `session.model=terra`, `model_original=NULL`, first msg model=luna → migration sets `model_original=luna` → B1 succeeds.
+- **B8 (per-turn switch does not leak):** `session.model=luna`, `model_original=luna` → `switch_model terra` (no persist) → durable `session.model` stays luna; next turn runs on luna.
+- **B9 (explicit session-wide switch):** `switch_model terra, persist: true` → durable `session.model` = terra; `model_original` stays luna; switch-back to luna still works.
+
+**Test plan additions:** Unit tests for B1 (reported bug scenario), B2 (first-call switch-back), B6 (non-original non-smart rejection still names original), B8 (persist:false no durable write), B9 (persist:true durable write), switch-back after persist:false escalation, tool schema persist default:false. All green on merge.
+
+**Files changed:** `tool/switch_model.ts` (P1, P7), `tool/switch_model.test.ts`, `tool/switch_model.txt`, `session/session.ts` (P2), `session/session.test.ts`, `session/prompt.ts` (P4 env fallback reorder), `session/system.ts`, `system.test.ts`, `packages/opencode/migration/2026090312xxxx_add_backfill_session_model_original/` (P3).
+
+**Migration verification:** Read-only `SELECT COUNT(*) FROM session WHERE model_original IS NOT NULL` before and after migration on prod DB to confirm row deltas. Migration idempotent.
