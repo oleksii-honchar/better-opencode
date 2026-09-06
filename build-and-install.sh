@@ -2,9 +2,9 @@
 # build-and-install.sh — Build better-opencode fork and optionally install binary
 #
 # Usage:
-#   ./build-and-install.sh --install --clean          # Full build + install + configure OpenChamber
-#   ./build-and-install.sh --only-build                # Build only (skip binary install)
-#   ./build-and-install.sh --clean                     # Clean dist/ before build
+#   ./build-and-install.sh --clean          # Full build + install (default) + configure OpenChamber
+#   ./build-and-install.sh --only-build      # Build only (skip binary install)
+#   ./build-and-install.sh --clean           # Clean dist/ before build
 #   ./build-and-install.sh --configure-openchamber     # Configure OpenChamber only (no build)
 #   ./build-and-install.sh --unconfigure-openchamber   # Remove OpenChamber config (undo)
 #
@@ -24,16 +24,19 @@ BINARY_SOURCE="$FORK_DIR/packages/opencode/dist/opencode-darwin-arm64/bin/openco
 BETTER_OPENCODE_BIN="$HOME/bin/better-opencode"
 OPENCHAMBER_SETTINGS="$HOME/.config/openchamber/settings.json"
 
-INSTALL=false
+INSTALL=true
 ONLY_BUILD=false
 CLEAN=false
 CONFIGURE_OPENCHAMBER=false
 UNCONFIGURE_OPENCHAMBER=false
+# Tracks whether --install was passed EXPLICITLY (vs. the new default). Used by the
+# standalone --configure-openchamber path, which must NOT install by default (no build ran).
+EXPLICIT_INSTALL=false
 
 # Parse flags
 for arg in "$@"; do
   case $arg in
-    --install) INSTALL=true ;;
+    --install) INSTALL=true; EXPLICIT_INSTALL=true ;;
     --only-build) ONLY_BUILD=true ;;
     --clean) CLEAN=true ;;
     --configure-openchamber) CONFIGURE_OPENCHAMBER=true ;;
@@ -42,7 +45,7 @@ for arg in "$@"; do
       echo "Usage: $0 [OPTIONS]"
       echo ""
       echo "Build options:"
-      echo "  --install              Install forked binary to ~/bin/better-opencode + configure OpenChamber"
+      echo "  --install              Install forked binary to ~/bin/better-opencode + configure OpenChamber (DEFAULT)"
       echo "  --only-build           Skip binary install and OpenChamber config (build only)"
       echo "  --clean                Remove dist/ before building"
       echo ""
@@ -51,10 +54,9 @@ for arg in "$@"; do
       echo "  --unconfigure-openchamber  Remove OpenChamber config (switch back to Homebrew opencode)"
       echo ""
       echo "Examples:"
-      echo "  $0 --install --clean              # Full build + install + configure"
-      echo "  $0 --only-build                   # Build only, no install"
-      echo "  $0 --configure-openchamber        # Configure OpenChamber only (no build)"
-      echo "  $0 --unconfigure-openchamber      # Remove OpenChamber config"
+      echo "  $0 --clean                      # Full build + install (default) + configure"
+      echo "  $0 --only-build                 # Build only, no install"
+      echo "  $0 --configure-openchamber      # Configure OpenChamber only (no build)"
       echo ""
       echo "Note: No git operations (fetch, rebase, checkout). Builds from current branch."
       exit 0
@@ -123,6 +125,58 @@ unconfigure_openchamber() {
   echo "    export OPENCHAMBER_OPENCODE_PATH=\"$BETTER_OPENCODE_BIN\"  # from ~/.zshrc"
 }
 
+# Ensure the installed binary is usable from the shell. Idempotent: detects existing
+# correct lines in ~/.zshrc and never duplicates them.
+ensure_shell_integration() {
+  local zshrc="$HOME/.zshrc"
+  local path_line='export PATH="$HOME/bin:$PATH"'
+  local env_line="export OPENCHAMBER_OPENCODE_PATH=\"$BETTER_OPENCODE_BIN\""
+  local changed=false
+
+  if [ ! -f "$zshrc" ]; then
+    echo "  WARNING: $zshrc not found — creating it"
+    touch "$zshrc"
+  fi
+
+  # 1. Uncomment the template PATH line if present (default oh-my-zsh template has it commented)
+  if grep -q '^# export PATH=\$HOME/bin' "$zshrc"; then
+    sed -i '' 's|^# export PATH=\$HOME/bin.*|export PATH="$HOME/bin:$PATH"|' "$zshrc"
+    echo "  Enabled ~/bin on PATH in $zshrc (uncommented template line)"
+    changed=true
+  elif ! grep -qE '^export PATH=.*\$HOME/bin.*:\$PATH' "$zshrc"; then
+    echo "" >> "$zshrc"
+    echo "# better-opencode: add ~/bin to PATH" >> "$zshrc"
+    echo "$path_line" >> "$zshrc"
+    echo "  Added ~/bin to PATH in $zshrc"
+    changed=true
+  else
+    echo "  ~/bin already on PATH in $zshrc (no change)"
+  fi
+
+  # 2. Set OPENCHAMBER_OPENCODE_PATH to the forked binary
+  if grep -q '^export OPENCHAMBER_OPENCODE_PATH=' "$zshrc"; then
+    if grep -qF "export OPENCHAMBER_OPENCODE_PATH=\"$BETTER_OPENCODE_BIN\"" "$zshrc"; then
+      echo "  OPENCHAMBER_OPENCODE_PATH already correct in $zshrc (no change)"
+    else
+      sed -i '' "s|^export OPENCHAMBER_OPENCODE_PATH=.*|$env_line|" "$zshrc"
+      echo "  Updated OPENCHAMBER_OPENCODE_PATH in $zshrc → $BETTER_OPENCODE_BIN"
+      changed=true
+    fi
+  else
+    echo "" >> "$zshrc"
+    echo "# better-opencode: point the CLI script at the forked binary" >> "$zshrc"
+    echo "$env_line" >> "$zshrc"
+    echo "  Added OPENCHAMBER_OPENCODE_PATH to $zshrc → $BETTER_OPENCODE_BIN"
+    changed=true
+  fi
+
+  if [ "$changed" = true ]; then
+    echo "  Shell integration updated — open a new terminal or run: source $zshrc"
+  else
+    echo "  Shell integration already up to date"
+  fi
+}
+
 # Handle unconfigure standalone (no build needed)
 if [ "$UNCONFIGURE_OPENCHAMBER" = true ]; then
   unconfigure_openchamber
@@ -132,7 +186,9 @@ fi
 
 # Handle configure-only standalone (no build needed)
 if [ "$CONFIGURE_OPENCHAMBER" = true ]; then
-  if [ "$INSTALL" = true ]; then
+  # Install only when --install was passed EXPLICITLY (default install must not apply here:
+  # no build has run, so the binary source may not exist).
+  if [ "$EXPLICIT_INSTALL" = true ]; then
     echo "=== Installing forked binary to ~/bin/better-opencode ==="
     mkdir -p "$HOME/bin"
     cp "$BINARY_SOURCE" "$BETTER_OPENCODE_BIN"
@@ -172,25 +228,29 @@ if [ ! -f "$BINARY_SOURCE" ]; then
   exit 1
 fi
 
-if [ "$ONLY_BUILD" = false ]; then
-  if [ "$INSTALL" = true ]; then
-    echo "=== Installing forked binary to ~/bin/better-opencode ==="
-    mkdir -p "$HOME/bin"
-    cp "$BINARY_SOURCE" "$BETTER_OPENCODE_BIN"
-    chmod +x "$BETTER_OPENCODE_BIN"
-    echo "  Binary: $BETTER_OPENCODE_BIN"
-
-    configure_openchamber "$BETTER_OPENCODE_BIN"
-
-    echo "=== CLI script env var recommendation ==="
-    echo "  Add to ~/.zshrc: export OPENCHAMBER_OPENCODE_PATH=\"$BETTER_OPENCODE_BIN\""
-    echo "  (This ensures the CLI script also uses the forked binary)"
-
-    echo "=== Smoke test ==="
-    "$BETTER_OPENCODE_BIN" --version
-    echo "  Build and install complete ✓"
-  else
-    echo "=== Build complete (no install) ==="
-    echo "  Binary: $BINARY_SOURCE"
-  fi
+if [ "$ONLY_BUILD" = true ]; then
+  echo "=== Build complete (no install) ==="
+  echo "  Binary: $BINARY_SOURCE"
+  exit 0
 fi
+
+echo "=== Installing forked binary to ~/bin/better-opencode ==="
+mkdir -p "$HOME/bin"
+cp "$BINARY_SOURCE" "$BETTER_OPENCODE_BIN"
+chmod +x "$BETTER_OPENCODE_BIN"
+
+# Verify the binary was actually installed
+if [ ! -f "$BETTER_OPENCODE_BIN" ]; then
+  echo "ERROR: Installation failed, binary not found at $BETTER_OPENCODE_BIN"
+  exit 1
+fi
+echo "  Binary: $BETTER_OPENCODE_BIN"
+
+configure_openchamber "$BETTER_OPENCODE_BIN"
+
+echo "=== Configuring shell integration (~/.zshrc) ==="
+ensure_shell_integration
+
+echo "=== Smoke test ==="
+"$BETTER_OPENCODE_BIN" --version
+echo "  Build and install complete ✓"

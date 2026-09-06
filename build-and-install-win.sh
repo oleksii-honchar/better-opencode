@@ -2,12 +2,12 @@
 # build-and-install-win.sh — Build better-opencode fork and install binary on Windows (GitBash)
 #
 # Usage:
-#   ./build-and-install-win.sh --install --clean          # Full build + install
-#   ./build-and-install-win.sh --only-build                # Build only (skip binary install)
-#   ./build-and-install-win.sh --clean                     # Clean dist/ before build
+#   ./build-and-install-win.sh --clean          # Full build + install (default) + clean
+#   ./build-and-install-win.sh --only-build      # Build only (skip binary install)
+#   ./build-and-install-win.sh --clean           # Clean dist/ before build
 #
 # Dry-run (print the commands instead of executing them):
-#   DRY_RUN=1 ./build-and-install-win.sh --install
+#   DRY_RUN=1 ./build-and-install-win.sh
 #
 # This script:
 #   1. Builds from current branch (no git operations)
@@ -25,7 +25,6 @@ FORK_DIR="$(cd "$(dirname "$0")" && pwd)"
 BINARY_SOURCE="$FORK_DIR/packages/opencode/dist/opencode-windows-x64/bin/opencode.exe"
 BETTER_OPENCODE_BIN="$HOME/bin/better-opencode.exe"
 
-INSTALL=false
 ONLY_BUILD=false
 CLEAN=false
 SINGLE_FLAG=false
@@ -43,7 +42,7 @@ run() {
 # Parse flags
 for arg in "$@"; do
   case $arg in
-    --install) INSTALL=true ;;
+    --install) ;; # accepted for backward compatibility; install is now the default
     --only-build) ONLY_BUILD=true ;;
     --clean) CLEAN=true ;;
     --single) SINGLE_FLAG=true ;;
@@ -51,7 +50,7 @@ for arg in "$@"; do
       echo "Usage: $0 [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --install              Install forked binary to ~/bin/better-opencode.exe"
+      echo "  --install              Install forked binary to ~/bin/better-opencode.exe (DEFAULT)"
       echo "  --only-build           Skip binary install (build only)"
       echo "  --clean                Remove dist/ before building"
       echo "  --single               Build only the current platform target (forwarded to build.ts"
@@ -64,10 +63,10 @@ for arg in "$@"; do
       echo "  DRY_RUN=1              Print the commands instead of executing them"
       echo ""
       echo "Examples:"
-      echo "  $0 --install --clean              # Full build + install (cross-build safe)"
+      echo "  $0 --clean                        # Full build + install (default)"
       echo "  $0 --only-build                   # Build only, no install"
-      echo "  $0 --install --clean --single     # Native Win11 build: only win32-x64 target"
-      echo "  DRY_RUN=1 $0 --install            # Preview the commands"
+      echo "  $0 --clean --single               # Native Win11 build: only win32-x64 target"
+      echo "  DRY_RUN=1 $0                      # Preview the commands"
       echo ""
       echo "Note: No git operations (fetch, rebase, checkout). Builds from current branch."
       exit 0
@@ -125,45 +124,40 @@ if [ "$ONLY_BUILD" = true ]; then
   exit 0
 fi
 
-if [ "$INSTALL" = true ]; then
-  echo "=== Installing forked binary to ~/bin/better-opencode.exe ==="
-  run mkdir -p "$HOME/bin"
-  run cp "$BINARY_SOURCE" "$BETTER_OPENCODE_BIN"
-  run chmod +x "$BETTER_OPENCODE_BIN"
+echo "=== Installing forked binary to ~/bin/better-opencode.exe ==="
+run mkdir -p "$HOME/bin"
+run cp "$BINARY_SOURCE" "$BETTER_OPENCODE_BIN"
+run chmod +x "$BETTER_OPENCODE_BIN"
 
-  # Verify the binary exists (skip the actual check in dry-run; we only print)
-  if [ "$DRY_RUN" = "1" ]; then
-    run test -f "$BETTER_OPENCODE_BIN"
-  else
-    if [ ! -f "$BETTER_OPENCODE_BIN" ]; then
-      echo "ERROR: Installation failed, binary not found at $BETTER_OPENCODE_BIN"
-      exit 1
-    fi
-  fi
-
-  # Print a Windows-native path so native Windows users see the right location
-  echo ""
-  if [ "$DRY_RUN" = "1" ]; then
-    # Always show the cygpath verification command in dry-run
-    echo "DRY_RUN: WIN_PATH=\$(cygpath -w \"$BETTER_OPENCODE_BIN\")"
-  elif command -v cygpath &> /dev/null; then
-    WIN_PATH=$(cygpath -w "$BETTER_OPENCODE_BIN")
-    echo "  Binary installed (Windows path): $WIN_PATH"
-  else
-    echo "  Binary installed: $BETTER_OPENCODE_BIN"
-    echo "  (cygpath not available on this host; on Windows use: cygpath -w \"$BETTER_OPENCODE_BIN\")"
-  fi
-
-  echo ""
-  echo "=== Verify from native Windows (PowerShell/CMD) ==="
-  echo "  where better-opencode.exe"
-  echo "  C:\\Users\\<you>\\bin\\better-opencode.exe --version"
-  echo ""
-  echo "  Point the better-openchamber extension at this binary via its"
-  echo "  'opencodeBinary' setting (Windows path, see cygpath output above)."
-  echo ""
-  echo "  Build and install complete"
+# Verify the binary exists (skip the actual check in dry-run; we only print)
+if [ "$DRY_RUN" = "1" ]; then
+  run test -f "$BETTER_OPENCODE_BIN"
 else
-  echo "=== Build complete (no install; pass --install to install) ==="
-  echo "  Binary: $BINARY_SOURCE"
+  if [ ! -f "$BETTER_OPENCODE_BIN" ]; then
+    echo "ERROR: Installation failed, binary not found at $BETTER_OPENCODE_BIN"
+    exit 1
+  fi
 fi
+
+# Print a Windows-native path so native Windows users see the right location
+echo ""
+if [ "$DRY_RUN" = "1" ]; then
+  # Always show the cygpath verification command in dry-run
+  echo "DRY_RUN: WIN_PATH=\$(cygpath -w \"$BETTER_OPENCODE_BIN\")"
+elif command -v cygpath &> /dev/null; then
+  WIN_PATH=$(cygpath -w "$BETTER_OPENCODE_BIN")
+  echo "  Binary installed (Windows path): $WIN_PATH"
+else
+  echo "  Binary installed: $BETTER_OPENCODE_BIN"
+  echo "  (cygpath not available on this host; on Windows use: cygpath -w \"$BETTER_OPENCODE_BIN\")"
+fi
+
+echo ""
+echo "=== Verify from native Windows (PowerShell/CMD) ==="
+echo "  where better-opencode.exe"
+echo "  C:\\Users\\<you>\\bin\\better-opencode.exe --version"
+echo ""
+echo "  Point the better-openchamber extension at this binary via its"
+echo "  'opencodeBinary' setting (Windows path, see cygpath output above)."
+echo ""
+echo "  Build and install complete"

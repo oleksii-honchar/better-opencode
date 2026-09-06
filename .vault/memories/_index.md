@@ -2,7 +2,7 @@
 type: index
 title: "Atomic Memories"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-08-30T15:54:00Z"
+updatedAt: "2026-09-05T19:50:00Z"
 tags: []
 ---
 
@@ -35,3 +35,4 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0021-ibkr-mcp-endpoint-behavior.memory.md]] — IBKR MCP Endpoint Behavior — 401 Empty Body, Akamai no-store, Registration Works
 - [[0022-remote-type-nul-byte-workaround.memory.md]] — type: remote MCP Servers Break (NUL byte) — Use local mcp-remote Bridges
 - [[0023-litellm-mcp-tool-name-prefixing.memory.md]] — LiteLLM-Proxy MCP Tool Names Get <server>- Prefix; Unprefixed Allowlists Silently Break
+- [[0024-subagent-permission-ask-time-merge.memory.md]] — Subagent Permission Ask-Time Merge — Agent Allows Win Unless Session *:ask Lands Last
