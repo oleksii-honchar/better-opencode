@@ -1,6 +1,6 @@
 # better-opencode Features
 
-This document describes the thirteen features added by the `better-opencode` fork.
+This document describes the eighteen features added by the `better-opencode` fork.
 
 For an overview of the fork's purpose and installation, see [BETTER-OPENCODE.md](./BETTER-OPENCODE.md).
 
@@ -685,3 +685,100 @@ Both fields are optional. Set `enabled: false` to disable the plugin without rem
 - **Skip when no sessionID:** Non-session contexts (title generation, agent generation) do not receive injected rules — the plugin skips when `sessionID` is absent.
 - **Missing folder:** If the configured folder does not exist or is unreadable, the plugin logs a warning and no-ops (no rules injected, no error thrown).
 - **File format:** Only `.mdc` files are loaded. Files are sorted alphabetically by filename. Each file is prefixed with `Instructions from: <absolute-path>` and separated by blank lines.
+
+---
+
+## 18. Markdown Image Grants Endpoint (OpenCode server)
+
+**Status:** ✅ Implemented
+
+**Problem:** The OpenChamber UI (web, Electron, hosted mobile, and the VS Code extension) renders Markdown media (images, video, audio) referenced by an assistant message. When the media lives outside the workspace, the UI needs the server to validate the requested paths and mint short-lived, path-bound grants. The VS Code extension in particular proxies its grant requests straight to the OpenCode server, so the server must own this route.
+
+**Solution:** A new HTTP endpoint on the OpenCode server validates the requested media sources against the assistant message text and mints path-bound, time-boxed grants for sources outside the workspace.
+
+**Endpoint:**
+
+```
+POST /api/openchamber/sessions/:sessionID/markdown-image-grants
+Content-Type: application/json
+Authorization: <OpenCode auth header>
+```
+
+**Request body:**
+
+```json
+{
+  "directory": "/abs/workspace/or/any/dir",
+  "messageId": "msg_xxx",
+  "sources": ["/abs/path/a.png", "relative/b.png", "file:///abs/c.mp4"]
+}
+```
+
+- `directory` is required and non-empty. It is used to resolve relative sources and to decide whether each source is inside or outside the workspace.
+- `messageId` is required and non-empty.
+- `sources` is an array of 1 to 12 non-empty strings. More than 12 returns a 400.
+- `sources` entries may be absolute paths, relative paths (resolved against `directory`), or `file://` URLs.
+
+**Response (200):**
+
+```json
+{
+  "results": [
+    {
+      "source": "/abs/path/a.png",
+      "status": "ready",
+      "path": "/abs/path/a.png",
+      "outsideFileGrant": "uuid",
+      "expiresAt": 1780000000000
+    },
+    {
+      "source": "/abs/workspace/b.png",
+      "status": "ready",
+      "path": "/abs/workspace/b.png"
+    },
+    {
+      "source": "/abs/missing.png",
+      "status": "missing"
+    },
+    {
+      "source": "/abs/unsupported.xyz",
+      "status": "error"
+    }
+  ]
+}
+```
+
+Each result object has:
+
+- `source`: the original source string from the request.
+- `status`: one of `ready`, `missing`, `error`.
+- `path`: the canonical resolved path, present when `ready`.
+- `outsideFileGrant`: the grant token, present only when `ready` and the path is outside the workspace.
+- `expiresAt`: the grant expiry timestamp in milliseconds, present only when `ready` and outside-workspace.
+
+**Error responses:**
+
+- `400` (BadRequest): missing or empty `directory`, missing or empty `messageId`, or a `sources` array with 0 or more than 12 entries.
+- `404` (MessageNotFoundError): the assistant message is missing, its id does not match `messageId`, or its role is not `assistant`. All three cases return the same 404 so a client cannot probe whether a given `messageId` exists.
+
+**Behavior:**
+
+- **Assistant-text authority gate:** The handler loads the message in-process (`MessageV2.get`), checks the id and role, then parses the assistant text for media references (fence-aware, inline and reference-style Markdown). A source not found in that set returns `{ status: "error" }` for that source; the rest of the request still processes.
+- **Containment is always relaxed:** Any absolute local path is accepted (ADR-1). The route does not enforce a workspace root. Only regular-file, size, and container-signature validation still apply.
+- **Media caps by kind (enforced from file stats):**
+  - image: 10 MiB
+  - video: 50 MiB
+  - audio: 20 MiB
+- **Signature checks:** Each accepted file's leading bytes are checked against the expected container signature for its kind (image PNG/JPEG/GIF/WebP, video ftyp/EBML, audio ID3/RIFF-WAVE/ftyp).
+- **Grant properties (outside-workspace only):**
+  - Path-bound: bound to the exact canonical path of the target file.
+  - Scopes: `["raw"]`.
+  - TTL: 10 minutes (`MARKDOWN_IMAGE_GRANT_TTL_MS`), pruned on each mint.
+  - Token: a UUID (`crypto.randomUUID`, with a fallback).
+- **Routing:** The route is always local. `workspace-routing.ts` maps `/api/openchamber/sessions` to `action: "local"`, so a `workspace` query param never proxies the grants request to a remote workspace.
+
+**Parity:** The constants (`MARKDOWN_MEDIA_MAX_BYTES`, `SUPPORTED_MEDIA_MIME_TYPES`, `KIND_BY_EXTENSION`, `MARKDOWN_IMAGE_GRANT_TTL_MS`, `MAX_IMAGE_GRANT_PATHS_PER_MESSAGE`) and the Markdown source-extraction and media-inspection logic are ported from `better-openchamber/packages/web/server/lib/markdown-image-grants/routes.js` and must match exactly (parity-tested).
+
+**Why the server owns this route:**
+
+The VS Code webview POSTs grant requests through the extension bridge to the OpenCode server, not to a separate OpenChamber web server. The OpenCode server must therefore implement the grants route directly. This replaces the earlier design, which relied on an environment flag on a web server that the VS Code runtime never reached.
