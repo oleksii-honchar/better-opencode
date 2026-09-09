@@ -24,6 +24,8 @@ import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, SessionID } from "../../src/session/schema"
 import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { Skill } from "@/skill"
+import { SystemPrompt } from "@/session/system"
 
 const FIXTURES_DIR = path.join(import.meta.dir, "../fixtures/recordings")
 
@@ -306,6 +308,8 @@ function recordedNativeLLMLayer(scenario: RecordedScenario) {
         HttpRecorder.Cassette.fileSystem({ directory: FIXTURES_DIR }).pipe(Layer.provide(NodeFileSystem.layer)),
       ),
       Layer.provide(RuntimeFlags.layer({ experimentalNativeLlm: true })),
+      Layer.provide(Skill.defaultLayer),
+      Layer.provide(SystemPrompt.defaultLayer),
     ),
   )
 }
