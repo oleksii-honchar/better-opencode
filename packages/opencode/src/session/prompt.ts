@@ -58,6 +58,7 @@ import { AgentAttachment, FileAttachment, ReferenceAttachment, Source } from "@o
 import { Reference } from "@/reference/reference"
 import { store as storeAttachment, trackForMessage, hasAttachments as hasMessageAttachments } from "@/session/attachment"
 import { DynamicSkillScanner } from "@/skill/dynamic-scanner"
+import { Ripgrep } from "@/file/ripgrep"
 
 const FILE_ATTACHMENTS_SYSTEM_PROMPT = `## File Attachments
   You can see files that have been attached by the user.
@@ -1710,13 +1711,32 @@ export const layer = Layer.effect(
 
             const modelSwitchEnabled = (yield* config.get()).dynamicModelSwitch?.enabled ?? true
             const originalModel = resolveOriginalModel(session, msgs)
+            // Format dynamic skills discovered so far into system prompt content
+            // (non-blocking; errors handled internally by injectDiscoveredSkills)
+            const injectedSkills = yield* DynamicSkillScanner.injectDiscoveredSkills(sessionID).pipe(
+              Effect.provideService(
+                Ripgrep.Service,
+                {
+                  files: () => Stream.empty,
+                  tree: () => Effect.succeed(""),
+                  search: () => Effect.succeed({ matches: [] }),
+                } as unknown as Ripgrep.Interface,
+              ),
+            )
             const [skills, env, instructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model, sessionID, session.parentID, session.workspaceFolders, agent, modelSwitchEnabled, originalModel),
               instruction.system().pipe(Effect.orDie),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
-            const system = [...env, ...instructions, ...(hasMessageAttachments(lastUser.id) ? [FILE_ATTACHMENTS_SYSTEM_PROMPT] : []), ...(skills ? [skills] : [])]
+            const dynamicSkillContent = injectedSkills.injected > 0 ? injectedSkills.xml : undefined
+            const system = [
+              ...env,
+              ...instructions,
+              ...(dynamicSkillContent ? [dynamicSkillContent] : []),
+              ...(hasMessageAttachments(lastUser.id) ? [FILE_ATTACHMENTS_SYSTEM_PROMPT] : []),
+              ...(skills ? [skills] : []),
+            ]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
 

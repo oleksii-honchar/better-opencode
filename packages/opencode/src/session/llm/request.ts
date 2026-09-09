@@ -32,6 +32,7 @@ type PrepareInput = {
   readonly flags: RuntimeFlags.Info
   readonly isWorkflow: boolean
   readonly onSystemPrepared?: (system: string) => Effect.Effect<void, never, never>
+  readonly skillContent?: string
 }
 
 export type Prepared = {
@@ -54,10 +55,16 @@ const mergeOptions = (target: Record<string, any>, source: Record<string, any> |
 
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
+
+  // For new chats, skill content is passed in via input.skillContent by the caller
+  // (llm.ts). This avoids service dependencies inside prepare().
+  const skillContent = input.skillContent
+
   const system = [
     [
       ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
       ...input.system,
+      ...(skillContent ? [skillContent] : []),
       ...(input.user.system ? [input.user.system] : []),
     ]
       .filter((x) => x)

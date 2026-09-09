@@ -24,6 +24,8 @@ import { Permission } from "@/permission"
 import { LLMAISDK } from "@/session/llm/ai-sdk"
 import { Session as SessionNs } from "@/session/session"
 import { ProviderError } from "@/provider/error"
+import { Skill } from "@/skill"
+import { SystemPrompt } from "@/session/system"
 
 type ConfigModel = NonNullable<NonNullable<Config.Info["provider"]>[string]["models"]>[string]
 
@@ -80,6 +82,8 @@ function llmLayerWithExecutor(executor: Layer.Layer<RequestExecutor.Service>, fl
     Layer.provide(Plugin.defaultLayer),
     Layer.provide(LLMClient.layer.pipe(Layer.provide(Layer.mergeAll(executor, WebSocketExecutor.layer)))),
     Layer.provide(RuntimeFlags.layer(flags)),
+    Layer.provide(Skill.defaultLayer),
+    Layer.provide(SystemPrompt.defaultLayer),
   )
 }
 
@@ -1213,6 +1217,8 @@ describe("session.llm.stream", () => {
             Layer.provide(Plugin.defaultLayer),
             Layer.provide(failingNativeClient),
             Layer.provide(RuntimeFlags.layer({ experimentalNativeLlm: false })),
+            Layer.provide(Skill.defaultLayer),
+            Layer.provide(SystemPrompt.defaultLayer),
           ),
           {
             user: {

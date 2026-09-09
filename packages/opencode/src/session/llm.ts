@@ -27,6 +27,8 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { Skill } from "@/skill"
+import { SystemPrompt } from "./system"
 
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
@@ -171,6 +173,7 @@ export type StreamInput = {
   retries?: number
   toolChoice?: "auto" | "required" | "none"
   onSystemPrepared?: (system: string) => Effect.Effect<void, never, never>
+  skillContent?: string
 }
 
 export type StreamRequest = StreamInput & {
@@ -195,6 +198,8 @@ const live: Layer.Layer<
   | Permission.Service
   | LLMClientService
   | RuntimeFlags.Service
+  | Skill.Service
+  | SystemPrompt.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -205,6 +210,8 @@ const live: Layer.Layer<
     const perm = yield* Permission.Service
     const llmClient = yield* LLMClient.Service
     const flags = yield* RuntimeFlags.Service
+    const skill = yield* Skill.Service
+    const systemPrompt = yield* SystemPrompt.Service
 
     const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
       const l = log
@@ -231,6 +238,18 @@ const live: Layer.Layer<
       )
 
       const isWorkflow = language instanceof GitLabWorkflowLanguageModel
+
+      // For new chats, fetch available skills and format their content for the system prompt.
+      // This avoids creating separate synthetic skill messages that would violate the session protocol.
+      const isNewChat = input.messages.length === 0
+      let skillContent = input.skillContent
+      if (isNewChat && !skillContent) {
+        const availableSkills = yield* skill.available(input.agent)
+        if (availableSkills.length > 0) {
+          skillContent = yield* systemPrompt.skills(input.agent)
+        }
+      }
+
       const prepared = yield* LLMRequestPrep.prepare({
         ...input,
         provider: item,
@@ -239,6 +258,7 @@ const live: Layer.Layer<
         flags,
         isWorkflow,
         onSystemPrepared: input.onSystemPrepared,
+        skillContent,
       })
 
       // Wire up toolExecutor for DWS workflow models so that tool calls
@@ -541,6 +561,8 @@ export const defaultLayer = Layer.suspend(() =>
       LLMClient.layer.pipe(Layer.provide(Layer.mergeAll(RequestExecutor.defaultLayer, WebSocketExecutor.layer))),
     ),
     Layer.provide(RuntimeFlags.defaultLayer),
+    Layer.provide(Skill.defaultLayer),
+    Layer.provide(SystemPrompt.defaultLayer),
   ),
 )
 
