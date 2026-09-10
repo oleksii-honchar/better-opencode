@@ -118,3 +118,4 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0103-media-in-chat-ismedia-extension.adr.md]] — ADR-0103 (accepted): extend isMedia/FilePart, no new part type
 - [[0104-provider-media-capability-map.adr.md]] — ADR-0104 (accepted): provider capability map for tool-result media
 - [[0105-display-first-render-pipeline.adr.md]] — ADR-0105 (accepted): display-first render pipeline
+- [[0106-fix-rules-inject-silent-failure.adr.md]] — Fix rules-inject Silent Failure with Observable Logging (ADR-0106, status: accepted)

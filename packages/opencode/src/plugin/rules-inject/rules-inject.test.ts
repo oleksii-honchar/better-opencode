@@ -121,6 +121,33 @@ describe("RulesInjectPlugin — transform hook", () => {
     fs.rmSync(tmp, { recursive: true, force: true })
   })
 
+  test("injection works with user-configured folder", async () => {
+    resetForTesting()
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rules-user-config-"))
+    fs.writeFileSync(path.join(tmp, "custom.mdc"), "Custom rule content\n")
+
+    const hooks = await RulesInjectPlugin({} as any)
+    await hooks.config?.({
+      rulesInject: {
+        enabled: true,
+        alwaysApplyFolder: tmp,
+        position: "after-persona"
+      }
+    } as any)
+
+    const system = ["You are powered by the model named test-model\nRest of system prompt"]
+    await hooks["experimental.chat.system.transform"]?.(
+      makeTransformInput("test-session-user-config"),
+      { system }
+    )
+
+    expect(system).toHaveLength(1)
+    expect(system[0]).toContain("Custom rule content")
+    expect(system[0]).toContain("Instructions from: " + path.join(tmp, "custom.mdc"))
+
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
   test("after-persona inserts rules between persona text and env marker", async () => {
     resetForTesting()
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rules-test-"))

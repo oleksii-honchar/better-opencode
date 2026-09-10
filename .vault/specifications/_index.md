@@ -34,3 +34,4 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 - [[0020-in-flight-model-switching.spec.md]] — In-flight Model Switching via a `switch_model` Tool (kind: feature, status: approved)
 
 - [[0021-agent-media-in-chat.spec.md]] — SPEC-0021 (approved): Agent Media Posting in Chat
+- [[0022-fix-rules-inject-silent-failure.spec.md]] — Fix rules-inject Silent Failure (kind: bugfix, status: completed)
