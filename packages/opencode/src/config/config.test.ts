@@ -1,6 +1,10 @@
-import { describe, test, expect } from "bun:test"
+import { describe, test, expect, beforeEach, afterEach } from "bun:test"
 import { Schema } from "effect"
 import { Info } from "./config"
+import { ConfigParse } from "./parse"
+import { writeFileSync, rmSync, mkdtempSync } from "fs"
+import { join } from "path"
+import { tmpdir } from "os"
 
 describe("Config Schema — unstuck doom_loop fields", () => {
   test("enableDoomLoopDetection field accepts true and false", () => {
@@ -323,6 +327,38 @@ describe("Config Schema — unstuck nudge strategy and pruneCount removal", () =
     expect(parsed.unstuck?.loopThreshold).toBe(3)
     expect(parsed.unstuck?.strategy).toBe("nudge-and-prune")
     expect((parsed.unstuck as Record<string, unknown>)?.pruneCount).toBeUndefined()
+  })
+})
+
+describe("Config Integration — rulesInject through config system", () => {
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "opencode-config-test-"))
+  })
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  test("rulesInject config is properly passed through the config system to the plugin", () => {
+    const configFile = join(tempDir, "opencode.jsonc")
+
+    const configContent = `{
+  "rulesInject": {
+    "enabled": true,
+    "alwaysApplyFolder": "~/.rules/olho/always-apply"
+  }
+}`
+
+    writeFileSync(configFile, configContent, "utf-8")
+
+    const loaded = ConfigParse.jsonc(configContent, configFile)
+    const cfg = ConfigParse.schema(Info, loaded, configFile)
+
+    expect(cfg.rulesInject).toBeDefined()
+    expect(cfg.rulesInject?.enabled).toBe(true)
+    expect(cfg.rulesInject?.alwaysApplyFolder).toBe("~/.rules/olho/always-apply")
   })
 })
 
