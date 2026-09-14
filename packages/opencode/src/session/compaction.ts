@@ -102,6 +102,37 @@ const postCompactionRestore = Effect.fn("SessionCompaction.postCompactionRestore
 
   return promotionResult
 })
+// Post-compaction Bensyne recall — reconstruct traversal history after compaction
+// by triggering a plugin hook that allows custom recall logic per provider/agent.
+// Best-effort: never blocks compaction.
+const postCompactionRecall = Effect.fn("SessionCompaction.postCompactionRecall")(function* (
+  sessionID: SessionID,
+  plugin: Plugin.Interface,
+  userMessage: MessageV2.User,
+) {
+  try {
+    // Trigger plugin hook to allow custom recall logic per provider/agent.
+    // The hook receives context about the session and can inject recall memories
+    // as synthetic user messages to help the agent reconstruct its position.
+    // Hook parameters: { sessionID, agent, model }
+    yield* plugin.trigger(
+      "experimental.compaction.post_recall",
+      {
+        sessionID,
+        agent: userMessage.agent,
+        model: userMessage.model,
+      },
+      undefined,
+    )
+  } catch (error) {
+    // Recall failure should not block compaction — log and continue
+    log.warn("post-compaction recall hook failed", {
+      sessionID,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+})
+
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
 <template>
 ## Goal
@@ -649,6 +680,12 @@ export const layer = Layer.effect(
         // Forked so it never blocks compaction; errors caught and logged as warnings
         // Cast via unknown to avoid leaking SessionMetadataService into processCompaction's env
         yield* (postCompactionRestore(input.sessionID, skills).pipe(
+          Effect.forkChild,
+        ) as unknown as Effect.Effect<void, never, never>)
+
+        // Post-compaction: Bensyne recall hook — reconstruct traversal history after compaction
+        // Allows custom recall logic per provider/agent via plugin hook
+        yield* (postCompactionRecall(input.sessionID, plugin, userMessage).pipe(
           Effect.forkChild,
         ) as unknown as Effect.Effect<void, never, never>)
       }

@@ -377,6 +377,25 @@ export interface Hooks {
     },
     output: { enabled: boolean },
   ) => Promise<void>
+  /**
+   * Called after compaction succeeds. Allows plugins to inject recall memories
+   * or other synthetic messages to help the agent reconstruct context after
+   * compaction.
+   *
+   * - `sessionID`: The session being compacted
+   * - `agent`: The agent name
+   * - `model`: The model used for the compaction
+   *
+   * Plugins should use the session service to inject synthetic user messages.
+   */
+  "experimental.compaction.post_recall"?: (
+    input: {
+      sessionID: string
+      agent: string
+      model: Model
+    },
+    output: undefined,
+  ) => Promise<void>
   "experimental.text.complete"?: (
     input: { sessionID: string; messageID: string; partID: string },
     output: { text: string },
