@@ -1,4 +1,7 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
+import * as Log from "@opencode-ai/core/util/log"
+
+const log = Log.create({ service: "plugin.bensyne-recall" })
 
 /**
  * Bensyne Recall Plugin
@@ -12,8 +15,6 @@ import type { Plugin, PluginInput } from "@opencode-ai/plugin"
  * immediately restores its memory of which decision node it's at.
  */
 export const BensyneRecallPlugin: Plugin = async (input: PluginInput) => {
-  const { client, log } = input
-
   log.info("Bensyne recall plugin initialized")
 
   return {
@@ -37,7 +38,7 @@ export const BensyneRecallPlugin: Plugin = async (input: PluginInput) => {
           promptLength: recallPrompt.length,
         })
 
-        const response = await client.session.prompt({
+        const response = await input.client.session.prompt({
           path: { id: ctx.sessionID },
           body: {
             parts: [
