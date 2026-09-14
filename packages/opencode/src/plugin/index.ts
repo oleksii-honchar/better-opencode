@@ -22,6 +22,7 @@ import { AzureAuthPlugin } from "./azure"
 import { DigitalOceanAuthPlugin } from "./digitalocean"
 import { XaiAuthPlugin } from "./xai"
 import { RulesInjectPlugin } from "./rules-inject"
+import { BensyneRecallPlugin } from "./bensyne"
 import { Effect, Layer, Context, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
@@ -85,6 +86,7 @@ const INTERNAL_PLUGINS: PluginInstance[] = [
   DigitalOceanAuthPlugin,
   XaiAuthPlugin,
   RulesInjectPlugin,
+  BensyneRecallPlugin,
 ]
 
 function isServerPlugin(value: unknown): value is PluginInstance {

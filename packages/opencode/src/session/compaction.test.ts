@@ -752,6 +752,196 @@ describe("SessionCompaction — Post-Compaction Dynamic Skill Promotion", () => 
 })
 
 // ---------------------------------------------------------------------------
+// Post-compaction Bensyne recall hook
+// ---------------------------------------------------------------------------
+
+describe("SessionCompaction — Post-Compaction Bensyne Recall Hook", () => {
+  const mockProject: Project.Info = {
+    id: ProjectID.make("proj-test"),
+    worktree: "/test-worktree",
+    time: { created: Date.now(), updated: Date.now() },
+    sandboxes: [],
+  }
+  const mockInstanceContext: InstanceContext = {
+    directory: "/test-dir",
+    worktree: "/test-worktree",
+    project: mockProject,
+    workspaceFolders: ["/test-dir"],
+  }
+
+  test("triggers experimental.compaction.post_recall plugin hook after compaction", async () => {
+    const mockBus = createMockBus()
+    const skillService = createMockSkillService()
+
+    // Track plugin hook calls
+    const hookCalls: Array<{ name: string; input: unknown }> = []
+    const pluginService: Plugin.Interface = {
+      trigger: Effect.fn("MockPlugin.trigger")(function* <Name, Input, Output>(
+        name: Name,
+        input: Input,
+        output: Output,
+      ) {
+        hookCalls.push({ name: String(name), input })
+        return output
+      }),
+      list: Effect.fn("MockPlugin.list")(function* () {
+        return []
+      }),
+      init: Effect.fn("MockPlugin.init")(function* () {}),
+    }
+
+    const parentID = MessageID.ascending()
+    const sessionID = SessionID.descending()
+    const messages = buildCompactionMessages(parentID, sessionID)
+
+    const program = Effect.gen(function* () {
+      const compaction = yield* Compaction.Service
+      const result = yield* compaction.process({
+        parentID,
+        messages,
+        sessionID,
+        auto: true,
+      })
+      // Wait briefly for forked recall to complete
+      yield* Effect.sleep(50)
+      return { result, hookCalls }
+    })
+
+    const allLayers = Compaction.layer.pipe(
+      Layer.provide(Layer.succeed(Bus.Service, mockBus)),
+      Layer.provide(Layer.succeed(Session.Service, createMockSession())),
+      Layer.provide(Layer.succeed(Agent.Service, createMockAgent())),
+      Layer.provide(Layer.succeed(Plugin.Service, pluginService)),
+      Layer.provide(Layer.succeed(Config.Service, createMockConfig())),
+      Layer.provide(Layer.succeed(Provider.Service, createMockProvider())),
+      Layer.provide(Layer.succeed(SessionProcessor.Service, createMockSessionProcessor())),
+      Layer.provide(Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags())),
+      Layer.provide(Layer.succeed(EventV2Bridge.Service, createMockEventV2Bridge())),
+      Layer.provide(Layer.succeed(Skill.Service, skillService)),
+      Layer.provide(Layer.succeed(SessionMetadataService, {
+        getMetadata: (_sessionID: string) =>
+          Effect.succeed({
+            dynamicSkillsScanned: new Set<string>(),
+            dynamicSkillsRegistered: {},
+            injectedSkills: new Set<string>(),
+          }),
+        addScannedDirectory: Effect.fn("MockSessionMetadata.addScannedDirectory")(function* () {}),
+        addRegisteredSkill: Effect.fn("MockSessionMetadata.addRegisteredSkill")(function* () {}),
+        wasDirectoryScanned: Effect.fn("MockSessionMetadata.wasDirectoryScanned")(function* () {
+          return false
+        }),
+        getRegisteredSkills: Effect.fn("MockSessionMetadata.getRegisteredSkills")(function* () {
+          return []
+        }),
+        wasSkillInjected: Effect.fn("MockSessionMetadata.wasSkillInjected")(function* () {
+          return false
+        }),
+        addInjectedSkill: Effect.fn("MockSessionMetadata.addInjectedSkill")(function* () {}),
+        clearMetadata: Effect.fn("MockSessionMetadata.clearMetadata")(function* () {}),
+      })),
+    )
+
+    const result = await Effect.runPromise(
+      Effect.provide(Effect.provideService(program, InstanceRef, mockInstanceContext), allLayers),
+    )
+
+    // Compaction should complete successfully
+    expect(result.result).toBe("continue")
+
+    // Plugin hook should have been called with correct name
+    const recallHook = result.hookCalls.find((call) => call.name === "experimental.compaction.post_recall")
+    expect(recallHook).toBeDefined()
+
+    // Hook input should contain session context
+    expect(recallHook!.input).toHaveProperty("sessionID")
+    expect(recallHook!.input).toHaveProperty("agent")
+    expect(recallHook!.input).toHaveProperty("model")
+  })
+
+  test("recall hook failure does not block compaction", async () => {
+    const mockBus = createMockBus()
+    const skillService = createMockSkillService()
+
+    // Plugin that throws when the recall hook is called
+    const pluginService: Plugin.Interface = {
+      trigger: Effect.fn("MockPlugin.trigger")(function* <Name, Input, Output>(
+        name: Name,
+        input: Input,
+        output: Output,
+      ) {
+        if (String(name) === "experimental.compaction.post_recall") {
+          throw new Error("Recall hook failed")
+        }
+        return output
+      }),
+      list: Effect.fn("MockPlugin.list")(function* () {
+        return []
+      }),
+      init: Effect.fn("MockPlugin.init")(function* () {}),
+    }
+
+    const parentID = MessageID.ascending()
+    const sessionID = SessionID.descending()
+    const messages = buildCompactionMessages(parentID, sessionID)
+
+    const program = Effect.gen(function* () {
+      const compaction = yield* Compaction.Service
+      const result = yield* compaction.process({
+        parentID,
+        messages,
+        sessionID,
+        auto: true,
+      })
+      // Wait for forked recall to complete (or fail)
+      yield* Effect.sleep(50)
+      return { result }
+    })
+
+    const allLayers = Compaction.layer.pipe(
+      Layer.provide(Layer.succeed(Bus.Service, mockBus)),
+      Layer.provide(Layer.succeed(Session.Service, createMockSession())),
+      Layer.provide(Layer.succeed(Agent.Service, createMockAgent())),
+      Layer.provide(Layer.succeed(Plugin.Service, pluginService)),
+      Layer.provide(Layer.succeed(Config.Service, createMockConfig())),
+      Layer.provide(Layer.succeed(Provider.Service, createMockProvider())),
+      Layer.provide(Layer.succeed(SessionProcessor.Service, createMockSessionProcessor())),
+      Layer.provide(Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags())),
+      Layer.provide(Layer.succeed(EventV2Bridge.Service, createMockEventV2Bridge())),
+      Layer.provide(Layer.succeed(Skill.Service, skillService)),
+      Layer.provide(Layer.succeed(SessionMetadataService, {
+        getMetadata: (_sessionID: string) =>
+          Effect.succeed({
+            dynamicSkillsScanned: new Set<string>(),
+            dynamicSkillsRegistered: {},
+            injectedSkills: new Set<string>(),
+          }),
+        addScannedDirectory: Effect.fn("MockSessionMetadata.addScannedDirectory")(function* () {}),
+        addRegisteredSkill: Effect.fn("MockSessionMetadata.addRegisteredSkill")(function* () {}),
+        wasDirectoryScanned: Effect.fn("MockSessionMetadata.wasDirectoryScanned")(function* () {
+          return false
+        }),
+        getRegisteredSkills: Effect.fn("MockSessionMetadata.getRegisteredSkills")(function* () {
+          return []
+        }),
+        wasSkillInjected: Effect.fn("MockSessionMetadata.wasSkillInjected")(function* () {
+          return false
+        }),
+        addInjectedSkill: Effect.fn("MockSessionMetadata.addInjectedSkill")(function* () {}),
+        clearMetadata: Effect.fn("MockSessionMetadata.clearMetadata")(function* () {}),
+      })),
+    )
+
+    // Should not throw even though the hook fails
+    const result = await Effect.runPromise(
+      Effect.provide(Effect.provideService(program, InstanceRef, mockInstanceContext), allLayers),
+    )
+
+    // Compaction should still complete successfully despite hook failure
+    expect(result.result).toBe("continue")
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Overflow replay — media file parts are replayed as generic placeholders
 // ---------------------------------------------------------------------------
 
