@@ -53,7 +53,7 @@ export const BensyneRecallPlugin: Plugin = async (input: PluginInput) => {
 
         log.info("Bensyne: recall prompt sent successfully", {
           sessionID: ctx.sessionID,
-          responseStatus: response?.status ?? "unknown",
+          responseStatus: response?.response?.status ?? "unknown",
         })
       } catch (err) {
         log.warn("Bensyne: post-compaction recall failed", {
