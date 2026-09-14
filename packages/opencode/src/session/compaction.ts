@@ -677,16 +677,18 @@ export const layer = Layer.effect(
         yield* bus.publish(Event.Compacted, { sessionID: input.sessionID })
 
         // Post-compaction: promote dynamic skills into startup skills so they appear in system prompt
-        // Forked so it never blocks compaction; errors caught and logged as warnings
+        // forkDetach so the fiber survives the compaction scope teardown (forkChild children get
+        // interrupted when the scope closes before they can execute); errors caught and logged as warnings
         // Cast via unknown to avoid leaking SessionMetadataService into processCompaction's env
         yield* (postCompactionRestore(input.sessionID, skills).pipe(
-          Effect.forkChild,
+          Effect.forkDetach,
         ) as unknown as Effect.Effect<void, never, never>)
 
         // Post-compaction: Bensyne recall hook — reconstruct traversal history after compaction
         // Allows custom recall logic per provider/agent via plugin hook
+        // forkDetach for the same reason as postCompactionRestore above
         yield* (postCompactionRecall(input.sessionID, plugin, userMessage).pipe(
-          Effect.forkChild,
+          Effect.forkDetach,
         ) as unknown as Effect.Effect<void, never, never>)
       }
       return result
