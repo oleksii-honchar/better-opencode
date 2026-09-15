@@ -1,5 +1,15 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
+import type { createOpencodeClient as createOpencodeClientV2 } from "@opencode-ai/sdk/v2"
 import * as Log from "@opencode-ai/core/util/log"
+
+// The runtime client passed to plugins is created from @opencode-ai/sdk/v2
+// (see plugin/index.ts createOpencodeClient import), but PluginInput.client is
+// typed as the v1 SDK client. Cast to the v2 client type so we call the v2
+// session.prompt signature ({ sessionID, parts, ... } flat params) instead of
+// the v1 shape ({ path: { id }, body: { parts } }) — the v1 shape leaves the
+// "{sessionID}" path placeholder unsubstituted and the server rejects it.
+const v2 = (client: PluginInput["client"]) =>
+  client as unknown as ReturnType<typeof createOpencodeClientV2>
 
 const log = Log.create({ service: "plugin.bensyne-recall" })
 
@@ -38,17 +48,15 @@ export const BensyneRecallPlugin: Plugin = async (input: PluginInput) => {
           promptLength: recallPrompt.length,
         })
 
-        const response = await input.client.session.prompt({
-          path: { id: ctx.sessionID },
-          body: {
-            parts: [
-              {
-                type: "text",
-                text: recallPrompt,
-                synthetic: true,
-              },
-            ],
-          },
+        const response = await v2(input.client).session.prompt({
+          sessionID: ctx.sessionID,
+          parts: [
+            {
+              type: "text",
+              text: recallPrompt,
+              synthetic: true,
+            },
+          ],
         })
 
         log.info("Bensyne: recall prompt sent successfully", {
