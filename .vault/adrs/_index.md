@@ -119,3 +119,4 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0104-provider-media-capability-map.adr.md]] — ADR-0104 (accepted): provider capability map for tool-result media
 - [[0105-display-first-render-pipeline.adr.md]] — ADR-0105 (accepted): display-first render pipeline
 - [[0106-fix-rules-inject-silent-failure.adr.md]] — Fix rules-inject Silent Failure with Observable Logging (ADR-0106, status: accepted)
+- [[0107-sequential-post-compaction-recall.adr.md]] — Sequential Post-Compaction Recall — Synchronous Hook Invocation (ADR-0107, status: accepted)

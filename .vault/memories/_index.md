@@ -36,3 +36,4 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0022-remote-type-nul-byte-workaround.memory.md]] — type: remote MCP Servers Break (NUL byte) — Use local mcp-remote Bridges
 - [[0023-litellm-mcp-tool-name-prefixing.memory.md]] — LiteLLM-Proxy MCP Tool Names Get <server>- Prefix; Unprefixed Allowlists Silently Break
 - [[0024-subagent-permission-ask-time-merge.memory.md]] — Subagent Permission Ask-Time Merge — Agent Allows Win Unless Session *:ask Lands Last
+- [[0025-post-compaction-recall-race-condition.memory.md]] — Post-Compaction Recall Race Condition — Async Fork Causes API Error
