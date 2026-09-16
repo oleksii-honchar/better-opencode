@@ -35,3 +35,4 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 
 - [[0021-agent-media-in-chat.spec.md]] — SPEC-0021 (approved): Agent Media Posting in Chat
 - [[0022-fix-rules-inject-silent-failure.spec.md]] — Fix rules-inject Silent Failure (kind: bugfix, status: completed)
+- [[0023-fix-post-compaction-recall-race-condition.spec.md]] — Fix Post-Compaction Recall Race Condition (kind: bugfix, status: completed)
