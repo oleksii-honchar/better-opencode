@@ -862,23 +862,23 @@ describe("SessionCompaction — Post-Compaction Bensyne Recall Hook", () => {
     const mockBus = createMockBus()
     const skillService = createMockSkillService()
 
-    // Plugin that throws when the recall hook is called
-    const pluginService: Plugin.Interface = {
-      trigger: Effect.fn("MockPlugin.trigger")(function* <Name, Input, Output>(
-        name: Name,
-        input: Input,
-        output: Output,
-      ) {
-        if (String(name) === "experimental.compaction.post_recall") {
-          throw new Error("Recall hook failed")
-        }
-        return output
-      }),
+    // Plugin that fails when the recall hook is called
+    const pluginService = {
+      trigger: Effect.fn("MockPlugin.trigger")(
+        function* (name: string, input: unknown, output: unknown) {
+          if (name === "experimental.compaction.post_recall") {
+            // Yield a failed effect to propagate failure through the effect system
+            yield* Effect.fail(new Error("Recall hook failed"))
+            return null
+          }
+          return output
+        },
+      ),
       list: Effect.fn("MockPlugin.list")(function* () {
         return []
       }),
       init: Effect.fn("MockPlugin.init")(function* () {}),
-    }
+    } as unknown as Plugin.Interface
 
     const parentID = MessageID.ascending()
     const sessionID = SessionID.descending()
@@ -892,8 +892,6 @@ describe("SessionCompaction — Post-Compaction Bensyne Recall Hook", () => {
         sessionID,
         auto: true,
       })
-      // Wait for forked recall to complete (or fail)
-      yield* Effect.sleep(50)
       return { result }
     })
 
@@ -931,7 +929,7 @@ describe("SessionCompaction — Post-Compaction Bensyne Recall Hook", () => {
       })),
     )
 
-    // Should not throw even though the hook fails
+    // Should not throw even though the hook fails (error is caught by Effect.catch)
     const result = await Effect.runPromise(
       Effect.provide(Effect.provideService(program, InstanceRef, mockInstanceContext), allLayers),
     )

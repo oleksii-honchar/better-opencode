@@ -110,27 +110,28 @@ const postCompactionRecall = Effect.fn("SessionCompaction.postCompactionRecall")
   plugin: Plugin.Interface,
   userMessage: MessageV2.User,
 ) {
-  try {
-    // Trigger plugin hook to allow custom recall logic per provider/agent.
-    // The hook receives context about the session and can inject recall memories
-    // as synthetic user messages to help the agent reconstruct its position.
-    // Hook parameters: { sessionID, agent, model }
-    yield* plugin.trigger(
-      "experimental.compaction.post_recall",
-      {
-        sessionID,
-        agent: userMessage.agent,
-        model: userMessage.model,
-      },
-      undefined,
-    )
-  } catch (error) {
-    // Recall failure should not block compaction — log and continue
-    log.warn("post-compaction recall hook failed", {
+  // Trigger plugin hook to allow custom recall logic per provider/agent.
+  // The hook receives context about the session and can inject recall memories
+  // as synthetic user messages to help the agent reconstruct its position.
+  // Hook parameters: { sessionID, agent, model }
+  yield* plugin.trigger(
+    "experimental.compaction.post_recall",
+    {
       sessionID,
-      error: error instanceof Error ? error.message : String(error),
-    })
-  }
+      agent: userMessage.agent,
+      model: userMessage.model,
+    },
+    undefined,
+  ).pipe(
+    Effect.catch((error: unknown) => {
+      // Recall failure should not block compaction — log and continue
+      log.warn("post-compaction recall hook failed", {
+        sessionID,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return Effect.succeed(undefined)
+    }),
+  )
 })
 
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
@@ -686,10 +687,10 @@ export const layer = Layer.effect(
 
         // Post-compaction: Bensyne recall hook — reconstruct traversal history after compaction
         // Allows custom recall logic per provider/agent via plugin hook
-        // forkDetach for the same reason as postCompactionRestore above
-        yield* (postCompactionRecall(input.sessionID, plugin, userMessage).pipe(
-          Effect.forkDetach,
-        ) as unknown as Effect.Effect<void, never, never>)
+        // Note: called synchronously (not forkDetach) to ensure correct message ordering —
+        // the compaction summary must be written before the recall prompt is sent, otherwise
+        // the API receives two consecutive assistant messages and rejects the request.
+        yield* postCompactionRecall(input.sessionID, plugin, userMessage)
       }
       return result
     })
