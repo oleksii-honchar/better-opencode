@@ -104,17 +104,19 @@ const postCompactionRestore = Effect.fn("SessionCompaction.postCompactionRestore
 })
 // Post-compaction Bensyne recall — reconstruct traversal history after compaction
 // by triggering a plugin hook that allows custom recall logic per provider/agent.
-// Best-effort: never blocks compaction.
+// Best-effort: never blocks compaction. Hook returns { text } which is injected
+// in-process as a synthetic user message (no HTTP round-trip).
 const postCompactionRecall = Effect.fn("SessionCompaction.postCompactionRecall")(function* (
   sessionID: SessionID,
   plugin: Plugin.Interface,
   userMessage: MessageV2.User,
 ) {
   // Trigger plugin hook to allow custom recall logic per provider/agent.
-  // The hook receives context about the session and can inject recall memories
-  // as synthetic user messages to help the agent reconstruct its position.
+  // The hook receives context about the session and can return recall memories
+  // as { text } which are injected in-process as synthetic user messages.
   // Hook parameters: { sessionID, agent, model }
-  yield* plugin.trigger(
+  const sessions = yield* Session.Service
+  const output = yield* plugin.trigger(
     "experimental.compaction.post_recall",
     {
       sessionID,
@@ -129,9 +131,45 @@ const postCompactionRecall = Effect.fn("SessionCompaction.postCompactionRecall")
         sessionID,
         error: error instanceof Error ? error.message : String(error),
       })
-      return Effect.succeed(undefined)
+      return Effect.succeed(undefined as any)
     }),
   )
+
+  // Inject any recall text returned by hooks as synthetic user messages (in-process)
+  if (output && (output as any).__hookResults) {
+    for (const { result } of (output as any).__hookResults) {
+      if (result && typeof result.text === "string" && result.text.trim().length > 0) {
+        try {
+          const userMsg: MessageV2.User = {
+            id: MessageID.ascending(),
+            sessionID,
+            role: "user",
+            time: { created: Date.now() },
+            agent: userMessage.agent,
+            model: userMessage.model,
+          }
+          yield* sessions.updateMessage(userMsg)
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            messageID: userMsg.id,
+            sessionID,
+            type: "text",
+            text: result.text,
+            synthetic: true,
+          } satisfies MessageV2.TextPart)
+          log.debug("injected post-compaction recall as synthetic user message", {
+            sessionID,
+            messageID: userMsg.id,
+          })
+        } catch (injectError: unknown) {
+          log.warn("failed to inject post-compaction recall message", {
+            sessionID,
+            error: injectError instanceof Error ? injectError.message : String(injectError),
+          })
+        }
+      }
+    }
+  }
 })
 
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
