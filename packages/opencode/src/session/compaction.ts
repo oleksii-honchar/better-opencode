@@ -110,12 +110,12 @@ const postCompactionRecall = Effect.fn("SessionCompaction.postCompactionRecall")
   sessionID: SessionID,
   plugin: Plugin.Interface,
   userMessage: MessageV2.User,
+  sessions: Session.Interface,
 ) {
   // Trigger plugin hook to allow custom recall logic per provider/agent.
-  // The hook receives context about the session and can return recall memories
-  // as { text } which are injected in-process as synthetic user messages.
+  // The hook receives context about the session and sets output.text with
+  // recall memories which are injected in-process as synthetic user messages.
   // Hook parameters: { sessionID, agent, model }
-  const sessions = yield* Session.Service
   const output = yield* plugin.trigger(
     "experimental.compaction.post_recall",
     {
@@ -123,7 +123,7 @@ const postCompactionRecall = Effect.fn("SessionCompaction.postCompactionRecall")
       agent: userMessage.agent,
       model: userMessage.model,
     },
-    undefined,
+    { text: undefined },
   ).pipe(
     Effect.catch((error: unknown) => {
       // Recall failure should not block compaction — log and continue
@@ -131,43 +131,39 @@ const postCompactionRecall = Effect.fn("SessionCompaction.postCompactionRecall")
         sessionID,
         error: error instanceof Error ? error.message : String(error),
       })
-      return Effect.succeed(undefined as any)
+      return Effect.succeed({ text: undefined } as any)
     }),
   )
 
-  // Inject any recall text returned by hooks as synthetic user messages (in-process)
-  if (output && (output as any).__hookResults) {
-    for (const { result } of (output as any).__hookResults) {
-      if (result && typeof result.text === "string" && result.text.trim().length > 0) {
-        try {
-          const userMsg: MessageV2.User = {
-            id: MessageID.ascending(),
-            sessionID,
-            role: "user",
-            time: { created: Date.now() },
-            agent: userMessage.agent,
-            model: userMessage.model,
-          }
-          yield* sessions.updateMessage(userMsg)
-          yield* sessions.updatePart({
-            id: PartID.ascending(),
-            messageID: userMsg.id,
-            sessionID,
-            type: "text",
-            text: result.text,
-            synthetic: true,
-          } satisfies MessageV2.TextPart)
-          log.debug("injected post-compaction recall as synthetic user message", {
-            sessionID,
-            messageID: userMsg.id,
-          })
-        } catch (injectError: unknown) {
-          log.warn("failed to inject post-compaction recall message", {
-            sessionID,
-            error: injectError instanceof Error ? injectError.message : String(injectError),
-          })
-        }
+  // Inject any recall text set by hooks as synthetic user messages (in-process)
+  if (output.text && typeof output.text === "string" && output.text.trim().length > 0) {
+    try {
+      const userMsg: MessageV2.User = {
+        id: MessageID.ascending(),
+        sessionID,
+        role: "user",
+        time: { created: Date.now() },
+        agent: userMessage.agent,
+        model: userMessage.model,
       }
+      yield* sessions.updateMessage(userMsg)
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: userMsg.id,
+        sessionID,
+        type: "text",
+        text: output.text,
+        synthetic: true,
+      } satisfies MessageV2.TextPart)
+      log.debug("injected post-compaction recall as synthetic user message", {
+        sessionID,
+        messageID: userMsg.id,
+      })
+    } catch (injectError: unknown) {
+      log.warn("failed to inject post-compaction recall message", {
+        sessionID,
+        error: injectError instanceof Error ? injectError.message : String(injectError),
+      })
     }
   }
 })
@@ -728,7 +724,7 @@ export const layer = Layer.effect(
         // Note: called synchronously (not forkDetach) to ensure correct message ordering —
         // the compaction summary must be written before the recall prompt is sent, otherwise
         // the API receives two consecutive assistant messages and rejects the request.
-        yield* postCompactionRecall(input.sessionID, plugin, userMessage)
+        yield* postCompactionRecall(input.sessionID, plugin, userMessage, session)
       }
       return result
     })

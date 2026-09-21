@@ -378,21 +378,22 @@ function autocontinue(enabled: boolean) {
   })
 }
 
-// Mock plugin hook for post-compaction recall that returns { text }
+// Mock plugin hook for post-compaction recall that sets output.text
 function postRecallPlugin(recallText: string | null | ((input: any, output: any) => any) | undefined) {
   return Layer.mock(Plugin.Service)({
     trigger: <Name extends string, Input, Output>(name: Name, input: Input, output: Output) => {
       if (name === "experimental.compaction.post_recall") {
         if (typeof recallText === "function") {
           return Effect.promise(async () => {
-            const result = recallText(input, output)
-            // post_recall passes undefined as output — return wrapper with __hookResults
-            return { __hookResults: [{ fn: () => {}, result }] }
+            recallText(input, output)
+            return output
           })
         }
         return Effect.sync(() => {
-          // post_recall passes undefined as output — return wrapper with __hookResults
-          return { __hookResults: [{ fn: () => {}, result: recallText ? { text: recallText } : undefined }] }
+          if (recallText) {
+            ;(output as { text?: string }).text = recallText
+          }
+          return output
         })
       }
       if (name === "experimental.compaction.autocontinue") {
@@ -1911,7 +1912,7 @@ describe("SessionNs.getUsage", () => {
           plugin: Layer.mock(Plugin.Service)({
             trigger: <Name extends string, Input, Output>(name: Name, _input: Input, output: Output) => {
               if (name === "experimental.compaction.post_recall") {
-                return Effect.fail(new Error("hook failed"))
+                return Effect.fail(new Error("hook failed")) as any
               }
               return Effect.succeed(output)
             },
@@ -1934,7 +1935,7 @@ describe("SessionNs.getUsage", () => {
           plugin: Layer.mock(Plugin.Service)({
             trigger: <Name extends string, Input, Output>(name: Name, _input: Input, output: Output) => {
               if (name === "experimental.compaction.post_recall") {
-                return Effect.fail(new Error("hook failed"))
+                return Effect.fail(new Error("hook failed")) as any
               }
               return Effect.succeed(output)
             },

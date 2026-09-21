@@ -24,7 +24,7 @@ export const BensyneRecallPlugin: Plugin = async (input: PluginInput) => {
   log.info("Bensyne recall plugin initialized")
 
   return {
-    "experimental.compaction.post_recall": async (ctx) => {
+    "experimental.compaction.post_recall": async (ctx, output) => {
       log.info("Bensyne: post-compaction recall hook triggered", {
         sessionID: ctx.sessionID,
         agent: ctx.agent,
@@ -39,7 +39,7 @@ export const BensyneRecallPlugin: Plugin = async (input: PluginInput) => {
         promptLength: recallPrompt.length,
       })
 
-      return { text: recallPrompt }
+      output.text = recallPrompt
     },
   }
 }

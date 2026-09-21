@@ -386,21 +386,12 @@ export const layer = Layer.effect(
         }
       }
 
-      const hookResults: Array<{ fn: any; result: any }> = []
       for (const hook of s.hooks) {
         const fn = hook[name] as any
         if (!fn) continue
-        const result = yield* Effect.promise(async () => fn(input, output))
-        hookResults.push({ fn, result })
+        yield* Effect.promise(async () => fn(input, output))
       }
-      // Attach hook results so callers can inspect returned values.
-      // For hooks that pass an output object, attach to it.
-      // For hooks that pass undefined (e.g. post_recall), return a wrapper object.
-      if (output !== undefined) {
-        ;(output as any).__hookResults = hookResults
-        return output
-      }
-      return { __hookResults: hookResults }
+      return output
     })
 
     const list = Effect.fn("Plugin.list")(function* () {
