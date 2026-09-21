@@ -2426,18 +2426,18 @@ noLLMServer.instance(
       const result = yield* prompt.prompt({
         sessionID,
         parts: [],
-        mode: "build",
+        agent: "build",
       })
 
       // Verify the synthetic message was consumed (loop processed it)
       expect(result).toBeDefined()
 
       // Verify the synthetic part was in the session history
-      const messages = yield* sessions.listMessages({ sessionID })
+      const messages = yield* sessions.messages({ sessionID })
       const syntheticMsgs = messages.filter(
-        (m) =>
-          m.role === "user" &&
-          m.parts.some((p) => p.type === "text" && p.synthetic === true && p.text.includes("synthetic recall")),
+        (m: typeof messages[number]) =>
+          m.info.role === "user" &&
+          m.parts.some((p: typeof m.parts[number]) => p.type === "text" && p.synthetic === true && p.text.includes("synthetic recall")),
       )
       expect(syntheticMsgs.length).toBeGreaterThanOrEqual(1)
     }),

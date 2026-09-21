@@ -394,7 +394,7 @@ export interface Hooks {
       agent: string
       model: Model
     },
-    output: undefined,
+    output: { text?: string },
   ) => Promise<void>
   "experimental.text.complete"?: (
     input: { sessionID: string; messageID: string; partID: string },

@@ -17,8 +17,13 @@ describe("plugin.bensyne", () => {
       }
       const input: PluginInput = {
         client: stubClient as any,
-        serverPort: 0,
-        serverUrl: "http://localhost:0",
+        project: {} as any,
+        directory: "/tmp",
+        worktree: "/tmp",
+        experimental_workspace: { register: () => {} },
+        serverUrl: new URL("http://localhost:0"),
+        $: {} as any,
+        llm: {} as any,
       }
 
       // Activate the plugin to get its hook map
@@ -34,16 +39,17 @@ describe("plugin.bensyne", () => {
         path: { cwd: "/tmp", root: "/tmp" },
       }
 
-      // Invoke the hook
-      const result = await hook(ctx as any)
+      // Invoke the hook (pass empty output object per widened contract)
+      const output: { text?: string } = {}
+      if (hook) {
+        await hook(ctx as any, output)
+      }
 
       // T5 assertions:
-      // 1. Hook returns { text } shape (not void)
-      expect(typeof result).toBe("object")
-      expect(result).not.toBeNull()
-      expect(typeof result.text).toBe("string")
-      expect(result.text).toContain("recall")
-      expect(result.text).toContain("Bensyne")
+      // 1. Hook sets output.text (not void)
+      expect(typeof output.text).toBe("string")
+      expect(output.text).toContain("recall")
+      expect(output.text).toContain("Bensyne")
 
       // 2. Hook never calls session.prompt (no HTTP side-effect)
       expect(promptCallCount).toBe(0)
