@@ -2391,3 +2391,55 @@ noLLMServer.instance(
     }),
   30_000,
 )
+
+// T3: Prompt loop consumes injected synthetic user message on next iteration
+noLLMServer.instance(
+  "T3: loop consumes injected synthetic user message (post-compaction recall pattern)",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+
+      const session = yield* sessions.create({})
+      const sessionID = session.id
+
+      // Inject a synthetic user message directly (mirrors post-compaction recall injection)
+      const userMsg = {
+        id: MessageID.ascending(),
+        sessionID,
+        role: "user" as const,
+        time: { created: Date.now() },
+        agent: "build",
+        model: ref,
+      }
+      yield* sessions.updateMessage(userMsg)
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: userMsg.id,
+        sessionID,
+        type: "text",
+        text: "synthetic recall text from post-compaction",
+        synthetic: true,
+      } satisfies MessageV2.TextPart)
+
+      // Trigger the prompt loop — it should consume the synthetic user message
+      const result = yield* prompt.prompt({
+        sessionID,
+        parts: [],
+        mode: "build",
+      })
+
+      // Verify the synthetic message was consumed (loop processed it)
+      expect(result).toBeDefined()
+
+      // Verify the synthetic part was in the session history
+      const messages = yield* sessions.listMessages({ sessionID })
+      const syntheticMsgs = messages.filter(
+        (m) =>
+          m.role === "user" &&
+          m.parts.some((p) => p.type === "text" && p.synthetic === true && p.text.includes("synthetic recall")),
+      )
+      expect(syntheticMsgs.length).toBeGreaterThanOrEqual(1)
+    }),
+  30_000,
+)

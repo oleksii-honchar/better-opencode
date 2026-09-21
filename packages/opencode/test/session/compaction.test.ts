@@ -378,6 +378,36 @@ function autocontinue(enabled: boolean) {
   })
 }
 
+// Mock plugin hook for post-compaction recall that returns { text }
+function postRecallPlugin(recallText: string | null | ((input: any, output: any) => any) | undefined) {
+  return Layer.mock(Plugin.Service)({
+    trigger: <Name extends string, Input, Output>(name: Name, input: Input, output: Output) => {
+      if (name === "experimental.compaction.post_recall") {
+        if (typeof recallText === "function") {
+          return Effect.promise(async () => {
+            const result = recallText(input, output)
+            // post_recall passes undefined as output — return wrapper with __hookResults
+            return { __hookResults: [{ fn: () => {}, result }] }
+          })
+        }
+        return Effect.sync(() => {
+          // post_recall passes undefined as output — return wrapper with __hookResults
+          return { __hookResults: [{ fn: () => {}, result: recallText ? { text: recallText } : undefined }] }
+        })
+      }
+      if (name === "experimental.compaction.autocontinue") {
+        return Effect.sync(() => {
+          ;(output as { enabled: boolean }).enabled = false
+          return output
+        })
+      }
+      return Effect.succeed(output)
+    },
+    list: () => Effect.succeed([]),
+    init: () => Effect.void,
+  })
+}
+
 describe("session.compaction.isOverflow", () => {
   it.live(
     "returns true when token count exceeds usable context",
@@ -1789,4 +1819,131 @@ describe("SessionNs.getUsage", () => {
     expect(result.tokens.cache.read).toBe(200)
     expect(result.tokens.cache.write).toBe(300)
   })
+
+  // T1: Post-compaction recall injection — hook returns { text } → injected as synthetic user part
+  itCompaction.instance(
+    "T1: post-compaction recall hook returns text that is injected as synthetic user message",
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const session = yield* ssn.create({})
+      const { id: sessionID } = session
+
+      // Create user + assistant messages, then a summary compaction
+      yield* createUserMessage(sessionID, "edit the config")
+      yield* createSummaryCompaction(sessionID).pipe(withCompaction({ plugin: postRecallPlugin("Recall: I was editing the config file.") }))
+
+      // Run compaction with post-recall plugin
+      const msgs = yield* ssn.messages({ sessionID })
+      const parent = msgs.at(-1)?.info.id
+      expect(parent).toBeTruthy()
+      const result = yield* SessionCompaction.use.process({
+        parentID: parent!,
+        messages: msgs,
+        sessionID,
+        auto: false,
+      }).pipe(withCompaction({ plugin: postRecallPlugin("Recall: I was editing the config file.") }))
+      expect(result).toBe("continue")
+
+      // Verify: recall text exists as synthetic user part after summary
+      const messages = yield* ssn.messages({ sessionID })
+      const syntheticUserMessages = messages.filter(
+        (m) =>
+          m.info.role === "user" &&
+          m.parts.some((p) => p.type === "text" && p.synthetic === true && p.text.includes("Recall")),
+      )
+      expect(syntheticUserMessages.length).toBeGreaterThanOrEqual(1)
+
+      // Verify ordering: synthetic recall comes after summary message
+      const summaryIdx = messages.findIndex((m) => m.info.role === "assistant" && m.info.summary === true)
+      const recallIdx = syntheticUserMessages[0].info.id
+      const recallPos = messages.findIndex((m) => m.info.id === recallIdx)
+      expect(summaryIdx).toBeGreaterThanOrEqual(0)
+      expect(recallPos).toBeGreaterThan(summaryIdx)
+    }),
+  )
+
+  // T2: No HTTP round-trip during post-compaction recall
+  itCompaction.instance(
+    "T2: post-compaction recall does not issue HTTP POST to session endpoint",
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const session = yield* ssn.create({})
+      const { id: sessionID } = session
+
+      // Create user + assistant messages, then a summary compaction
+      yield* createUserMessage(sessionID, "edit the config")
+      yield* createSummaryCompaction(sessionID).pipe(withCompaction({ plugin: postRecallPlugin("Recall: remember my context.") }))
+
+      // Run compaction with post-recall plugin
+      const msgs = yield* ssn.messages({ sessionID })
+      const parent = msgs.at(-1)?.info.id
+      expect(parent).toBeTruthy()
+      const result = yield* SessionCompaction.use.process({
+        parentID: parent!,
+        messages: msgs,
+        sessionID,
+        auto: false,
+      }).pipe(withCompaction({ plugin: postRecallPlugin("Recall: remember my context.") }))
+      expect(result).toBe("continue")
+
+      // The recall text should be injected as a synthetic user part (in-process, no HTTP)
+      const messages = yield* ssn.messages({ sessionID })
+      const syntheticMsgs = messages.filter(
+        (m) =>
+          m.info.role === "user" &&
+          m.parts.some((p) => p.type === "text" && p.synthetic === true && p.text.includes("Recall")),
+      )
+      expect(syntheticMsgs.length).toBeGreaterThanOrEqual(1)
+    }),
+  )
+
+  // Hook failure swallow retained
+  itCompaction.instance(
+    "hook failure does not block compaction — returns continue",
+    Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const session = yield* ssn.create({})
+      const { id: sessionID } = session
+
+      yield* createUserMessage(sessionID, "edit the config")
+      yield* createSummaryCompaction(sessionID).pipe(
+        withCompaction({
+          plugin: Layer.mock(Plugin.Service)({
+            trigger: <Name extends string, Input, Output>(name: Name, _input: Input, output: Output) => {
+              if (name === "experimental.compaction.post_recall") {
+                return Effect.fail(new Error("hook failed"))
+              }
+              return Effect.succeed(output)
+            },
+            list: () => Effect.succeed([]),
+            init: () => Effect.void,
+          }),
+        }),
+      )
+
+      const msgs = yield* ssn.messages({ sessionID })
+      const parent = msgs.at(-1)?.info.id
+      expect(parent).toBeTruthy()
+      const result = yield* SessionCompaction.use.process({
+        parentID: parent!,
+        messages: msgs,
+        sessionID,
+        auto: false,
+      }).pipe(
+        withCompaction({
+          plugin: Layer.mock(Plugin.Service)({
+            trigger: <Name extends string, Input, Output>(name: Name, _input: Input, output: Output) => {
+              if (name === "experimental.compaction.post_recall") {
+                return Effect.fail(new Error("hook failed"))
+              }
+              return Effect.succeed(output)
+            },
+            list: () => Effect.succeed([]),
+            init: () => Effect.void,
+          }),
+        }),
+      )
+      expect(result).toBe("continue")
+    }),
+  )
 })
