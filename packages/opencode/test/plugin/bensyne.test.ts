@@ -48,8 +48,9 @@ describe("plugin.bensyne", () => {
       // T5 assertions:
       // 1. Hook sets output.text (not void)
       expect(typeof output.text).toBe("string")
-      expect(output.text).toContain("recall")
-      expect(output.text).toContain("Bensyne")
+      expect(output.text).toContain("getPersonaEntryNode")
+      expect(output.text).toContain("re-enter the tree")
+      expect(output.text).toContain("agent-sessions_test-session-123")
 
       // 2. Hook never calls session.prompt (no HTTP side-effect)
       expect(promptCallCount).toBe(0)
