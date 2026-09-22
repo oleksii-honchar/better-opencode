@@ -31,8 +31,7 @@ export const BensyneRecallPlugin: Plugin = async (input: PluginInput) => {
         model: ctx.model,
       })
 
-      const recallPrompt =
-        "Please recall your current position in the decision tree by checking your traversal history in the Bensyne memory system (call recallMemory with category=traversal-history and relevant context)."
+      const recallPrompt = `Your session context was just compacted. To re-anchor in your persona decision tree: meta_search("getPersonaEntryNode") → meta_use("getPersonaEntryNode", { memory_bank: "your-persona-bank" }) to find the entry node, then traverse forward. Also recall your recent context from the current session bank — meta_search("recall") → meta_use("recall", { query: "<current task>", memory_bank: "agent-sessions_${ctx.sessionID}", limit: 5 }). Do not try to recall your prior position — re-enter the tree from the start. Before proceeding, state your current node and the status of its target, veto, and conditions for traversal.`
 
       log.info("Bensyne: recall queued (in-process injection)", {
         sessionID: ctx.sessionID,
