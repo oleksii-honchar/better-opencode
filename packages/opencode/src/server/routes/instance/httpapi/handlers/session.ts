@@ -11,7 +11,7 @@ import {
   listAll as listAllSessionMetadata,
   get as getSessionMetadata,
   set as setSessionMetadata,
-} from "@/session/session-metadata"
+} from "@/session/session-state"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
