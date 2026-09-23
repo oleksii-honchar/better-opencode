@@ -12,6 +12,7 @@ import { MessageID, PartID, SessionID } from "@/session/schema"
 import { Snapshot } from "@/snapshot"
 import { Schema, Struct } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
+
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import {
@@ -98,6 +99,9 @@ export const SessionPaths = {
   deleteMessage: `${root}/:sessionID/message/:messageID`,
   deletePart: `${root}/:sessionID/message/:messageID/part/:partID`,
   updatePart: `${root}/:sessionID/message/:messageID/part/:partID`,
+  listMetadata: `${root}/:sessionID/metadata`,
+  getMetadata: `${root}/:sessionID/metadata/:key`,
+  setMetadata: `${root}/:sessionID/metadata/:key`,
 } as const
 
 export const SessionApi = HttpApi.make("session")
@@ -436,6 +440,43 @@ export const SessionApi = HttpApi.make("session")
           OpenApi.annotations({
             identifier: "part.update",
             description: "Update a part in a message.",
+          }),
+        ),
+        HttpApiEndpoint.get("listMetadata", SessionPaths.listMetadata, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String })), "Metadata entries"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.listMetadata",
+            summary: "List session metadata",
+            description: "List all key-value metadata entries for a session.",
+          }),
+        ),
+        HttpApiEndpoint.get("getMetadata", SessionPaths.getMetadata, {
+          params: { sessionID: SessionID, key: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Struct({ key: Schema.String, value: Schema.String }), "Metadata entry"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.getMetadata",
+            summary: "Get session metadata key",
+            description: "Get a specific key's value from session metadata.",
+          }),
+        ),
+        HttpApiEndpoint.put("setMetadata", SessionPaths.setMetadata, {
+          params: { sessionID: SessionID, key: Schema.String },
+          query: WorkspaceRoutingQuery,
+          payload: Schema.Struct({ value: Schema.String }),
+          success: described(Schema.Boolean, "Successfully set metadata"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.setMetadata",
+            summary: "Set session metadata key",
+            description: "Set a specific key's value in session metadata (upsert).",
           }),
         ),
       )

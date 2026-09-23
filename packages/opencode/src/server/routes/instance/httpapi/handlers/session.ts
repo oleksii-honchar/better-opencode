@@ -7,6 +7,11 @@ import { SessionShare } from "@/share/session"
 import { Session } from "@/session/session"
 import { SessionCompaction } from "@/session/compaction"
 import { MessageV2 } from "@/session/message-v2"
+import {
+  listAll as listAllSessionMetadata,
+  get as getSessionMetadata,
+  set as setSessionMetadata,
+} from "@/session/session-metadata"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
@@ -59,6 +64,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const statusSvc = yield* SessionStatus.Service
     const todoSvc = yield* Todo.Service
     const summary = yield* SessionSummary.Service
+
     const bus = yield* Bus.Service
     const scope = yield* Scope.Scope
 
@@ -424,6 +430,33 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return yield* session.updatePart(payload)
     })
 
+    const listMetadata = Effect.fn("SessionHttpApi.listMetadata")(function* (ctx: {
+      params: { sessionID: SessionID }
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* listAllSessionMetadata(ctx.params.sessionID)
+    })
+
+    const getMetadata = Effect.fn("SessionHttpApi.getMetadata")(function* (ctx: {
+      params: { sessionID: SessionID; key: string }
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      const result = yield* getSessionMetadata(ctx.params.sessionID, ctx.params.key)
+      if (result === null) {
+        return yield* ApiError.notFound(`Metadata key not found: ${ctx.params.key}`)
+      }
+      return result
+    })
+
+    const setMetadata = Effect.fn("SessionHttpApi.setMetadata")(function* (ctx: {
+      params: { sessionID: SessionID; key: string }
+      payload: { value: string }
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      yield* setSessionMetadata(ctx.params.sessionID, ctx.params.key, ctx.payload.value)
+      return true
+    })
+
     return handlers
       .handle("list", list)
       .handle("status", status)
@@ -452,5 +485,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("deleteMessage", deleteMessage)
       .handle("deletePart", deletePart)
       .handle("updatePart", updatePart)
-  }),
+      .handle("listMetadata", listMetadata)
+      .handle("getMetadata", getMetadata)
+      .handle("setMetadata", setMetadata)
+   }),
 )
