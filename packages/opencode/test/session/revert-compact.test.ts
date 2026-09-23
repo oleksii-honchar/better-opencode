@@ -501,7 +501,7 @@ describe("revert + compact workflow", () => {
               sessionID: sid,
               type: "patch",
               hash: patch.hash,
-              files: patch.files,
+              files: [...patch.files],
             })
             return u.id
           })
@@ -596,7 +596,7 @@ describe("revert + compact workflow", () => {
               sessionID: sid,
               type: "patch",
               hash: patch.hash,
-              files: patch.files,
+              files: [...patch.files],
             })
             return u.id
           })

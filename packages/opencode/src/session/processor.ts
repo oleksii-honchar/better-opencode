@@ -596,7 +596,7 @@ export const layer = Layer.effect(
                   sessionID: ctx.sessionID,
                   type: "patch",
                   hash: patch.hash,
-                  files: patch.files,
+                  files: [...patch.files],
                 })
               }
               ctx.snapshot = undefined
@@ -698,7 +698,7 @@ export const layer = Layer.effect(
               sessionID: ctx.sessionID,
               type: "patch",
               hash: patch.hash,
-              files: patch.files,
+              files: [...patch.files],
             })
           }
           ctx.snapshot = undefined

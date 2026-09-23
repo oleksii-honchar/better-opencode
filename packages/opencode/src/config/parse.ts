@@ -52,7 +52,7 @@ export function schema<S extends EffectSchema.Top>(
     })
   }
 
-  const decoded = EffectSchema.decodeUnknownExit(schema)(data, { errors: "all", propertyOrder: "original" })
+  const decoded = EffectSchema.decodeUnknownExit(schema as any)(data, { errors: "all", propertyOrder: "original" })
   if (Exit.isSuccess(decoded)) return decoded.value as DeepMutable<S["Type"]>
   const error = Cause.squash(decoded.cause)
 

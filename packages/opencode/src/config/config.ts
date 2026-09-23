@@ -657,7 +657,7 @@ export const layer = Layer.effect(
             ...(result.plugin_origins ?? []),
             ...list.map((spec) => ({ spec, source, scope: hit })),
           ])
-          result.plugin = plugins.map((item) => item.spec)
+          result.plugin = plugins.map((item) => item.spec) as (string | [string, Record<string, unknown>])[]
           result.plugin_origins = plugins
         })
 

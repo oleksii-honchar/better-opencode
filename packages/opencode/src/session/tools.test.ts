@@ -841,8 +841,7 @@ describe("processContentItems — tool_response_file", () => {
 describe("processContentItems — integration (real file I/O)", () => {
   // Helper: create a temp dir, return cleanup function
   function createTempDir(): { dir: string; cleanup: () => void } {
-    const dir = Bun.file(Bun.spawnSync(["mktemp", "-d"]).stdout.toString().trim())
-    const tmpPath = dir.path
+    const tmpPath = Bun.spawnSync(["mktemp", "-d"]).stdout.toString().trim()
     return {
       dir: tmpPath,
       cleanup: () => {
