@@ -25,3 +25,4 @@ Mental models, domain vocabulary, and architectural patterns used in better-open
 - [[0011-dynamic-skill-visibility.concept.md]] — Dynamic Skill Visibility Chain (Registered but Invisible): process-wide registration vs per-session injection, plugin search blind spot, KV-cache-driven visibility gap
 - [[0012-mcp-oauth-auth-flow.concept.md]] — MCP OAuth Auth Flow: SDK auth chain, guardedFetchFn transport boundary, oauthServers type-remote-only limitation
 - [[0013-in-flight-model-switching.concept.md]] — In-flight Model Switching: agent-driven mid-turn model switching via a `switch_model` tool riding the runLoop per-iteration model re-resolution
+- [[0014-session-stopping-turn-interruption.concept.md]] — Session Stopping Hook: fork-specific turn-interruption delivery primitive for authoritative mid-turn messages (ADR-0014 hard-gate mechanism)
