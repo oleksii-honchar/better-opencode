@@ -104,9 +104,12 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
     Effect.gen(function* () {
       const plugins = config.plugin
       if (!plugins) return config
-      for (let i = 0; i < plugins.length; i++) {
-        plugins[i] = yield* Effect.promise(() => ConfigPlugin.resolvePluginSpec(plugins[i], configFilepath))
+      const resolved: (string | [string, Record<string, unknown>])[] = []
+      for (const spec of plugins) {
+        const resolvedSpec = yield* Effect.promise(() => ConfigPlugin.resolvePluginSpec(spec as string | [string, Record<string, unknown>], configFilepath))
+        resolved.push(resolvedSpec as string | [string, Record<string, unknown>])
       }
+      config.plugin = resolved
       return config
     })
 
@@ -185,7 +188,7 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
         ...acc.plugin_origins,
         ...data.plugin.map((spec) => ({ spec, scope, source: file })),
       ])
-      acc.result.plugin = plugins.map((item) => item.spec)
+      acc.result.plugin = plugins.map((item) => item.spec) as (string | [string, Record<string, unknown>])[]
       acc.plugin_origins = plugins
     })
 

@@ -186,7 +186,7 @@ export async function loadMode(dir: string) {
       result[config.name] = {
         ...parsed.value,
         mode: "primary" as const,
-      }
+      } as Info
     }
   }
   return result
