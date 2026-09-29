@@ -59,6 +59,7 @@ import { Reference } from "@/reference/reference"
 import { store as storeAttachment, trackForMessage, hasAttachments as hasMessageAttachments } from "@/session/attachment"
 import { DynamicSkillScanner } from "@/skill/dynamic-scanner"
 import { Ripgrep } from "@/file/ripgrep"
+import { checkAndResetNewTurnRequested, requestNewTurn } from "./force-new-turn-signal"
 
 const FILE_ATTACHMENTS_SYSTEM_PROMPT = `## File Attachments
   You can see files that have been attached by the user.
@@ -400,7 +401,7 @@ export const layer = Layer.effect(
       title: string
       output: string
       metadata: any
-      inject?: Array<{ role: "user" | "system"; text: string }>
+      inject?: Array<{ role: "user" | "system"; text: string; force_new_turn?: boolean }>
     }
 
     /**
@@ -409,13 +410,13 @@ export const layer = Layer.effect(
      * System-role injections are wrapped in <system-reminder> tags.
      */
     const flushInjectedMessages = Effect.fn("SessionPrompt.flushInjectedMessages")(function* (input: {
-      injected: Array<{ role: "user" | "system"; text: string }>
+      injected: Array<{ role: "user" | "system"; text: string; force_new_turn?: boolean }>
       sessionID: SessionID
       agent: string
       providerID: ProviderID
       modelID: ModelID
     }) {
-      if (input.injected.length === 0) return
+      if (input.injected.length === 0) return "ok"
 
       for (const injection of input.injected) {
         const isSystem = injection.role === "system"
@@ -442,6 +443,14 @@ export const layer = Layer.effect(
           synthetic: true,
         } satisfies MessageV2.TextPart)
       }
+
+      // Check for force_new_turn flag
+      const hasForceNewTurn = input.injected.some((i) => i.force_new_turn)
+      if (hasForceNewTurn) {
+        checkAndResetNewTurnRequested() // Reset any previous signal
+        requestNewTurn()
+      }
+      return "ok"
     })
 
     const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
@@ -1450,6 +1459,8 @@ export const layer = Layer.effect(
         let step = 0
         const maxStoppingContinuations = 3
         let stoppingContinuationCount = 0
+        const maxForceNewTurns = 3
+        let forceNewTurnCount = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
@@ -1813,6 +1824,23 @@ export const layer = Layer.effect(
             Effect.onInterrupt(() => finalizeInterruptedAssistant),
           )
           if (outcome === "break") break
+
+          // Check for force_new_turn signal from tool.execute.after hooks
+          if (checkAndResetNewTurnRequested()) {
+            forceNewTurnCount++
+            if (forceNewTurnCount >= maxForceNewTurns) {
+              yield* slog.warn(
+                `force_new_turn triggered ${maxForceNewTurns} times — forcing continuation`,
+              )
+              forceNewTurnCount = 0  // Reset to prevent permanent block
+              continue  // Continue the loop
+            }
+            // Break out of the current turn — the injected message will be
+            // seen as the first message of the next turn
+            yield* slog.info("force_new_turn triggered — breaking out of turn")
+            break
+          }
+
           continue
         }
 

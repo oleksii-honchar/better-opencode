@@ -296,12 +296,23 @@ function cmd(shell: string, command: string, cwd: string, env: NodeJS.ProcessEnv
     })
   }
 
+  if (process.platform !== "win32") {
+    // POSIX: run via a login shell that sources ~/.zshenv + ~/.zshrc (bash: ~/.bashrc)
+    // so every bash-tool command sees the user's declared functions and env vars.
+    return ChildProcess.make(shell, Shell.args(shell, command, cwd), {
+      cwd,
+      env,
+      stdin: "ignore",
+      detached: true,
+    })
+  }
+
   return ChildProcess.make(command, [], {
     shell,
     cwd,
     env,
     stdin: "ignore",
-    detached: process.platform !== "win32",
+    detached: false,
   })
 }
 const parser = lazy(async () => {

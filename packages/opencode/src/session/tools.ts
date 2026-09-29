@@ -21,6 +21,7 @@ import * as Log from "@opencode-ai/core/util/log"
 import { EffectBridge } from "@/effect/bridge"
 import { DynamicSkillScanner } from "@/skill/dynamic-scanner"
 import * as SessionMetadata from "@/skill/session-metadata"
+import { requestNewTurn } from "./force-new-turn-signal"
 
 const log = Log.create({ service: "session.tools" })
 
@@ -175,7 +176,7 @@ type ToolExecuteAfterOutput = {
   title: string
   output: string
   metadata: any
-  inject?: Array<{ role: "user" | "system"; text: string }>
+  inject?: Array<{ role: "user" | "system"; text: string; force_new_turn?: boolean }>
 }
 
 /**
@@ -184,13 +185,13 @@ type ToolExecuteAfterOutput = {
  * System-role injections are wrapped in <system-reminder> tags.
  */
 const flushInjectedMessages = Effect.fn("SessionTools.flushInjectedMessages")(function* (input: {
-  injected: Array<{ role: "user" | "system"; text: string }>
+  injected: Array<{ role: "user" | "system"; text: string; force_new_turn?: boolean }>
   sessionID: SessionID
   agent: string
   providerID: ProviderID
   modelID: ModelID
 }) {
-  if (input.injected.length === 0) return
+  if (input.injected.length === 0) return "ok"
 
   const sessions = yield* Session.Service
 
@@ -219,6 +220,13 @@ const flushInjectedMessages = Effect.fn("SessionTools.flushInjectedMessages")(fu
       synthetic: true,
     } satisfies MessageV2.TextPart)
   }
+
+  // Check for force_new_turn flag
+  const hasForceNewTurn = input.injected.some((i) => i.force_new_turn)
+  if (hasForceNewTurn) {
+    requestNewTurn()
+  }
+  return "ok"
 })
 
 export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
