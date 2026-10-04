@@ -178,12 +178,11 @@ async function* streamWithDetection(
         // Cross-stream doom-loop detection: after per-stream check, on tool-input-end,
         // call manager.recordCall if cross-stream detection is enabled and manager exists.
         // Route through the SAME evidence gate as per-stream detections — never throw immediately.
-        // NOTE: enableCrossStreamDoomLoopDetection defaults to false (opt-in).
-        // Single-state design weakness (memory 0015): the cross-stream manager uses one
-        // DoomLoopRunState per session, so if the model calls tool A, then tool B, then
-        // tool A again with the same input, the run is broken — the count resets to 1
-        // instead of continuing. This means cross-stream detection only catches truly
-        // consecutive identical tool+input calls across streams, not interleaved patterns.
+        // NOTE: enableCrossStreamDoomLoopDetection defaults to true (DEC-1, post
+        // 2026-10-03 incident). The manager now tracks per-(session, tool,
+        // fingerprint) counts, so interleaved A-B-A-B calls keep incrementing each
+        // key's count instead of resetting — the alternating-loop blind spot of the
+        // old single-state design (memory 0015) is closed.
         if (mappedChunk.type === "tool-input-end" && !mappedChunk.providerExecuted) {
           if (config.enableCrossStreamDoomLoopDetection && crossStreamManager && sessionId) {
             const input = (mappedChunk as any).input ?? {}

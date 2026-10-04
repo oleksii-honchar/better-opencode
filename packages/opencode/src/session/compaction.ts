@@ -153,6 +153,10 @@ const postCompactionRecall = Effect.fn("SessionCompaction.postCompactionRecall")
         sessionID,
         type: "text",
         text: output.text,
+        // Auditability marker (DEC-2/A2): mirrors the compaction_continue
+        // convention below — grepping session history for compaction_recall
+        // gives the re-anchor injection count as ground truth.
+        metadata: { compaction_recall: true },
         synthetic: true,
       } satisfies MessageV2.TextPart)
       log.debug("injected post-compaction recall as synthetic user message", {
@@ -168,10 +172,96 @@ const postCompactionRecall = Effect.fn("SessionCompaction.postCompactionRecall")
   }
 })
 
+// A4 (DEC-3): cap consecutive auto-continue injections. The 2026-10-03
+// incident showed auto-continue "Continue if you have next steps" messages
+// fueling a compaction↔re-anchor doom-loop. Walk the message history
+// backwards from the compaction parent counting synthetic user messages
+// carrying the compaction_continue marker. Only a REAL user message
+// (non-synthetic text) breaks the chain — synthetic unmarked user messages
+// (recall prompts) and auto-created compaction parents (no text parts) are
+// loop machinery: they neither count nor reset. At/above the cap the
+// continue message is not injected.
+const MAX_CONSECUTIVE_AUTOCONTINUES = 3
+
+function countConsecutiveAutoContinues(messages: MessageV2.WithParts[], parentIndex: number): number {
+  let count = 0
+  for (let i = parentIndex - 1; i >= 0; i--) {
+    const msg = messages[i]!
+    if (msg.info.role !== "user") continue
+    const marked = msg.parts.some((part) => part.type === "text" && part.metadata?.compaction_continue === true)
+    if (marked) {
+      count++
+      continue
+    }
+    const realInput = msg.parts.some((part) => part.type === "text" && !part.synthetic)
+    if (realInput) break
+  }
+  return count
+}
+
+// C1 (DEC-4): the 2026-10-03 anchored-summary loop laundered a confabulated
+// goal into every later pass because nothing pinned the real task. The first
+// REAL user message (no synthetic text, no compaction/compaction_continue/
+// compaction_recall markers, no compaction part) is seeded verbatim into the
+// summarizer prompt as an <original-task> block. Long requests are truncated
+// to keep the context cost bounded.
+const ORIGINAL_TASK_MAX_CHARS = 2_000
+
+function hasCompactionMarker(part: MessageV2.TextPart): boolean {
+  const metadata = part.metadata as Record<string, unknown> | undefined
+  if (!metadata) return false
+  return metadata.compaction === true || metadata.compaction_continue === true || metadata.compaction_recall === true
+}
+
+function isRealUserMessage(msg: MessageV2.WithParts): boolean {
+  if (msg.info.role !== "user") return false
+  if (msg.parts.some((part) => part.type === "compaction")) return false
+  return msg.parts.some((part) => part.type === "text" && !part.synthetic && !hasCompactionMarker(part))
+}
+
+function extractOriginalTask(messages: MessageV2.WithParts[]): string | undefined {
+  for (const msg of messages) {
+    if (!isRealUserMessage(msg)) continue
+    const text = msg.parts
+      .filter(
+        (part): part is MessageV2.TextPart => part.type === "text" && !part.synthetic && !hasCompactionMarker(part),
+      )
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join("\n")
+    if (!text) continue
+    return text.length > ORIGINAL_TASK_MAX_CHARS ? text.slice(0, ORIGINAL_TASK_MAX_CHARS) + "…" : text
+  }
+  return undefined
+}
+
+// C2 (DEC-4): goal-drift tripwire. Cheap normalized string compare of the
+// ## Goal section between successive summaries; with no intervening real user
+// message a drift means the summarizer moved the goal on its own (E11 class).
+// Tripwire only — never blocks or alters the summary.
+function extractGoal(summary: string): string | undefined {
+  const match = /## Goal\n([\s\S]*?)(?=\n## |$)/.exec(summary)
+  if (!match) return undefined
+  return match[1]!.trim().replace(/\s+/g, " ").toLowerCase()
+}
+
+function hasRealUserMessageBetween(messages: MessageV2.WithParts[], fromID: MessageID, toID: MessageID): boolean {
+  const from = messages.findIndex((m) => m.info.id === fromID)
+  const to = messages.findIndex((m) => m.info.id === toID)
+  if (from === -1 || to === -1 || to <= from + 1) return false
+  for (let i = from + 1; i < to; i++) {
+    if (isRealUserMessage(messages[i]!)) return true
+  }
+  return false
+}
+
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
 <template>
 ## Goal
 - [single-sentence task summary]
+
+## Original Task (immutable)
+- [verbatim first real user request; copy unchanged]
 
 ## Constraints & Preferences
 - [user constraints, preferences, specs, or "(none)"]
@@ -208,6 +298,7 @@ const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <te
 
 Rules:
 - Keep every section, even when empty.
+- Goal must be consistent with Original Task; if they conflict, Goal follows Original Task.
 - Use terse bullets, not prose paragraphs.
 - Preserve exact file paths, commands, error strings, and identifiers when known.
 - Do not mention the summary process or that context was compacted.`
@@ -223,6 +314,7 @@ type Tail = {
 }
 
 type CompletedCompaction = {
+  userID: MessageID
   userIndex: number
   assistantIndex: number
   summary: string | undefined
@@ -252,11 +344,11 @@ function completedCompactions(messages: MessageV2.WithParts[]) {
     if (!msg.info.summary || !msg.info.finish || msg.info.error) return []
     const userIndex = users.get(msg.info.parentID)
     if (userIndex === undefined) return []
-    return [{ userIndex, assistantIndex, summary: summaryText(msg) }]
+    return [{ userID: msg.info.parentID, userIndex, assistantIndex, summary: summaryText(msg) }]
   })
 }
 
-function buildPrompt(input: { previousSummary?: string; context: string[] }) {
+function buildPrompt(input: { previousSummary?: string; context: string[]; originalTask?: string }) {
   const anchor = input.previousSummary
     ? [
         "Update the anchored summary below using the conversation history above.",
@@ -266,7 +358,17 @@ function buildPrompt(input: { previousSummary?: string; context: string[] }) {
         "</previous-summary>",
       ].join("\n")
     : "Create a new anchored summary from the conversation history above."
-  return [anchor, SUMMARY_TEMPLATE, ...input.context].join("\n\n")
+  // C1: pin the real task so the anchored-summary loop cannot launder a
+  // confabulated goal past the summarizer (DEC-4 / E11).
+  const originalTask = input.originalTask
+    ? [
+        "<original-task>",
+        "Copy this block verbatim into the Original Task section. Never rewrite, reinterpret, or merge it.",
+        input.originalTask,
+        "</original-task>",
+      ].join("\n")
+    : undefined
+  return [anchor, originalTask, SUMMARY_TEMPLATE, ...input.context].filter((x) => x !== undefined).join("\n\n")
 }
 
 function preserveRecentBudget(input: { cfg: Config.Info; model: Provider.Model }) {
@@ -522,6 +624,7 @@ export const layer = Layer.effect(
       const prior = completedCompactions(history)
       const hidden = new Set(prior.flatMap((item) => [item.userIndex, item.assistantIndex]))
       const previousSummary = prior.at(-1)?.summary
+      const originalTask = extractOriginalTask(input.messages)
       const selected = yield* select({
         messages: history.filter((_, index) => !hidden.has(index)),
         cfg,
@@ -533,7 +636,7 @@ export const layer = Layer.effect(
         { sessionID: input.sessionID },
         { context: [], prompt: undefined },
       )
-      const nextPrompt = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context })
+      const nextPrompt = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context, originalTask })
       const msgs = structuredClone(selected.head)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
       const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, {
@@ -637,56 +740,67 @@ export const layer = Layer.effect(
         }
 
         if (!replay) {
-          const info = yield* provider.getProvider(userMessage.model.providerID)
-          if (
-            (yield* plugin.trigger(
-              "experimental.compaction.autocontinue",
-              {
-                sessionID: input.sessionID,
-                agent: userMessage.agent,
-                model: yield* provider
-                  .getModel(userMessage.model.providerID, userMessage.model.modelID)
-                  .pipe(Effect.orDie),
-                provider: {
-                  source: info.source,
-                  info,
-                  options: info.options,
+          // A4: suppress the continue message once too many consecutive
+          // compaction_continue injections already precede this compaction.
+          const parentIndex = input.messages.findIndex((m) => m.info.id === input.parentID)
+          const consecutiveContinue = countConsecutiveAutoContinues(input.messages, parentIndex)
+          if (consecutiveContinue >= MAX_CONSECUTIVE_AUTOCONTINUES) {
+            log.warn("auto-continue cap reached — stopping", {
+              sessionID: input.sessionID,
+              consecutive: consecutiveContinue,
+            })
+          } else {
+            const info = yield* provider.getProvider(userMessage.model.providerID)
+            if (
+              (yield* plugin.trigger(
+                "experimental.compaction.autocontinue",
+                {
+                  sessionID: input.sessionID,
+                  agent: userMessage.agent,
+                  model: yield* provider
+                    .getModel(userMessage.model.providerID, userMessage.model.modelID)
+                    .pipe(Effect.orDie),
+                  provider: {
+                    source: info.source,
+                    info,
+                    options: info.options,
+                  },
+                  message: userMessage,
+                  overflow: input.overflow === true,
                 },
-                message: userMessage,
-                overflow: input.overflow === true,
-              },
-              { enabled: true },
-            )).enabled
-          ) {
-            const continueMsg = yield* session.updateMessage({
-              id: MessageID.ascending(),
-              role: "user",
-              sessionID: input.sessionID,
-              time: { created: Date.now() },
-              agent: userMessage.agent,
-              model: userMessage.model,
-            })
-            const text =
-              (input.overflow
-                ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
-                : "") +
-              "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: continueMsg.id,
-              sessionID: input.sessionID,
-              type: "text",
-              // Internal marker for auto-compaction followups so provider plugins
-              // can distinguish them from manual post-compaction user prompts.
-              // This is not a stable plugin contract and may change or disappear.
-              metadata: { compaction_continue: true },
-              synthetic: true,
-              text,
-              time: {
-                start: Date.now(),
-                end: Date.now(),
-              },
-            })
+                { enabled: true },
+              )).enabled
+            ) {
+              const continueMsg = yield* session.updateMessage({
+                id: MessageID.ascending(),
+                role: "user",
+                sessionID: input.sessionID,
+                time: { created: Date.now() },
+                agent: userMessage.agent,
+                model: userMessage.model,
+              })
+              const text =
+                (input.overflow
+                  ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
+                  : "") +
+                "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
+              yield* session.updatePart({
+                id: PartID.ascending(),
+                messageID: continueMsg.id,
+                sessionID: input.sessionID,
+                type: "text",
+                // Internal marker for auto-compaction followups so provider plugins
+                // can distinguish them from manual post-compaction user prompts.
+                // This is not a stable plugin contract and may change or disappear.
+                metadata: { compaction_continue: true },
+                synthetic: true,
+                text,
+                time: {
+                  start: Date.now(),
+                  end: Date.now(),
+                },
+              })
+            }
           }
         }
       }
@@ -701,6 +815,29 @@ export const layer = Layer.effect(
             parts: [],
           },
         )
+        // C2 (DEC-4): goal-drift tripwire — a Goal change between successive
+        // summaries with no real user message in between means the summarizer
+        // moved the goal on its own (E11 class). Warn + flag the summary
+        // message; never block or alter the produced summary.
+        const priorCompaction = prior.at(-1)
+        if (previousSummary && summary && priorCompaction) {
+          const oldGoal = extractGoal(previousSummary)
+          const newGoal = extractGoal(summary)
+          if (
+            oldGoal !== undefined &&
+            newGoal !== undefined &&
+            oldGoal !== newGoal &&
+            !hasRealUserMessageBetween(input.messages, priorCompaction.userID, input.parentID)
+          ) {
+            log.warn("compaction goal drifted without user input", {
+              sessionID: input.sessionID,
+              oldGoal,
+              newGoal,
+            })
+            msg.metadata = { ...(msg.metadata ?? {}), goal_drift: true }
+            yield* session.updateMessage(msg)
+          }
+        }
         if (flags.experimentalEventSystem) {
           yield* events.publish(SessionEvent.Compaction.Ended, {
             sessionID: input.sessionID,

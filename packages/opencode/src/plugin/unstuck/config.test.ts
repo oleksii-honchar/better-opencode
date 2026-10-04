@@ -14,8 +14,8 @@ describe("UnstuckConfig — Task 1: Config defaults and new fields", () => {
     expect(defaultEvidenceThresholds.selfDiagnosis).toBe(3)
   })
 
-  test("defaultConfig.enableCrossStreamDoomLoopDetection is false", () => {
-    expect(defaultConfig.enableCrossStreamDoomLoopDetection).toBe(false)
+  test("defaultConfig.enableCrossStreamDoomLoopDetection is true (DEC-1, post 2026-10-03 incident)", () => {
+    expect(defaultConfig.enableCrossStreamDoomLoopDetection).toBe(true)
   })
 
   test("UnstuckConfig interface has sentenceLoopIncludeReasoning field", () => {
@@ -41,7 +41,7 @@ describe("UnstuckConfig — Task 1: Config defaults and new fields", () => {
     expect(merged.maxNudges).toBe(2)
     expect(merged.evidenceThresholds.sentenceLoop).toBe(3)
     expect(merged.evidenceThresholds.selfDiagnosis).toBe(3)
-    expect(merged.enableCrossStreamDoomLoopDetection).toBe(false)
+    expect(merged.enableCrossStreamDoomLoopDetection).toBe(true)
     expect(merged.sentenceLoopIncludeReasoning).toBe(false)
     expect(merged.doomLoopIgnorePatterns).toEqual(["/\\.rules\\/", "\\.mdc"])
   })
@@ -130,24 +130,24 @@ describe("UnstuckConfig — Task 2: cross-stream doom-loop config fields", () =>
     expect("crossStreamDoomLoopThreshold" in config).toBe(true)
   })
 
-  test("defaultConfig.enableCrossStreamDoomLoopDetection === false (opt-in, Task 1)", () => {
-    expect(defaultConfig.enableCrossStreamDoomLoopDetection).toBe(false)
+  test("defaultConfig.enableCrossStreamDoomLoopDetection === true (default-on since 2026-10-03 incident, DEC-1)", () => {
+    expect(defaultConfig.enableCrossStreamDoomLoopDetection).toBe(true)
   })
 
   test("defaultConfig.crossStreamDoomLoopThreshold === 3", () => {
     expect(defaultConfig.crossStreamDoomLoopThreshold).toBe(3)
   })
 
-  test("mergeConfig({}) retains cross-stream doom-loop defaults (opt-in false, Task 1)", () => {
+  test("mergeConfig({}) retains cross-stream doom-loop defaults (default-on, DEC-1)", () => {
     const merged = mergeConfig({})
-    expect(merged.enableCrossStreamDoomLoopDetection).toBe(false)
+    expect(merged.enableCrossStreamDoomLoopDetection).toBe(true)
     expect(merged.crossStreamDoomLoopThreshold).toBe(3)
   })
 
   test("mergeConfig({ crossStreamDoomLoopThreshold: 5 }) overrides threshold", () => {
     const merged = mergeConfig({ crossStreamDoomLoopThreshold: 5 })
     expect(merged.crossStreamDoomLoopThreshold).toBe(5)
-    expect(merged.enableCrossStreamDoomLoopDetection).toBe(false)
+    expect(merged.enableCrossStreamDoomLoopDetection).toBe(true)
   })
 
   test("mergeConfig({ enableCrossStreamDoomLoopDetection: false }) overrides the switch", () => {

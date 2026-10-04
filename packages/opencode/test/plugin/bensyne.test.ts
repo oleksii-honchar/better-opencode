@@ -45,12 +45,16 @@ describe("plugin.bensyne", () => {
         await hook(ctx as any, output)
       }
 
-      // T5 assertions:
+      // T5 assertions (updated for Task 2 / A3 prompt rewrite):
       // 1. Hook sets output.text (not void)
       expect(typeof output.text).toBe("string")
       expect(output.text).toContain("getPersonaEntryNode")
-      expect(output.text).toContain("re-enter the tree")
-      expect(output.text).toContain("agent-sessions_test-session-123")
+      // A3: the self-propagating re-entry mandate is deleted; traversal-history
+      // recall comes first and the per-session bank replaces the legacy name.
+      expect(output.text).not.toContain("re-enter the tree from the start")
+      expect(output.text).toContain("traversal-history")
+      expect(output.text).toContain("agent-session-test-session-123")
+      expect(output.text).not.toContain("agent-sessions_")
 
       // 2. Hook never calls session.prompt (no HTTP side-effect)
       expect(promptCallCount).toBe(0)

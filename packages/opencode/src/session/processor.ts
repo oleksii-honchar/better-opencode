@@ -112,6 +112,33 @@ export const toolResultOmissionSuffix = (omitted: number): string | undefined =>
     ? undefined
     : `\n\n[${omitted} image${omitted === 1 ? "" : "s"} omitted: could not be resized below the image size limit.]`
 
+/**
+ * Attribute snapshot patch files to the session that actually touched them.
+ *
+ * Snapshot state is per-project (one shared snapshot gitdir per worktree), so
+ * `snapshot.patch(stepStartHash)` returns EVERY file changed in the worktree
+ * since the step started — including files edited by OTHER concurrent sessions
+ * (2026-10-03 incident: 70 patch parts snapshotting another session's files
+ * landed in a session that never edited anything). A `patch` part may only
+ * contain files this session's tool calls declared as touched; anything else
+ * stays unattributed. Matching is segment-aware so relative tool inputs match
+ * absolute snapshot paths, and separators are normalized so Windows-style tool
+ * inputs match the forward-slash paths the snapshot layer emits.
+ */
+export const attributePatchFiles = (
+  patchFiles: readonly string[],
+  touchedFiles: ReadonlySet<string>,
+): string[] => {
+  if (patchFiles.length === 0 || touchedFiles.size === 0) return []
+  const normalize = (item: string) => item.replaceAll("\\", "/")
+  const touched = Array.from(touchedFiles, normalize).filter(Boolean)
+  const absolute = (item: string) => item.startsWith("/") || /^[A-Za-z]:\//.test(item)
+  return patchFiles.filter((patchFile) => {
+    const file = normalize(patchFile)
+    return touched.some((item) => file === item || (!absolute(item) && file.endsWith(`/${item}`)))
+  })
+}
+
 type ToolCall = {
   partID: MessageV2.ToolPart["id"]
   messageID: MessageV2.ToolPart["messageID"]
@@ -128,6 +155,10 @@ interface ProcessorContext extends Input {
   needsCompaction: boolean
   currentText: MessageV2.TextPart | undefined
   reasoningMap: Record<string, MessageV2.ReasoningPart>
+  // Files this session's tool calls declared as touched (from tool inputs and
+  // mutation-tool result metadata). Used to attribute snapshot patch files per
+  // session — see `attributePatchFiles`.
+  touchedFiles: Set<string>
 }
 
 type StreamEvent = LLMEvent
@@ -168,6 +199,7 @@ export const layer = Layer.effect(
         needsCompaction: false,
         currentText: undefined,
         reasoningMap: {},
+        touchedFiles: new Set<string>(),
       }
       let aborted = false
       const slog = log.clone().tag("session.id", input.sessionID).tag("messageID", input.assistantMessage.id)
@@ -430,6 +462,9 @@ export const layer = Layer.effect(
             }
             const toolCall = yield* ensureToolCall(value)
             const input = toolInput(value.input)
+            // Track declared target files so snapshot patch attribution stays
+            // per-session (edit/write/multiedit carry `filePath`).
+            if (typeof input.filePath === "string") ctx.touchedFiles.add(input.filePath)
             if (!toolCall.call.inputEnded) {
               // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
               if (flags.experimentalEventSystem) {
@@ -502,6 +537,16 @@ export const layer = Layer.effect(
           case "tool-result": {
             const toolCall = yield* readToolCall(value.id)
             const rawOutput = toolResultOutput(value)
+            // Mutation tools report touched files in result metadata
+            // (`write`: filepath, `apply_patch`: files[].filePath/movePath).
+            if (typeof rawOutput.metadata.filepath === "string") ctx.touchedFiles.add(rawOutput.metadata.filepath)
+            if (Array.isArray(rawOutput.metadata.files)) {
+              for (const file of rawOutput.metadata.files) {
+                if (!isRecord(file)) continue
+                if (typeof file.filePath === "string") ctx.touchedFiles.add(file.filePath)
+                if (typeof file.movePath === "string") ctx.touchedFiles.add(file.movePath)
+              }
+            }
             const normalized = yield* normalizeToolResultAttachments(rawOutput.attachments ?? [], (attachment) =>
               image.normalize(attachment),
             )
@@ -629,14 +674,15 @@ export const layer = Layer.effect(
             yield* session.updateMessage(ctx.assistantMessage)
             if (ctx.snapshot) {
               const patch = yield* snapshot.patch(ctx.snapshot)
-              if (patch.files.length) {
+              const files = attributePatchFiles(patch.files, ctx.touchedFiles)
+              if (files.length) {
                 yield* session.updatePart({
                   id: PartID.ascending(),
                   messageID: ctx.assistantMessage.id,
                   sessionID: ctx.sessionID,
                   type: "patch",
                   hash: patch.hash,
-                  files: [...patch.files],
+                  files,
                 })
               }
               ctx.snapshot = undefined
@@ -731,14 +777,15 @@ export const layer = Layer.effect(
       const cleanup = Effect.fn("SessionProcessor.cleanup")(function* () {
         if (ctx.snapshot) {
           const patch = yield* snapshot.patch(ctx.snapshot)
-          if (patch.files.length) {
+          const files = attributePatchFiles(patch.files, ctx.touchedFiles)
+          if (files.length) {
             yield* session.updatePart({
               id: PartID.ascending(),
               messageID: ctx.assistantMessage.id,
               sessionID: ctx.sessionID,
               type: "patch",
               hash: patch.hash,
-              files: [...patch.files],
+              files,
             })
           }
           ctx.snapshot = undefined

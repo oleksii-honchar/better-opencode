@@ -1735,6 +1735,8 @@ export const layer = Layer.effect(
         strategy: unstuckConfig.strategy,
         maxNudges: unstuckConfig.maxNudges,
         loopThreshold: unstuckConfig.loopThreshold,
+        crossStreamDoomLoop: unstuckConfig.enableCrossStreamDoomLoopDetection,
+        crossStreamThreshold: unstuckConfig.crossStreamDoomLoopThreshold,
       })
       return yield* EffectPromise.refineRejection(
         async () => {

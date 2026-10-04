@@ -23,6 +23,8 @@ import { ProjectID } from "@/project/schema"
 import { ProviderID, ModelID } from "@/provider/schema"
 import { LLM } from "@/session/llm"
 import { EventV2 } from "@opencode-ai/core/event"
+import { BensyneRecallPlugin } from "@/plugin/bensyne/index"
+import type { PluginInput } from "@opencode-ai/plugin"
 
 // ---------------------------------------------------------------------------
 // Mock Skill.Service that tracks calls
@@ -505,14 +507,16 @@ function createAllLayers(
   skillService: Skill.Interface,
   busService: Bus.Interface,
   sessionService: Session.Interface = createMockSession(),
+  pluginService: Plugin.Interface = createMockPlugin(),
+  processorService: SessionProcessor.Interface = createMockSessionProcessor(),
 ) {
   const mockBusLayer = Layer.succeed(Bus.Service, busService)
   const mockSessionLayer = Layer.succeed(Session.Service, sessionService)
   const mockAgentLayer = Layer.succeed(Agent.Service, createMockAgent())
-  const mockPluginLayer = Layer.succeed(Plugin.Service, createMockPlugin())
+  const mockPluginLayer = Layer.succeed(Plugin.Service, pluginService)
   const mockConfigLayer = Layer.succeed(Config.Service, createMockConfig())
   const mockProviderLayer = Layer.succeed(Provider.Service, createMockProvider())
-  const mockProcessorLayer = Layer.succeed(SessionProcessor.Service, createMockSessionProcessor())
+  const mockProcessorLayer = Layer.succeed(SessionProcessor.Service, processorService)
   const mockFlagsLayer = Layer.succeed(RuntimeFlags.Service, createMockRuntimeFlags())
   const mockEventsLayer = Layer.succeed(EventV2Bridge.Service, createMockEventV2Bridge())
   const mockSkillLayer = Layer.succeed(Skill.Service, skillService)
@@ -1056,5 +1060,839 @@ describe("SessionCompaction — overflow replay media placeholder", () => {
 
     // Non-media parts replay unchanged
     expect(capturedParts.some((p) => p.type === "text" && p.text === "user prompt text survives replay")).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task 2 (A2) — the injected post-compaction recall part carries the
+// compaction_recall marker (auditability; mirrors compaction_continue).
+// ---------------------------------------------------------------------------
+
+describe("SessionCompaction — recall part marker (A2)", () => {
+  const mockProject: Project.Info = {
+    id: ProjectID.make("proj-test"),
+    worktree: "/test-worktree",
+    time: { created: Date.now(), updated: Date.now() },
+    sandboxes: [],
+  }
+  const mockInstanceContext: InstanceContext = {
+    directory: "/test-dir",
+    worktree: "/test-worktree",
+    project: mockProject,
+    workspaceFolders: ["/test-dir"],
+  }
+
+  test("injected recall part carries metadata.compaction_recall === true", async () => {
+    const mockBus = createMockBus()
+    const skillService = createMockSkillService()
+    const { session, capturedParts } = createCapturingMockSession()
+
+    // Plugin that sets recall text — compaction injects it as a synthetic
+    // user message; the injected TextPart must carry the compaction_recall
+    // marker.
+    const pluginService: Plugin.Interface = {
+      trigger: Effect.fn("MockPlugin.trigger")(function* <Name, Input, Output>(
+        name: Name,
+        _input: Input,
+        output: Output,
+      ) {
+        if (String(name) === "experimental.compaction.post_recall") {
+          ;(output as { text?: string }).text = "RECALL-PROMPT-A2-MARKER"
+        }
+        return output
+      }),
+      list: Effect.fn("MockPlugin.list")(function* () {
+        return []
+      }),
+      init: Effect.fn("MockPlugin.init")(function* () {}),
+    }
+
+    const parentID = MessageID.ascending()
+    const sessionID = SessionID.descending()
+    const messages = buildCompactionMessages(parentID, sessionID)
+
+    const program = Effect.gen(function* () {
+      const compaction = yield* Compaction.Service
+      const result = yield* compaction.process({ parentID, messages, sessionID, auto: true })
+      yield* Effect.sleep(50)
+      return result
+    })
+
+    const allLayers = createAllLayers(skillService, mockBus, session, pluginService)
+    const result = await Effect.runPromise(
+      Effect.provide(Effect.provideService(program, InstanceRef, mockInstanceContext), allLayers),
+    )
+
+    expect(result).toBe("continue")
+
+    const recallPart = capturedParts.find(
+      (p): p is MessageV2.TextPart => p.type === "text" && p.text === "RECALL-PROMPT-A2-MARKER",
+    )
+    expect(recallPart).toBeDefined()
+    expect(recallPart!.metadata?.compaction_recall).toBe(true)
+    expect(recallPart!.synthetic).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task 2 (A4) — consecutive auto-continue cap (DEC-3): 3 consecutive
+// compaction_continue-marked injections allowed, 4th suppressed; a real
+// (non-synthetic) user message between compactions breaks the chain.
+// ---------------------------------------------------------------------------
+
+describe("SessionCompaction — auto-continue consecutive cap (A4)", () => {
+  const mockProject: Project.Info = {
+    id: ProjectID.make("proj-test"),
+    worktree: "/test-worktree",
+    time: { created: Date.now(), updated: Date.now() },
+    sandboxes: [],
+  }
+  const mockInstanceContext: InstanceContext = {
+    directory: "/test-dir",
+    worktree: "/test-worktree",
+    project: mockProject,
+    workspaceFolders: ["/test-dir"],
+  }
+
+  function makeUserInfo(id: MessageID, sessionID: SessionID): MessageV2.User {
+    return {
+      id,
+      role: "user",
+      sessionID,
+      agent: "test",
+      model: { providerID: ProviderID.make("mock-provider"), modelID: ModelID.make("mock-model") },
+      time: { created: Date.now() },
+    }
+  }
+
+  function makeAssistantInfo(id: MessageID, sessionID: SessionID): MessageV2.Assistant {
+    return {
+      id,
+      role: "assistant",
+      sessionID,
+      parentID: MessageID.ascending(),
+      agent: "test",
+      modelID: ModelID.make("mock-model"),
+      providerID: ProviderID.make("mock-provider"),
+      mode: "all",
+      path: { cwd: "/tmp", root: "/tmp" },
+      time: { created: Date.now() },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    }
+  }
+
+  // Synthetic user message carrying the compaction_continue marker — the
+  // shape autocontinue itself injects.
+  function makeContinueUser(id: MessageID, sessionID: SessionID): MessageV2.WithParts {
+    return {
+      info: makeUserInfo(id, sessionID),
+      parts: [
+        {
+          id: PartID.ascending(),
+          messageID: id,
+          sessionID,
+          type: "text",
+          text: "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.",
+          synthetic: true,
+          metadata: { compaction_continue: true },
+          time: { start: Date.now(), end: Date.now() },
+        },
+      ],
+    }
+  }
+
+  function makeRealUser(id: MessageID, sessionID: SessionID, text: string): MessageV2.WithParts {
+    return {
+      info: makeUserInfo(id, sessionID),
+      parts: [
+        {
+          id: PartID.ascending(),
+          messageID: id,
+          sessionID,
+          type: "text",
+          text,
+          time: { start: Date.now(), end: Date.now() },
+        },
+      ],
+    }
+  }
+
+  // `count` consecutive marker-carrying synthetic user messages (each preceded
+  // by an assistant reply) sitting immediately before the compaction parent.
+  function buildContinueChain(count: number, sessionID: SessionID): MessageV2.WithParts[] {
+    const chain: MessageV2.WithParts[] = []
+    for (let i = 0; i < count; i++) {
+      chain.push({ info: makeAssistantInfo(MessageID.ascending(), sessionID), parts: [] })
+      chain.push(makeContinueUser(MessageID.ascending(), sessionID))
+    }
+    return chain
+  }
+
+  async function runAutoContinueScenario(preParent: MessageV2.WithParts[]): Promise<MessageV2.Part[]> {
+    const mockBus = createMockBus()
+    const skillService = createMockSkillService()
+    const { session, capturedParts } = createCapturingMockSession()
+
+    const parentID = MessageID.ascending()
+    const sessionID = SessionID.descending()
+    const messages = [makeRealUser(MessageID.ascending(), sessionID, "seed task"), ...preParent, ...buildCompactionMessages(parentID, sessionID)]
+
+    const program = Effect.gen(function* () {
+      const compaction = yield* Compaction.Service
+      const result = yield* compaction.process({ parentID, messages, sessionID, auto: true })
+      yield* Effect.sleep(50)
+      return result
+    })
+
+    const allLayers = createAllLayers(skillService, mockBus, session)
+    const result = await Effect.runPromise(
+      Effect.provide(Effect.provideService(program, InstanceRef, mockInstanceContext), allLayers),
+    )
+    expect(result).toBe("continue")
+    return capturedParts
+  }
+
+  function continuePartsIn(captured: MessageV2.Part[]): MessageV2.TextPart[] {
+    return captured.filter(
+      (p): p is MessageV2.TextPart => p.type === "text" && p.metadata?.compaction_continue === true,
+    )
+  }
+
+  test("no preceding continue chain — continue message is injected (1st)", async () => {
+    const captured = await runAutoContinueScenario([])
+    expect(continuePartsIn(captured)).toHaveLength(1)
+  })
+
+  test("2 consecutive preceding continue injections — 3rd is allowed", async () => {
+    const sessionID = SessionID.descending()
+    const captured = await runAutoContinueScenario(buildContinueChain(2, sessionID))
+    expect(continuePartsIn(captured)).toHaveLength(1)
+  })
+
+  test("3 consecutive preceding continue injections — 4th is suppressed", async () => {
+    const sessionID = SessionID.descending()
+    const captured = await runAutoContinueScenario(buildContinueChain(3, sessionID))
+    expect(continuePartsIn(captured)).toHaveLength(0)
+  })
+
+  test("real user message between compactions resets the chain — injection re-enabled", async () => {
+    const sessionID = SessionID.descending()
+    const chain = buildContinueChain(3, sessionID)
+    // A real (non-synthetic, unmarked) user message after the chain breaks it.
+    const realUser = makeRealUser(MessageID.ascending(), sessionID, "actually, switch direction please")
+    const captured = await runAutoContinueScenario([...chain, { info: makeAssistantInfo(MessageID.ascending(), sessionID), parts: [] }, realUser])
+    expect(continuePartsIn(captured)).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task 2 (replay guard) — incident shape: compaction → recall prompt →
+// compaction … driven through the REAL BensyneRecallPlugin hook. The loop
+// must terminate: ≤3 re-anchor injections and ≤3 auto-continue injections
+// across 6 simulated compaction passes; later passes inject nothing.
+// ---------------------------------------------------------------------------
+
+describe("SessionCompaction — replay guard: incident loop terminates (A1+A4 composed)", () => {
+  const mockProject: Project.Info = {
+    id: ProjectID.make("proj-test"),
+    worktree: "/test-worktree",
+    time: { created: Date.now(), updated: Date.now() },
+    sandboxes: [],
+  }
+  const mockInstanceContext: InstanceContext = {
+    directory: "/test-dir",
+    worktree: "/test-worktree",
+    project: mockProject,
+    workspaceFolders: ["/test-dir"],
+  }
+
+  test("6 compaction passes produce ≤3 recall and ≤3 auto-continue injections; loop starves", async () => {
+    const sessionID = SessionID.descending()
+
+    // Real plugin hook — its module-level per-session cap is the A1 enforcement.
+    const realHooks = await BensyneRecallPlugin({} as PluginInput)
+    const realRecall = realHooks["experimental.compaction.post_recall"]!
+    const pluginService: Plugin.Interface = {
+      trigger: Effect.fn("ReplayPlugin.trigger")(function* <Name, Input, Output>(
+        name: Name,
+        input: Input,
+        output: Output,
+      ) {
+        if (String(name) === "experimental.compaction.post_recall") {
+          yield* Effect.promise(() => realRecall(input as any, output as any))
+        }
+        return output
+      }),
+      list: Effect.fn("ReplayPlugin.list")(function* () {
+        return []
+      }),
+      init: Effect.fn("ReplayPlugin.init")(function* () {}),
+    }
+
+    const mockBus = createMockBus()
+    const skillService = createMockSkillService()
+    const { session, capturedParts } = createCapturingMockSession()
+
+    let messages: MessageV2.WithParts[] = [
+      makeSeedUser(MessageID.ascending(), sessionID),
+      ...buildCompactionMessages(MessageID.ascending(), sessionID),
+    ]
+
+    let recallInjections = 0
+    let continueInjections = 0
+    let latePassInjections = 0
+
+    for (let pass = 0; pass < 6; pass++) {
+      const mark = capturedParts.length
+      const parentID = messages[messages.length - 1]!.info.id
+
+      const program = Effect.gen(function* () {
+        const compaction = yield* Compaction.Service
+        return yield* compaction.process({ parentID, messages, sessionID, auto: true })
+      })
+
+      const allLayers = createAllLayers(skillService, mockBus, session, pluginService)
+      const result = await Effect.runPromise(
+        Effect.provide(Effect.provideService(program, InstanceRef, mockInstanceContext), allLayers),
+      )
+      expect(result).toBe("continue")
+
+      // Reconstruct the next pass's history from what this pass injected:
+      // assistant summary → (continue user?) → (recall user?) → new parent.
+      const injected = capturedParts.slice(mark)
+      const contPart = injected.find(
+        (p): p is MessageV2.TextPart => p.type === "text" && p.metadata?.compaction_continue === true,
+      )
+      const recallPart = injected.find(
+        (p): p is MessageV2.TextPart => p.type === "text" && p.metadata?.compaction_recall === true,
+      )
+      if (contPart) continueInjections++
+      if (recallPart) recallInjections++
+      if (pass >= 3 && (contPart || recallPart)) latePassInjections++
+
+      const nextMsgs: MessageV2.WithParts[] = [...messages]
+      nextMsgs.push({
+        info: {
+          id: MessageID.ascending(),
+          role: "assistant",
+          sessionID,
+          parentID,
+          agent: "test",
+          modelID: ModelID.make("mock-model"),
+          providerID: ProviderID.make("mock-provider"),
+          mode: "all",
+          path: { cwd: "/tmp", root: "/tmp" },
+          time: { created: Date.now() },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+        parts: [],
+      })
+      if (contPart) {
+        const contID = MessageID.ascending()
+        nextMsgs.push({
+          info: {
+            id: contID,
+            role: "user",
+            sessionID,
+            agent: "test",
+            model: { providerID: ProviderID.make("mock-provider"), modelID: ModelID.make("mock-model") },
+            time: { created: Date.now() },
+          },
+          parts: [{ ...contPart, id: PartID.ascending(), messageID: contID }],
+        })
+      }
+      if (recallPart) {
+        const recallID = MessageID.ascending()
+        nextMsgs.push({
+          info: {
+            id: recallID,
+            role: "user",
+            sessionID,
+            agent: "test",
+            model: { providerID: ProviderID.make("mock-provider"), modelID: ModelID.make("mock-model") },
+            time: { created: Date.now() },
+          },
+          parts: [{ ...recallPart, id: PartID.ascending(), messageID: recallID }],
+        })
+      }
+      // Next compaction trigger — auto-created parents carry only the
+      // compaction part (matches Compaction.create shape).
+      const nextParentID = MessageID.ascending()
+      nextMsgs.push({
+        info: {
+          id: nextParentID,
+          role: "user",
+          sessionID,
+          agent: "test",
+          model: { providerID: ProviderID.make("mock-provider"), modelID: ModelID.make("mock-model") },
+          time: { created: Date.now() },
+        },
+        parts: [{ id: PartID.ascending(), messageID: nextParentID, sessionID, type: "compaction", auto: true }],
+      })
+      messages = nextMsgs
+    }
+
+    // Loop cannot self-sustain: caps bound both injection streams…
+    expect(recallInjections).toBeLessThanOrEqual(3)
+    expect(continueInjections).toBeLessThanOrEqual(3)
+    // …and after the caps bite (passes 4-6) nothing is injected at all.
+    expect(latePassInjections).toBe(0)
+  })
+
+  function makeSeedUser(id: MessageID, sessionID: SessionID): MessageV2.WithParts {
+    return {
+      info: {
+        id,
+        role: "user",
+        sessionID,
+        agent: "test",
+        model: { providerID: ProviderID.make("mock-provider"), modelID: ModelID.make("mock-model") },
+        time: { created: Date.now() },
+      },
+      parts: [
+        {
+          id: PartID.ascending(),
+          messageID: id,
+          sessionID,
+          type: "text",
+          text: "seed task for replay guard",
+          time: { start: Date.now(), end: Date.now() },
+        },
+      ],
+    }
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Task 4 (C1+C2) — compaction goal integrity: immutable Original Task block
+// in the summarizer prompt (seeded from the first real user message) and a
+// goal-drift tripwire that flags metadata.goal_drift on the summary assistant
+// message when successive Goals differ with no intervening real user input.
+// Tripwire only: never blocks or alters the produced summary.
+// ---------------------------------------------------------------------------
+
+describe("SessionCompaction — goal integrity: Original Task + drift tripwire (C1+C2)", () => {
+  const mockProject: Project.Info = {
+    id: ProjectID.make("proj-test"),
+    worktree: "/test-worktree",
+    time: { created: Date.now(), updated: Date.now() },
+    sandboxes: [],
+  }
+  const mockInstanceContext: InstanceContext = {
+    directory: "/test-dir",
+    worktree: "/test-worktree",
+    project: mockProject,
+    workspaceFolders: ["/test-dir"],
+  }
+
+  function makeUserInfo(id: MessageID, sessionID: SessionID): MessageV2.User {
+    return {
+      id,
+      role: "user",
+      sessionID,
+      agent: "test",
+      model: { providerID: ProviderID.make("mock-provider"), modelID: ModelID.make("mock-model") },
+      time: { created: Date.now() },
+    }
+  }
+
+  function makeAssistantInfo(
+    id: MessageID,
+    sessionID: SessionID,
+    overrides?: Partial<Pick<MessageV2.Assistant, "summary" | "finish" | "parentID">>,
+  ): MessageV2.Assistant {
+    return {
+      id,
+      role: "assistant",
+      sessionID,
+      parentID: overrides?.parentID ?? MessageID.ascending(),
+      agent: "test",
+      modelID: ModelID.make("mock-model"),
+      providerID: ProviderID.make("mock-provider"),
+      mode: "all",
+      path: { cwd: "/tmp", root: "/tmp" },
+      time: { created: Date.now() },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      ...(overrides?.summary ? { summary: true } : {}),
+      ...(overrides?.finish ? { finish: overrides.finish } : {}),
+    }
+  }
+
+  function makeRealUser(id: MessageID, sessionID: SessionID, text: string): MessageV2.WithParts {
+    return {
+      info: makeUserInfo(id, sessionID),
+      parts: [
+        {
+          id: PartID.ascending(),
+          messageID: id,
+          sessionID,
+          type: "text",
+          text,
+          time: { start: Date.now(), end: Date.now() },
+        },
+      ],
+    }
+  }
+
+  // Synthetic user message carrying a compaction marker (continue or recall) —
+  // must be skipped when picking the Original Task and must NOT count as
+  // intervening real user input for the drift tripwire.
+  function makeMarkerUser(
+    id: MessageID,
+    sessionID: SessionID,
+    metadata: Record<string, unknown>,
+    text: string,
+  ): MessageV2.WithParts {
+    return {
+      info: makeUserInfo(id, sessionID),
+      parts: [
+        {
+          id: PartID.ascending(),
+          messageID: id,
+          sessionID,
+          type: "text",
+          text,
+          synthetic: true,
+          metadata,
+          time: { start: Date.now(), end: Date.now() },
+        },
+      ],
+    }
+  }
+
+  // Auto-compaction parent: user message whose only part is the compaction part.
+  function makeCompactionParent(id: MessageID, sessionID: SessionID): MessageV2.WithParts {
+    return {
+      info: makeUserInfo(id, sessionID),
+      parts: [{ id: PartID.ascending(), messageID: id, sessionID, type: "compaction", auto: true }],
+    }
+  }
+
+  // Attaching session mock: updatePart writes land on the stored message so
+  // summaryText() (read back via session.messages()) sees the produced summary.
+  function createAttachingMockSession(): {
+    session: Session.Interface
+    stored: MessageV2.WithParts[]
+    updatedMessages: MessageV2.Info[]
+  } {
+    const stored: MessageV2.WithParts[] = []
+    const updatedMessages: MessageV2.Info[] = []
+    const base = createMockSession()
+    const session: Session.Interface = {
+      ...base,
+      messages: Effect.fn("AttachingSession.messages")(function* (_: { sessionID: SessionID }) {
+        return stored
+      }),
+      updateMessage: Effect.fn("AttachingSession.updateMessage")(function* <T extends MessageV2.Info>(msg: T) {
+        updatedMessages.push(msg)
+        const idx = stored.findIndex((m) => m.info.id === msg.id)
+        const entry: MessageV2.WithParts = { info: msg, parts: idx >= 0 ? stored[idx]!.parts : [] }
+        if (idx >= 0) stored[idx] = entry
+        else stored.push(entry)
+        return msg
+      }),
+      updatePart: Effect.fn("AttachingSession.updatePart")(function* <T extends MessageV2.Part>(part: T) {
+        const idx = stored.findIndex((m) => m.info.id === part.messageID)
+        if (idx >= 0) stored[idx]!.parts.push(part as MessageV2.Part)
+        return part
+      }),
+    }
+    return { session, stored, updatedMessages }
+  }
+
+  // Processor mock that records the summarizer stream input (so the built
+  // prompt can be asserted) and, when given summary text, writes it back as a
+  // text part on the assistant message — the shape the real processor produces.
+  function createSummarizingMockProcessor(session: Session.Interface, summaryText?: string): {
+    processor: SessionProcessor.Interface
+    prompts: string[]
+  } {
+    const prompts: string[] = []
+    return {
+      prompts,
+      processor: {
+        create: Effect.fn("SummarizingProcessor.create")(function* (input: {
+          assistantMessage: MessageV2.Assistant
+          sessionID: SessionID
+          model: Provider.Model
+        }) {
+          const assistantMessage = input.assistantMessage
+          return {
+            message: assistantMessage,
+            updateToolCall: Effect.fn("SummarizingHandle.updateToolCall")(function* () {
+              return undefined
+            }),
+            completeToolCall: Effect.fn("SummarizingHandle.completeToolCall")(function* () {}),
+            process: (streamInput: LLM.StreamInput) =>
+              Effect.gen(function* () {
+                const last = streamInput.messages.at(-1) as {
+                  role?: string
+                  content?: Array<{ type?: string; text?: string }>
+                }
+                prompts.push(last?.content?.[0]?.text ?? "")
+                if (summaryText !== undefined) {
+                  yield* session.updatePart({
+                    id: PartID.ascending(),
+                    messageID: assistantMessage.id,
+                    sessionID: assistantMessage.sessionID,
+                    type: "text",
+                    text: summaryText,
+                    time: { start: Date.now(), end: Date.now() },
+                  } satisfies MessageV2.TextPart)
+                }
+                return "continue" as SessionProcessor.Result
+              }),
+          } satisfies SessionProcessor.Handle
+        }),
+      },
+    }
+  }
+
+  async function runGoalIntegrityScenario(input: {
+    messages: MessageV2.WithParts[]
+    parentID: MessageID
+    sessionID: SessionID
+    summaryText?: string
+  }): Promise<{
+    result: "continue" | "stop"
+    prompts: string[]
+    stored: MessageV2.WithParts[]
+    updatedMessages: MessageV2.Info[]
+  }> {
+    const mockBus = createMockBus()
+    const skillService = createMockSkillService()
+    const { session, stored, updatedMessages } = createAttachingMockSession()
+    const { processor, prompts } = createSummarizingMockProcessor(session, input.summaryText)
+
+    const program = Effect.gen(function* () {
+      const compaction = yield* Compaction.Service
+      const result = yield* compaction.process({
+        parentID: input.parentID,
+        messages: input.messages,
+        sessionID: input.sessionID,
+        auto: true,
+      })
+      yield* Effect.sleep(50)
+      return result
+    })
+
+    const allLayers = createAllLayers(skillService, mockBus, session, createMockPlugin(), processor)
+    const result = await Effect.runPromise(
+      Effect.provide(Effect.provideService(program, InstanceRef, mockInstanceContext), allLayers),
+    )
+    return { result, prompts, stored, updatedMessages }
+  }
+
+  function summaryAssistantIn(stored: MessageV2.WithParts[], parentID: MessageID): MessageV2.Assistant {
+    const entry = stored.find(
+      (m) => m.info.role === "assistant" && (m.info as MessageV2.Assistant).parentID === parentID,
+    )
+    return entry!.info as MessageV2.Assistant
+  }
+
+  // --- C1: template + prompt assembly -------------------------------------
+
+  test("SUMMARY_TEMPLATE carries the immutable Original Task section (in built prompt)", async () => {
+    const sessionID = SessionID.descending()
+    const parentID = MessageID.ascending()
+    const { result, prompts } = await runGoalIntegrityScenario({
+      messages: [makeRealUser(MessageID.ascending(), sessionID, "real task"), ...buildCompactionMessages(parentID, sessionID)],
+      parentID,
+      sessionID,
+    })
+
+    expect(result).toBe("continue")
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain("## Original Task (immutable)")
+    expect(prompts[0]).toContain("Goal must be consistent with Original Task")
+  })
+
+  test("<original-task> block present with the first real user message text", async () => {
+    const sessionID = SessionID.descending()
+    const parentID = MessageID.ascending()
+    const { prompts } = await runGoalIntegrityScenario({
+      messages: [
+        makeRealUser(MessageID.ascending(), sessionID, "Fix the login bug in auth.ts"),
+        makeRealUser(MessageID.ascending(), sessionID, "second real message never wins"),
+        ...buildCompactionMessages(parentID, sessionID),
+      ],
+      parentID,
+      sessionID,
+    })
+
+    expect(prompts[0]).toContain("<original-task>")
+    expect(prompts[0]).toContain("</original-task>")
+    expect(prompts[0]).toContain("Copy this block verbatim into the Original Task section. Never rewrite, reinterpret, or merge it.")
+    expect(prompts[0]).toContain("Fix the login bug in auth.ts")
+    expect(prompts[0]).not.toContain("second real message never wins")
+  })
+
+  test("synthetic and marker-carrying messages are skipped when picking the Original Task", async () => {
+    const sessionID = SessionID.descending()
+    const parentID = MessageID.ascending()
+    const { prompts } = await runGoalIntegrityScenario({
+      messages: [
+        makeMarkerUser(MessageID.ascending(), sessionID, { compaction_recall: true }, "SYNTHETIC-RECALL-MUST-NOT-BE-TASK"),
+        makeMarkerUser(MessageID.ascending(), sessionID, { compaction_continue: true }, "SYNTHETIC-CONTINUE-MUST-NOT-BE-TASK"),
+        makeRealUser(MessageID.ascending(), sessionID, "the actual user request"),
+        ...buildCompactionMessages(parentID, sessionID),
+      ],
+      parentID,
+      sessionID,
+    })
+
+    expect(prompts[0]).toContain("<original-task>")
+    expect(prompts[0]).toContain("the actual user request")
+    expect(prompts[0]).not.toContain("SYNTHETIC-RECALL-MUST-NOT-BE-TASK")
+    expect(prompts[0]).not.toContain("SYNTHETIC-CONTINUE-MUST-NOT-BE-TASK")
+  })
+
+  test("Original Task text longer than 2000 chars is truncated with an ellipsis", async () => {
+    const sessionID = SessionID.descending()
+    const parentID = MessageID.ascending()
+    const longText = "x".repeat(2500)
+    const { prompts } = await runGoalIntegrityScenario({
+      messages: [makeRealUser(MessageID.ascending(), sessionID, longText), ...buildCompactionMessages(parentID, sessionID)],
+      parentID,
+      sessionID,
+    })
+
+    const prompt = prompts[0]!
+    expect(prompt).toContain("<original-task>")
+    expect(prompt).toContain("x".repeat(2000))
+    expect(prompt).not.toContain("x".repeat(2001))
+    // Truncated marker (ellipsis) present right after the cut
+    expect(prompt).toMatch(/x{2000}[…]/)
+  })
+
+  test("no <original-task> block when no real user message exists", async () => {
+    const sessionID = SessionID.descending()
+    const parentID = MessageID.ascending()
+    // Only marker-carrying synthetic messages + the compaction parent (which
+    // carries a compaction part and must not qualify either).
+    const { prompts } = await runGoalIntegrityScenario({
+      messages: [
+        makeMarkerUser(MessageID.ascending(), sessionID, { compaction_continue: true }, "continue prompt"),
+        ...buildCompactionMessages(parentID, sessionID),
+      ],
+      parentID,
+      sessionID,
+    })
+
+    expect(prompts[0]).not.toContain("<original-task>")
+  })
+
+  // --- C2: goal-drift tripwire ---------------------------------------------
+
+  const priorSummary = ["## Goal", "- Fix the login bug in auth.ts", "", "## Progress", "### Done", "- none"].join("\n")
+  const driftedSummary = ["## Goal", "- Build the XDR short engine", "", "## Progress", "### Done", "- none"].join("\n")
+  const sameGoalDifferentShape = ["## Goal", "-   FIX the LOGIN bug   in auth.ts", "", "## Progress", "### Done", "- none"].join("\n")
+
+  // History: real task → assistant → prior compaction (user + summary
+  // assistant) → synthetic continue → assistant → current compaction parent.
+  function buildDriftHistory(sessionID: SessionID): { messages: MessageV2.WithParts[]; parentID: MessageID } {
+    const parentID = MessageID.ascending()
+    const priorParentID = MessageID.ascending()
+    const priorSummaryID = MessageID.ascending()
+    const messages: MessageV2.WithParts[] = [
+      makeRealUser(MessageID.ascending(), sessionID, "Fix the login bug in auth.ts"),
+      { info: makeAssistantInfo(MessageID.ascending(), sessionID), parts: [] },
+      makeCompactionParent(priorParentID, sessionID),
+      {
+        info: makeAssistantInfo(priorSummaryID, sessionID, { summary: true, finish: "stop", parentID: priorParentID }),
+        parts: [
+          {
+            id: PartID.ascending(),
+            messageID: priorSummaryID,
+            sessionID,
+            type: "text",
+            text: priorSummary,
+            time: { start: Date.now(), end: Date.now() },
+          },
+        ],
+      },
+      makeMarkerUser(MessageID.ascending(), sessionID, { compaction_continue: true }, "Continue if you have next steps"),
+      { info: makeAssistantInfo(MessageID.ascending(), sessionID), parts: [] },
+      makeCompactionParent(parentID, sessionID),
+    ]
+    return { messages, parentID }
+  }
+
+  test("goal drift with no intervening real user message → metadata.goal_drift on summary message", async () => {
+    const sessionID = SessionID.descending()
+    const { messages, parentID } = buildDriftHistory(sessionID)
+
+    const { result, stored } = await runGoalIntegrityScenario({
+      messages,
+      parentID,
+      sessionID,
+      summaryText: driftedSummary,
+    })
+
+    // Tripwire never blocks compaction…
+    expect(result).toBe("continue")
+    // …and flags the summary assistant message.
+    const summaryMsg = summaryAssistantIn(stored, parentID)
+    expect(summaryMsg).toBeDefined()
+    expect(summaryMsg.metadata?.goal_drift).toBe(true)
+    // Produced summary text is untouched by the tripwire.
+    const summaryPart = stored
+      .find((m) => m.info.id === summaryMsg.id)!
+      .parts.find((p): p is MessageV2.TextPart => p.type === "text")
+    expect(summaryPart!.text).toBe(driftedSummary)
+  })
+
+  test("Goals match after normalization → no drift flag", async () => {
+    const sessionID = SessionID.descending()
+    const { messages, parentID } = buildDriftHistory(sessionID)
+
+    const { result, stored } = await runGoalIntegrityScenario({
+      messages,
+      parentID,
+      sessionID,
+      summaryText: sameGoalDifferentShape,
+    })
+
+    expect(result).toBe("continue")
+    const summaryMsg = summaryAssistantIn(stored, parentID)
+    expect(summaryMsg.metadata?.goal_drift).toBeUndefined()
+  })
+
+  test("real user message between the two compactions → no drift flag despite differing Goals", async () => {
+    const sessionID = SessionID.descending()
+    const { messages, parentID } = buildDriftHistory(sessionID)
+    // Insert a real user message between the prior compaction and the current one.
+    const realIdx = messages.findIndex((m) => m.parts.some((p) => p.type === "compaction" && p.auto) && m.info.id !== parentID)
+    messages.splice(realIdx + 3, 0, makeRealUser(MessageID.ascending(), sessionID, "actually, pivot to payments"))
+
+    const { result, stored } = await runGoalIntegrityScenario({
+      messages,
+      parentID,
+      sessionID,
+      summaryText: driftedSummary,
+    })
+
+    expect(result).toBe("continue")
+    const summaryMsg = summaryAssistantIn(stored, parentID)
+    expect(summaryMsg.metadata?.goal_drift).toBeUndefined()
+  })
+
+  test("first compaction (no previous summary) → no drift flag", async () => {
+    const sessionID = SessionID.descending()
+    const parentID = MessageID.ascending()
+
+    const { result, stored } = await runGoalIntegrityScenario({
+      messages: [makeRealUser(MessageID.ascending(), sessionID, "first task"), ...buildCompactionMessages(parentID, sessionID)],
+      parentID,
+      sessionID,
+      summaryText: driftedSummary,
+    })
+
+    expect(result).toBe("continue")
+    const summaryMsg = summaryAssistantIn(stored, parentID)
+    expect(summaryMsg.metadata?.goal_drift).toBeUndefined()
   })
 })

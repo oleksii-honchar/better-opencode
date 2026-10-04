@@ -86,7 +86,10 @@ export const defaultConfig: UnstuckConfig = {
   // Number of identical tool+input calls in a row to declare a doom loop (matches DOOM_LOOP_THRESHOLD)
   doomLoopThreshold: 3,
   // Enable cross-stream doom-loop detection (tracks identical tool+input across separate doStream calls)
-  enableCrossStreamDoomLoopDetection: false,
+  // DEFAULT ON (DEC-1): the 2026-10-03 incident — a compaction↔persona-re-anchor
+  // doom-loop burned 163.7M tokens with alternating byte-identical tool calls that
+  // the old single-state design missed; per-key state now catches that shape.
+  enableCrossStreamDoomLoopDetection: true,
   // Threshold for cross-stream doom-loop detection (number of identical calls across streams to trigger)
   crossStreamDoomLoopThreshold: 3,
   // Whether sentence_loop detection includes reasoning-delta content (default false to avoid CoT false positives)

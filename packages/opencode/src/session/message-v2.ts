@@ -485,6 +485,10 @@ export const Assistant = Schema.Struct({
   structured: Schema.optional(Schema.Any),
   variant: Schema.optional(Schema.String),
   finish: Schema.optional(Schema.String),
+  // Fork-local (DEC-4/C2): untyped tripwire metadata on assistant messages —
+  // e.g. goal_drift set by the compaction goal-drift tripwire. Mirrors the
+  // untyped part-metadata convention (compaction_continue/compaction_recall).
+  metadata: Schema.optional(Schema.Record(Schema.String, Schema.Any)),
 }).annotate({ identifier: "AssistantMessage" })
 export type Assistant = Omit<Types.DeepMutable<Schema.Schema.Type<typeof Assistant>>, "error"> & {
   error?: AssistantError

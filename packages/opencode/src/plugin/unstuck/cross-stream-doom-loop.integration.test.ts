@@ -227,8 +227,8 @@ describe("cross-stream doom-loop integration", () => {
     // Model was called exactly 3 times, no nudge/restart.
     expect(callCount()).toBe(3)
 
-    // Manager state: the last call's fingerprint is set with count 1
-    // (each different input resets the counter).
+    // Manager state: each distinct (tool, fingerprint) key holds count 1 —
+    // per-key tracking keeps them independent, none reaches the threshold.
     // No nudge was injected — the prompt never got an _unstuckNudge message.
     manager.clearAll()
   })
@@ -346,6 +346,98 @@ describe("cross-stream doom-loop integration", () => {
     }
     return { model, callCount: () => callCount, receivedPrompt: () => receivedPrompt }
   }
+
+  // ---------------------------------------------------------------------------
+  // Test 5: Incident replay (2026-10-03) — two tools alternating across separate
+  // doStream calls with byte-identical inputs per tool. The single-state design
+  // reset each tool's count on every interleaving and never triggered; per-key
+  // state (DEC-1) must reach threshold 3 on the third getPersonaEntryNode call
+  // and route through the evidence gate into the nudge path.
+  // ---------------------------------------------------------------------------
+
+  function createIncidentShapeModel(): {
+    model: LanguageModelV3
+    callCount: () => number
+    receivedPrompt: () => any[]
+  } {
+    let callCount = 0
+    let receivedPrompt: any[] = []
+    const model: LanguageModelV3 = {
+      modelId: "test-model",
+      provider: "test",
+      specificationVersion: "v3",
+      supportedUrls: {},
+      async doGenerate() {
+        throw new Error("not implemented")
+      },
+      async doStream(args: LanguageModelV3CallOptions): Promise<LanguageModelV3StreamResult> {
+        callCount++
+        receivedPrompt = args.prompt as any[]
+        if (callCount <= 5) {
+          // Alternate two tools, each with a byte-identical input every time:
+          // odd calls → getPersonaEntryNode, even calls → recallMemory.
+          const isEntry = callCount % 2 === 1
+          const toolName = isEntry ? "getPersonaEntryNode" : "recallMemory"
+          const input = isEntry
+            ? { memory_bank: "agent-persona_architect" }
+            : { query: "traversal-history", memory_bank: "agent-session-ses_test_incident" }
+          const chunks: LanguageModelV3StreamPart[] = [
+            { type: "text-delta", id: `${callCount}-text`, delta: "Re-anchoring" },
+            { type: "tool-input-start", id: `call-${callCount}`, toolName },
+            { type: "tool-input-end", id: `call-${callCount}`, input, providerMetadata: undefined } as any,
+            { type: "finish", finishReason: { unified: "tool-calls", raw: "tool-calls" }, usage: mockUsage },
+          ]
+          return { stream: createMockStream(chunks) }
+        }
+        // Recovery stream after nudge
+        return { stream: createMockStream(recoveryChunks) }
+      },
+    }
+    return { model, callCount: () => callCount, receivedPrompt: () => receivedPrompt }
+  }
+
+  test("incident replay — alternating tools across streams with identical inputs per tool → nudge triggers", async () => {
+    const { model, callCount, receivedPrompt } = createIncidentShapeModel()
+    const manager = new CrossStreamDoomLoopManagerImpl()
+    const wrapped = wrapWithLoopDetection(model, crossStreamConfig, manager)
+
+    const prompt = [
+      { role: "system", content: "<env>Session ID: ses_test_incident</env>" },
+      { role: "user", content: "Hello" },
+    ]
+
+    // Streams 1–4: A, B, A, B — each tool at count 2, below threshold 3.
+    for (let i = 0; i < 4; i++) {
+      const result = await collectStream(wrapped, prompt)
+      expect(result.length).toBeGreaterThan(0)
+    }
+    expect(callCount()).toBe(4)
+
+    // Stream 5: third getPersonaEntryNode call — per-key count hits 3,
+    // evidence gate (doomLoop: 1) met → nudge injected, stream restarted.
+    let escaped: unknown = undefined
+    let result5: LanguageModelV3StreamPart[] = []
+    try {
+      result5 = await collectStream(wrapped, prompt)
+    } catch (e) {
+      escaped = e
+    }
+
+    // No error escaped — nudge recovered the stream.
+    expect(escaped).toBeUndefined()
+    expect(escaped).not.toBeInstanceOf(LoopDetectedError)
+    expect(result5.length).toBeGreaterThan(0)
+
+    // Model called 6 times: 5 alternating doom-loop streams + 1 recovery after nudge.
+    expect(callCount()).toBe(6)
+
+    // Nudge user message was injected with _unstuckNudge: true, naming the tool.
+    const lastMessage = receivedPrompt()[receivedPrompt().length - 1]
+    expect(lastMessage._unstuckNudge).toBe(true)
+    const lastContent = lastMessage.content as Array<{ type: string; text: string }>
+    expect(lastContent[0]?.text).toContain("getPersonaEntryNode")
+    expect(lastContent[0]?.text).toContain("doom loop")
+  })
 
   test("per-stream detection still works independently — 3 identical calls in ONE stream", async () => {
     const { model, callCount, receivedPrompt } = createPerStreamModel(doomLoopChunks())

@@ -7,6 +7,8 @@ export function isIgnored(patterns: string[]): (serialized: string) => boolean {
   return (serialized: string) => regexes.some((re) => re.test(serialized))
 }
 
+// Kept for API compatibility (re-exported from index.ts). The manager no longer
+// stores one of these per session — DEC-1 replaced it with per-key counts.
 export interface DoomLoopRunState {
   toolName: string;
   inputFingerprint: string;
@@ -19,30 +21,59 @@ export interface CrossStreamDoomLoopManager {
   clearAll(): void;
 }
 
+// Per-session cap on tracked (tool, fingerprint) keys. On overflow the
+// oldest-inserted key is dropped (Map/Set insertion order) so long-lived
+// processes cannot grow the map without bound.
+export const MAX_KEYS_PER_SESSION = 64;
+
 export class CrossStreamDoomLoopManagerImpl implements CrossStreamDoomLoopManager {
-  // Single-state design: one DoomLoopRunState per session.
-  // Weakness (memory 0015): if the model calls tool A, then tool B, then tool A again
-  // with the same input, the count resets to 1 instead of continuing. Only truly
-  // consecutive identical tool+input calls across streams are caught.
-  private sessions = new Map<string, DoomLoopRunState>();
+  // Per-(session, tool, fingerprint) counts (DEC-1, supersedes the single-state
+  // design): interleaved A-B-A-B calls no longer reset each other's counts.
+  // Key format: `${sessionId}\u0000${toolName}\u0000${inputFingerprint}` — NUL
+  // separator keeps tool names/fingerprints containing arbitrary characters from
+  // colliding.
+  private runs = new Map<string, { count: number }>();
+  // Index sessionId -> its run keys, for resetSession and per-session eviction.
+  private sessionKeys = new Map<string, Set<string>>();
 
   recordCall(sessionId: string, toolName: string, inputFingerprint: string, threshold: number): boolean {
-    const current = this.sessions.get(sessionId);
+    const key = `${sessionId}\u0000${toolName}\u0000${inputFingerprint}`;
 
-    if (current && current.toolName === toolName && current.inputFingerprint === inputFingerprint) {
+    const current = this.runs.get(key);
+    if (current) {
       current.count += 1;
       return current.count >= threshold;
     }
 
-    this.sessions.set(sessionId, { toolName, inputFingerprint, count: 1 });
+    this.runs.set(key, { count: 1 });
+    let keys = this.sessionKeys.get(sessionId);
+    if (!keys) {
+      keys = new Set<string>();
+      this.sessionKeys.set(sessionId, keys);
+    }
+    keys.add(key);
+
+    // Per-session cap: drop the oldest-inserted key (Set insertion order).
+    while (keys.size > MAX_KEYS_PER_SESSION) {
+      const oldest = keys.values().next().value as string;
+      keys.delete(oldest);
+      this.runs.delete(oldest);
+    }
+
     return 1 >= threshold;
   }
 
   resetSession(sessionId: string): void {
-    this.sessions.delete(sessionId);
+    const keys = this.sessionKeys.get(sessionId);
+    if (!keys) return;
+    for (const key of keys) {
+      this.runs.delete(key);
+    }
+    this.sessionKeys.delete(sessionId);
   }
 
   clearAll(): void {
-    this.sessions.clear();
+    this.runs.clear();
+    this.sessionKeys.clear();
   }
 }

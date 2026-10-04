@@ -10,6 +10,18 @@ const base = Flag.OTEL_EXPORTER_OTLP_ENDPOINT
 export const enabled = !!base
 const processID = crypto.randomUUID()
 
+// One-time startup warning: without an OTLP endpoint telemetry is silently
+// disabled, the exact blindness that hid the 2026-10-03 runaway-loop incident
+// (163.7M tokens, zero spans). Module scope + ESM module cache = emitted at
+// most once per process, regardless of how often the layer/spans initialize.
+if (!base) {
+  Effect.runSync(
+    EffectLogger.create({ service: "observability" })
+      .warn("OTel telemetry disabled: OTEL_EXPORTER_OTLP_ENDPOINT not set")
+      .pipe(Effect.provide(EffectLogger.layer)),
+  )
+}
+
 const headers = Flag.OTEL_EXPORTER_OTLP_HEADERS
   ? Flag.OTEL_EXPORTER_OTLP_HEADERS.split(",").reduce(
       (acc, x) => {
