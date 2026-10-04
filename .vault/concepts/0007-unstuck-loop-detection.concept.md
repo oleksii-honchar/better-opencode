@@ -2,7 +2,7 @@
 type: concept
 title: "Unstuck Loop Detection System"
 createdAt: "2026-06-21T00:00:00Z"
-updatedAt: "2026-08-14T19:00:00Z"
+updatedAt: "2026-10-04T11:12:29Z"
 tags: [unstuck, loop-detection, fingerprint, nudge, doom-loop, cross-stream, evidence-gated]
 see_also:
   - "../specifications/0004-unstuck-loop-detection.spec.md"
@@ -29,6 +29,8 @@ see_also:
   - "../adrs/0087-cross-stream-opt-in.adr.md"
   - "../adrs/0088-provider-cache-fingerprint.adr.md"
   - "../adrs/0089-re-focus-nudge-message.adr.md"
+  - "../adrs/0108-per-key-cross-stream-detector-state.adr.md"
+  - "../specifications/0024-runaway-loop-hardening.spec.md"
 ---
 
 # CONCEPT-0007: Unstuck Loop Detection System
@@ -39,6 +41,7 @@ see_also:
 **Updated:** 2026-08-12 (added cross-stream doom-loop detection — ADR-0074)
 **Updated:** 2026-08-14 (removed xml_repetition detection type — superseded by ADR-0081)
 **Updated:** 2026-08-14 (evidence-gated throw, reasoning-delta exclusion, maxNudges 2, self_diagnosis threshold 3, ignore patterns, cross-stream opt-in, cache fingerprint, re-focus nudge — ADR-0082 through ADR-0089)
+**Updated:** 2026-10-04 (cross-stream detector: per-`(session, tool, fingerprint)` state + default-on — DEC-0108, after the 2026-10-03 runaway-loop incident)
 
 ## What
 
@@ -74,8 +77,9 @@ LLM agents frequently enter behavioral loops (e.g., 697+ iterations of the same 
 - **Gap:** Per-stream detector (ADR-0072) sees at most 1 call per `doStream` — when an agent calls the same tool with identical input across multiple streams, the threshold (default 3) is never reached.
 - **Incident:** Session `ses_009302293ffe3KacIsKYNnejAD` — 30 identical `sed -i` calls across 30 streams, never detected; model self-escaped after ~147s.
 - **Solution:** Per-session rolling record in `CrossStreamDoomLoopManager` (keyed by session ID from `<env>` block). After per-step doom-loop detection in `streamWithDetection`, check the session record. If (tool name + input fingerprint) matches, increment count; if count >= threshold, trigger nudge-and-prune.
-- **Reset:** On nudge, `resetSession(sessionId)` clears the counter. On session end, `clearAll()` clears all records.
-- **Config:** `enableCrossStreamDoomLoopDetection` (default **false** — opt-in, ADR-0087), `crossStreamDoomLoopThreshold` (default 3).
+- **Per-key state (DEC-0108, 2026-10-04):** the original single run-state per session was replaced by a keyed count map `session\0tool\0fingerprint` with a `sessionKeys` index for `resetSession` and a per-session cap of 64 keys (oldest-inserted evicted). Interleaved A-B-A-B calls no longer reset each other's counts — the 2026-10-03 incident loop (`getPersonaEntryNode` ×623 alternating with `recallMemory` ×627, 163.7M tokens) sat exactly in that blind spot.
+- **Reset:** On nudge, `resetSession(sessionId)` clears all keys for the session. On session end, `clearAll()` clears all records.
+- **Config:** `enableCrossStreamDoomLoopDetection` (default **true** since DEC-0108 — was opt-in false per ADR-0087, now superseded), `crossStreamDoomLoopThreshold` (default 3).
 - **Session ID extraction:** Regex on `Session ID: ses_xxxxx` from prompt's `<env>` block; fallback to empty string (no cross-stream detection for that call).
 - **Preserves per-stream isolation:** additive to ADR-0072 — the per-stream detector still operates independently; cross-stream detection is a separate layer at the provider/wrapper level.
 

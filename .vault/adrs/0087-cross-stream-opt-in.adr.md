@@ -2,15 +2,20 @@
 type: adr
 id: ADR-0087
 title: "Cross-Stream Doom-Loop Detection Opt-In by Default"
-status: accepted
+status: superseded
 createdAt: "2026-08-14T17:40:00Z"
-updatedAt: "2026-08-14T19:00:00Z"
+updatedAt: "2026-10-04T11:12:29Z"
 tags: [unstuck, doom-loop, cross-stream, opt-in]
 supersedes: []
-superseded_by: []
+superseded_by: [DEC-0108]
+deprecated:
+  date: 2026-10-04
+  reason: "Per-(session, tool, fingerprint) detector state implemented (DEC-0108); the deferred fix this ADR rejected-for-now is now built, and the default flipped to true after the 2026-10-03 incident"
+  superseded_by: DEC-0108
 see_also:
   - "../concepts/0007-unstuck-loop-detection.concept.md"
   - "0074-cross-stream-doom-loop-detection.adr.md"
+  - "0108-per-key-cross-stream-detector-state.adr.md"
   - "../memories/0015-cross-stream-detection-gap.memory.md"
 ---
 

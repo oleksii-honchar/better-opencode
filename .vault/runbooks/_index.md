@@ -2,7 +2,7 @@
 type: index
 title: "Operational Runbooks"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-09-06T08:52:00Z"
+updatedAt: "2026-10-04T11:12:29Z"
 tags: []
 ---
 
@@ -15,3 +15,4 @@ Step-by-step operational procedures for building, deploying, and maintaining bet
 - [[0001-opencode-db-maintenance.runbook.md]] — OpenCode Database Maintenance
 - [[0002-mcp-bridge-reauthentication.runbook.md]] — Re-authenticate an mcp-remote MCP Bridge
 - [[0003-install-forked-binary-shell-path.runbook.md]] — Install Forked Binary and Make It Resolvable by the Shell
+- [[0004-token-budget-caps-and-runaway-alerting.runbook.md]] — Token Budget Caps, Runaway Alerting, Telemetry Verification, Idle-Session Policy

@@ -2,7 +2,7 @@
 type: index
 title: "Atomic Memories"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-09-05T19:50:00Z"
+updatedAt: "2026-10-04T11:12:29Z"
 tags: []
 ---
 
@@ -37,3 +37,7 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0023-litellm-mcp-tool-name-prefixing.memory.md]] — LiteLLM-Proxy MCP Tool Names Get <server>- Prefix; Unprefixed Allowlists Silently Break
 - [[0024-subagent-permission-ask-time-merge.memory.md]] — Subagent Permission Ask-Time Merge — Agent Allows Win Unless Session *:ask Lands Last
 - [[0025-post-compaction-recall-race-condition.memory.md]] — Post-Compaction Recall Race Condition — Async Fork Causes API Error
+- [[0026-snapshot-patch-attribution-shared-worktree.memory.md]] — Patch Parts Attribute the Whole Shared-Worktree Diff to Any Session
+- [[0027-litellm-streaming-spans-empty-usage-object.memory.md]] — LiteLLM Streaming Spans Carry Empty usage_object (Gateway Under-Reports)
+- [[0028-litellm-db-backed-keys-caps-via-key-update.memory.md]] — LiteLLM opencode Key Is DB-Backed — Caps via /key/update, Not config.yaml
+- [[0029-confabulated-goal-laundered-by-compaction.memory.md]] — Compaction Can Confabulate a Phantom Goal and Launder It as a User Message

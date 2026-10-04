@@ -2,7 +2,7 @@
 type: index
 title: "Architecture Decision Records"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-09-04T12:35:00Z"
+updatedAt: "2026-10-04T11:12:29Z"
 tags: []
 ---
 
@@ -98,7 +98,7 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0084-maxnudges-default-2.adr.md]] — Reconcile maxNudges: Default 2 (ADR-0084, status: accepted)
 - [[0085-tighten-self-diagnosis.adr.md]] — Tighten self_diagnosis Regex and Raise Evidence Threshold (ADR-0085, status: accepted)
 - [[0086-doom-loop-ignore-patterns.adr.md]] — Exclude Mandated Rule-File Reads from Doom-Loop Tracking (ADR-0086, status: accepted)
-- [[0087-cross-stream-opt-in.adr.md]] — Cross-Stream Doom-Loop Detection Opt-In by Default (ADR-0087, status: accepted)
+- [[0087-cross-stream-opt-in.adr.md]] — Cross-Stream Doom-Loop Detection Opt-In by Default (ADR-0087, status: superseded by DEC-0108)
 - [[0088-provider-cache-fingerprint.adr.md]] — Provider Cache Key Includes Unstuck Config Fingerprint (ADR-0088, status: accepted)
 - [[0089-re-focus-nudge-message.adr.md]] — Re-Focus the Default Nudge Message (ADR-0089, status: accepted)
 - [[0090-retry-truncated-provider-streams.adr.md]] — Retry Truncated Provider Streams (ADR-0090, status: accepted)
@@ -119,4 +119,9 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0104-provider-media-capability-map.adr.md]] — ADR-0104 (accepted): provider capability map for tool-result media
 - [[0105-display-first-render-pipeline.adr.md]] — ADR-0105 (accepted): display-first render pipeline
 - [[0106-fix-rules-inject-silent-failure.adr.md]] — Fix rules-inject Silent Failure with Observable Logging (ADR-0106, status: accepted)
-- [[0107-sequential-post-compaction-recall.adr.md]] — Sequential Post-Compaction Recall — Synchronous Hook Invocation (ADR-0107, status: accepted)
+- [[0107-sequential-post-compaction-recall.adr.md]] — Sequential Post-Compaction Recall — Synchronous Hook Invocation (ADR-0107, status: accepted; amended by DEC-0109)
+- [[0108-per-key-cross-stream-detector-state.adr.md]] — Per-(session, tool, fingerprint) Cross-Stream Detector State + Default On (DEC-0108, status: proposed — supersedes ADR-0087)
+- [[0109-capped-post-compaction-re-anchor.adr.md]] — Rate-Limit the Post-Compaction Re-Anchor Hook, Cap 3 + Recall-First Prompt (DEC-0109, status: proposed — amends DEC-0107)
+- [[0110-autocontinue-consecutive-cap.adr.md]] — Cap Consecutive Compaction Auto-Continues at 3 (DEC-0110, status: proposed)
+- [[0111-compaction-goal-integrity.adr.md]] — Immutable Original Task + Goal-Drift Tripwire in Compaction (DEC-0111, status: proposed)
+- [[0112-telemetry-visibility-startup-warn.adr.md]] — Telemetry Visibility: Startup Warn When OTel Endpoint Unset (DEC-0112, status: proposed)

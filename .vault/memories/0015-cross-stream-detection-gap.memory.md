@@ -2,7 +2,7 @@
 type: memory
 title: "Cross-Stream Doom-Loop Detection Gap (Per-Stream Isolation)"
 createdAt: "2026-08-12T20:00:00Z"
-updatedAt: "2026-08-12T20:00:00Z"
+updatedAt: "2026-10-04T11:12:29Z"
 tags: [unstuck, doom-loop, cross-stream, gotcha, incident]
 see_also:
   - "../adrs/0074-cross-stream-doom-loop-detection.adr.md"
@@ -28,3 +28,5 @@ In session `ses_009302293ffe3KacIsKYNnejAD`, an agent called `sed -i "s/17 files
 Before ADR-0074: cross-stream doom loops were undetectable — a fundamental blind spot for any repeated-failure scenario where each call was a separate stream. After ADR-0074: the `CrossStreamDoomLoopManager` tracks per-session rolling records, catching these loops with the same threshold of 3.
 
 **Lesson:** Per-stream isolation (ADR-0072) is correct for preventing cross-session leakage, but it creates a cross-stream blind spot that requires a separate detection layer at the provider/wrapper level.
+
+**Update 2026-10-04:** the remaining half of this gap — the cross-stream manager's SINGLE run-state per session, which interleaved A-B-A-B calls reset — was closed by DEC-0108 (per-`(session, tool, fingerprint)` keyed state + default-on), after the 2026-10-03 incident loop (`getPersonaEntryNode` ×623 alternating with `recallMemory` ×627) proved the interleaving blind spot cost 163.7M tokens.

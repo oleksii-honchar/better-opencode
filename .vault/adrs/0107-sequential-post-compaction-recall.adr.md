@@ -4,12 +4,13 @@ title: "Sequential Post-Compaction Recall — Synchronous Hook Invocation"
 id: DEC-0107
 status: accepted
 createdAt: "2026-09-16"
-updatedAt: "2026-09-16"
+updatedAt: "2026-10-04T11:12:29Z"
 tags: [compaction, recall, plugin, race-condition, bensyne]
 system: opencode
 see_also:
   - [[0056-core-pipeline-injection.adr.md]]
   - [[0057-two-phase-context-injection.adr.md]]
+  - [[0109-capped-post-compaction-re-anchor.adr.md]]
 ---
 
 ## Context
@@ -37,6 +38,8 @@ yield* postCompactionRecall(input.sessionID, plugin, userMessage)
 ```
 
 Keep `postCompactionRestore` forked (unchanged) — it's independent of the recall sequence and doesn't participate in conversation message ordering.
+
+> **Amended 2026-10-03 by DEC-0109** — the synchronous-invocation decision here still stands, but the hook is now capped at 3 re-anchor injections per session, the injected part carries `metadata.compaction_recall`, and the prompt is recall-first (resume at `persona.anchor_file_id`; re-enter the entry node only if recall is empty). See [[0109-capped-post-compaction-re-anchor.adr.md]].
 
 ## Alternatives Considered
 
