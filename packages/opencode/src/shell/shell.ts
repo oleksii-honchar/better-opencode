@@ -156,6 +156,14 @@ function info(file: string): Item {
   }
 }
 
+// POSIX single-quote wrapping: the only form that prevents the OUTER shell from
+// expanding $vars, $positional args, and $(...) inside the user command before
+// `eval` runs it. JSON.stringify produces a double-quoted string, which the outer
+// shell expands first — silently rewriting $FOO to empty in the user's command.
+function shellQuote(value: string) {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
 export function args(file: string, command: string, cwd: string) {
   const n = name(file)
   if (n === "nu" || n === "fish") return ["-c", command]
@@ -167,7 +175,7 @@ export function args(file: string, command: string, cwd: string) {
         [[ -f ~/.zshenv ]] && source ~/.zshenv >/dev/null 2>&1 || true
         [[ -f "\${ZDOTDIR:-$HOME}/.zshrc" ]] && source "\${ZDOTDIR:-$HOME}/.zshrc" >/dev/null 2>&1 || true
         cd -- "$1"
-        eval ${JSON.stringify(command)}
+        eval ${shellQuote(command)}
       `,
       "opencode",
       cwd,
@@ -181,7 +189,7 @@ export function args(file: string, command: string, cwd: string) {
         shopt -s expand_aliases
         [[ -f ~/.bashrc ]] && source ~/.bashrc >/dev/null 2>&1 || true
         cd -- "$1"
-        eval ${JSON.stringify(command)}
+        eval ${shellQuote(command)}
       `,
       "opencode",
       cwd,
