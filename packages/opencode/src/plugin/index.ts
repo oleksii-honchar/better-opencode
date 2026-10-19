@@ -23,6 +23,7 @@ import { DigitalOceanAuthPlugin } from "./digitalocean"
 import { XaiAuthPlugin } from "./xai"
 import { RulesInjectPlugin } from "./rules-inject"
 import { BensyneRecallPlugin } from "./bensyne"
+import { SessionPathGuardPlugin } from "./session-path-guard"
 import { Effect, Layer, Context, Stream } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
@@ -87,6 +88,7 @@ const INTERNAL_PLUGINS: PluginInstance[] = [
   XaiAuthPlugin,
   RulesInjectPlugin,
   BensyneRecallPlugin,
+  SessionPathGuardPlugin,
 ]
 
 function isServerPlugin(value: unknown): value is PluginInstance {
