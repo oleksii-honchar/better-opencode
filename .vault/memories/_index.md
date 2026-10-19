@@ -43,3 +43,5 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0029-confabulated-goal-laundered-by-compaction.memory.md]] — Compaction Can Confabulate a Phantom Goal and Launder It as a User Message
 - [[0030-xdg-env-missing-volume-startup-eacces.memory.md]] — Startup EACCES mkdir '/Volumes/Data' — XDG_* Env Pointing at a Missing Volume Crashes global.ts Import
 - [[0031-bun-143-log-tools-startup-hang.memory.md]] — Bun 1.4.3 + OPENCODE_LOG_TOOLS=1 Hangs Server Startup (1.3.14 OK) — Pin Bun Across Nodes
+- [[0032-subagent-flat-date-path-generation.memory.md]] — Subagents Re-Emit Flat Date Session Paths at Write Time Despite Correct Nested Context
+- [[0033-display-normalization-flattens-nested-paths.memory.md]] — Rendered Tool Output Can Display Nested Session Paths Flat — Trust Hex/Bytes, Verify with find

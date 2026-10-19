@@ -37,3 +37,4 @@ Structured feature, migration, and refactor specifications with scope, phases, r
 - [[0022-fix-rules-inject-silent-failure.spec.md]] — Fix rules-inject Silent Failure (kind: bugfix, status: completed)
 - [[0023-fix-post-compaction-recall-race-condition.spec.md]] — Fix Post-Compaction Recall Race Condition (kind: bugfix, status: completed)
 - [[0024-runaway-loop-hardening.spec.md]] — Runaway-Loop Hardening & Telemetry Integrity — 2026-10-03 incident, workstreams A–F (kind: feature, status: active — branch 261003-fix-runaway-loop-hardening, awaiting merge)
+- [[0025-session-path-guard-flat-date-defense.spec.md]] — Session-Path Guard — tool-layer defense against flat-date session paths (kind: bugfix, status: active — branch fix/session-path-guard, awaiting merge)
