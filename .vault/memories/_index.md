@@ -2,7 +2,7 @@
 type: index
 title: "Atomic Memories"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-10-04T11:12:29Z"
+updatedAt: "2026-10-18T15:45:30Z"
 tags: []
 ---
 
@@ -41,3 +41,5 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0027-litellm-streaming-spans-empty-usage-object.memory.md]] — LiteLLM Streaming Spans Carry Empty usage_object (Gateway Under-Reports)
 - [[0028-litellm-db-backed-keys-caps-via-key-update.memory.md]] — LiteLLM opencode Key Is DB-Backed — Caps via /key/update, Not config.yaml
 - [[0029-confabulated-goal-laundered-by-compaction.memory.md]] — Compaction Can Confabulate a Phantom Goal and Launder It as a User Message
+- [[0030-xdg-env-missing-volume-startup-eacces.memory.md]] — Startup EACCES mkdir '/Volumes/Data' — XDG_* Env Pointing at a Missing Volume Crashes global.ts Import
+- [[0031-bun-143-log-tools-startup-hang.memory.md]] — Bun 1.4.3 + OPENCODE_LOG_TOOLS=1 Hangs Server Startup (1.3.14 OK) — Pin Bun Across Nodes
