@@ -2,9 +2,9 @@
 type: decision
 id: DEC-0113
 title: "Enforce Session-Path Shape at the Tool Layer via In-Fork Plugin"
-status: proposed
+status: accepted
 createdAt: "2026-10-19T14:31:00Z"
-updatedAt: "2026-10-19T14:31:00Z"
+updatedAt: "2026-10-20T12:28:00Z"
 tags: [plugin, session-paths, path-shape, guard, agent-sessions, observability]
 system: opencode
 supersedes: []
@@ -19,8 +19,9 @@ see_also:
 # DEC-0113: Enforce Session-Path Shape at the Tool Layer via In-Fork Plugin
 
 > **Status note:** implemented and review-PASS on branch `fix/session-path-guard` @
-> `749db11bb` (base `e545ec0bb`, `patched/dev2`); **unmerged as of 2026-10-19** (re-verified
-> directly by vault-keeper). Flip to `accepted` after merge. Governance deviation (review F-4):
+> `749db11bb` (base `e545ec0bb`, `patched/dev2`); **merged into `patched/dev2`** (ancestry
+> verified 2026-10-20); installed build fingerprint `opencode/0.0.0-fix/session-path-guard-202610191208`.
+> Governance deviation (review F-4):
 > branch naming and `patched/dev2` base differ from docs' illustrative `YYMMDD-feat-NN` /
 > `patched/dev` — keep the deviation note in the merge commit; governance doc may be stale.
 

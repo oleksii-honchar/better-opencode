@@ -4,7 +4,7 @@ kind: bugfix
 status: active
 title: "Session-Path Guard — Tool-Layer Defense Against Flat-Date Session Paths"
 createdAt: "2026-10-19T14:31:00Z"
-updatedAt: "2026-10-19T14:31:00Z"
+updatedAt: "2026-10-20T12:28:00Z"
 tags: [session-paths, plugin, path-shape, agent-sessions]
 system: opencode
 owner: "oleksii"
@@ -16,8 +16,8 @@ see_also:
 
 # Spec: Session-Path Guard (flat-date defense)
 
-> **Status:** implementation on branch `fix/session-path-guard` @ `749db11bb`
-> (`patched/dev2` base), review-PASS, **awaiting merge** — same convention as spec 0024.
+> **Status:** IMPLEMENTED — merged into `patched/dev2` (ancestry verified 2026-10-20),
+> installed build `fix/session-path-guard-202610191208`.
 
 ## Goal
 
@@ -33,7 +33,7 @@ nested `NN/NN/NN` form, observably, without blocking the agent.
   out-of-root untouched, WARN names both forms
 - [x] Phase 3 — orphan cleanup: population empty (audit = 0 flat dirs; re-confirmed 2026-10-19)
 - [x] Phase 4 — knowledge promotion: this node + DEC-0113 + memories 0032/0033
-- [ ] Phase 5 — merge `fix/session-path-guard` onto `patched/dev2` (**user decision**);
+- [x] Phase 5 — merge `fix/session-path-guard` onto `patched/dev2` (**user decision**);
   flip DEC-0113 to accepted
 
 ## Behaviors (test-pinned contract)

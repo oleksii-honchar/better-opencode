@@ -125,4 +125,4 @@ Decisions about how better-opencode is built, configured, and maintained — cap
 - [[0110-autocontinue-consecutive-cap.adr.md]] — Cap Consecutive Compaction Auto-Continues at 3 (DEC-0110, status: proposed)
 - [[0111-compaction-goal-integrity.adr.md]] — Immutable Original Task + Goal-Drift Tripwire in Compaction (DEC-0111, status: proposed)
 - [[0112-telemetry-visibility-startup-warn.adr.md]] — Telemetry Visibility: Startup Warn When OTel Endpoint Unset (DEC-0112, status: proposed)
-- [[0113-session-path-guard-tool-layer.adr.md]] — Enforce Session-Path Shape at the Tool Layer via In-Fork Plugin (DEC-0113, status: proposed — branch fix/session-path-guard, awaiting merge)
+- [[0113-session-path-guard-tool-layer.adr.md]] — Enforce Session-Path Shape at the Tool Layer via In-Fork Plugin (DEC-0113, status: accepted — merged into patched/dev2)
