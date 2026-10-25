@@ -2,7 +2,7 @@
 type: index
 title: "Atomic Memories"
 createdAt: "2026-06-08T18:32:00Z"
-updatedAt: "2026-10-18T15:45:30Z"
+updatedAt: "2026-10-25T16:47:00Z"
 tags: []
 ---
 
@@ -45,3 +45,4 @@ Self-contained facts, gotchas, incident learnings, and one-off knowledge that do
 - [[0031-bun-143-log-tools-startup-hang.memory.md]] — Bun 1.4.3 + OPENCODE_LOG_TOOLS=1 Hangs Server Startup (1.3.14 OK) — Pin Bun Across Nodes
 - [[0032-subagent-flat-date-path-generation.memory.md]] — Subagents Re-Emit Flat Date Session Paths at Write Time Despite Correct Nested Context
 - [[0033-display-normalization-flattens-nested-paths.memory.md]] — Rendered Tool Output Can Display Nested Session Paths Flat — Trust Hex/Bytes, Verify with find
+- [[0034-session-title-one-shot-silent-generation.memory.md]] — Session Title Generation Is One-Shot, Silent-Guarded, Fire-and-Forget — Default Titles Are Never Retried
