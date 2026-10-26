@@ -4,12 +4,14 @@ title: "Session Title Generation Is One-Shot, Silent-Guarded, Fire-and-Forget â€
 id: MEM-0034
 category: behavior-pattern
 createdAt: "2026-10-25"
-updatedAt: "2026-10-25"
+updatedAt: "2026-10-26"
 tags: [session, title, prompt-loop, small-model, observability, diagnostics]
-system: opencode
+system: id
 see_also:
   - [[0003-llm-turn-management.concept.md]]
   - [[0001-session-model.concept.md]]
+  - [[0035-session-title-generation-retry-remediation.memory.md]]
+  - [[0035-session-title-generation-retry-remediation.memory.md]]
 ---
 
 ## Fact
