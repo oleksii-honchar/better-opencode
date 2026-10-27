@@ -9,6 +9,7 @@ import { ProjectID } from "@/project/schema"
 import { ProviderID, ModelID } from "@/provider/schema"
 import type { Provider } from "@/provider/provider"
 import type { Agent } from "@/agent/agent"
+import { Config } from "@/config/config"
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -200,6 +201,69 @@ test("existing environment content unchanged (header still present)", async () =
 
   test("no originalModel: maybe certainly no ORIGINAL_MODEL line", async () => {
     const out = await runEnvironment(makeModel(P1), makeAgent({ smartModels: SMART_MODELS_2 }), true)
+    expect(out).not.toContain("ORIGINAL_MODEL")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Ad-Hoc Task A — smartModelSupervision effective-gate truth table.
+// Precedence (mirrors Config.smartModelSupervisionEnabled and the
+// config.ts schema description):
+//   smartModelSupervision present => its `enabled` governs
+//     (present block without `enabled` => false);
+//   absent => legacy `dynamicModelSwitch?.enabled ?? true` unchanged.
+// Env co-behavior under test (today's pairing, system.ts): SMART_MODELS and
+// ORIGINAL_MODEL are both emitted only when the effective gate is ON.
+// ---------------------------------------------------------------------------
+
+describe("SystemPrompt.environment — smartModelSupervision gate truth table", () => {
+  // M = agent has provider-matching smart models; original model pinned for every
+  // row so ORIGINAL_MODEL co-behavior is asserted alongside SMART_MODELS.
+  const original = { providerID: P1, modelID: ModelID.make("fast") }
+
+  async function emitFor(cfg: Parameters<typeof Config.smartModelSupervisionEnabled>[0]) {
+    const gate = Config.smartModelSupervisionEnabled(cfg)
+    const out = await runEnvironment(
+      makeModel(P1),
+      makeAgent({ smartModels: SMART_MODELS_2 }),
+      gate,
+      original,
+    )
+    return { gate, out }
+  }
+
+  test("row absent + absent: gate ON (today) — SMART_MODELS and ORIGINAL_MODEL present", async () => {
+    const { gate, out } = await emitFor({})
+    expect(gate).toBe(true)
+    expect(out).toContain("SMART_MODELS: p1/smart")
+    expect(out).toContain("ORIGINAL_MODEL: p1/fast")
+  })
+
+  test("row absent + dynamicModelSwitch enabled:false: gate OFF (legacy opt-out intact)", async () => {
+    const { gate, out } = await emitFor({ dynamicModelSwitch: { enabled: false } })
+    expect(gate).toBe(false)
+    expect(out).not.toContain("SMART_MODELS")
+    expect(out).not.toContain("ORIGINAL_MODEL")
+  })
+
+  test("row smartModelSupervision enabled:true: gate ON regardless of dynamicModelSwitch", async () => {
+    const { gate, out } = await emitFor({ smartModelSupervision: { enabled: true }, dynamicModelSwitch: { enabled: false } })
+    expect(gate).toBe(true)
+    expect(out).toContain("SMART_MODELS: p1/smart")
+    expect(out).toContain("ORIGINAL_MODEL: p1/fast")
+  })
+
+  test("row smartModelSupervision enabled:false: gate OFF regardless of dynamicModelSwitch (live user state)", async () => {
+    const { gate, out } = await emitFor({ smartModelSupervision: { enabled: false }, dynamicModelSwitch: { enabled: true } })
+    expect(gate).toBe(false)
+    expect(out).not.toContain("SMART_MODELS")
+    expect(out).not.toContain("ORIGINAL_MODEL")
+  })
+
+  test("row smartModelSupervision present without enabled: gate OFF (present means controlled)", async () => {
+    const { gate, out } = await emitFor({ smartModelSupervision: {} })
+    expect(gate).toBe(false)
+    expect(out).not.toContain("SMART_MODELS")
     expect(out).not.toContain("ORIGINAL_MODEL")
   })
 })

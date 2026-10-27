@@ -277,7 +277,7 @@ export const layer: Layer.Layer<
             ...(flags.experimentalScout ? [tool.repo_clone, tool.repo_overview] : []),
             tool.skill,
             ...(cfg.toolFilter?.applyPatch?.enabled !== false ? [tool.patch] : []),
-            ...((cfg.dynamicModelSwitch?.enabled ?? true) ? [tool.switch_model] : []),
+            ...(Config.smartModelSupervisionEnabled(cfg) ? [tool.switch_model] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],

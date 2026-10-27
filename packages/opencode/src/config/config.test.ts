@@ -399,3 +399,68 @@ describe("Config Schema — dynamicModelSwitch gate (C5)", () => {
   })
 })
 
+describe("Config Parse — smartModelSupervision global section (Ad-Hoc Task A)", () => {
+  // Precedence owned by Config.smartModelSupervisionEnabled (see config.ts):
+  // present => its enabled governs (missing enabled => false); absent => legacy
+  // dynamicModelSwitch?.enabled ?? true. These tests only prove the section
+  // parses; the gate matrix lives in session/system.test.ts.
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "opencode-config-test-"))
+  })
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  test("parses the live global-config shape: smartModelSupervision { enabled: false } beside existing keys", () => {
+    const configFile = join(tempDir, "opencode.jsonc")
+
+    // Shape of the user's ~/.config/opencode/opencode.jsonc lines 62-64, kept in
+    // that file's neighborhood (rulesInject above, agent below) with JSONC comments.
+    const configContent = `{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": true,
+  "rulesInject": {
+    "enabled": true,
+    "alwaysApplyFolder": "~/.rules/olho/always-apply",
+    "position": "after-persona"
+  },
+  // smart-model supervision
+  "smartModelSupervision": {
+    "enabled": false
+  },
+  "agent": {
+    "general": {
+      "disable": true
+    }
+  },
+  "model": "puma-qwen3.5-2b-instruct"
+}`
+
+    writeFileSync(configFile, configContent, "utf-8")
+
+    const loaded = ConfigParse.jsonc(configContent, configFile)
+    const cfg = ConfigParse.schema(Info, loaded, configFile)
+
+    expect(cfg.smartModelSupervision).toBeDefined()
+    expect(cfg.smartModelSupervision?.enabled).toBe(false)
+    // Neighbouring keys still parse unchanged (zero diff for existing config).
+    expect(cfg.rulesInject?.enabled).toBe(true)
+    expect(cfg.model).toBe("puma-qwen3.5-2b-instruct")
+  })
+
+  test("empty smartModelSupervision object decodes with enabled absent", () => {
+    const parsed = Schema.decodeSync(Info)({ smartModelSupervision: {} })
+    expect(parsed.smartModelSupervision).toBeDefined()
+    expect(parsed.smartModelSupervision?.enabled).toBeUndefined()
+  })
+
+  test("absent key still parses clean — behavior unchanged for keyless configs", () => {
+    const parsed = Schema.decodeSync(Info)({ model: "anthropic/claude-2" })
+    expect(parsed.model).toBe("anthropic/claude-2")
+    expect(parsed.smartModelSupervision).toBeUndefined()
+  })
+})
+

@@ -265,6 +265,21 @@ export const Info = Schema.Struct({
   ).annotate({
     description: "Enable agent-driven in-flight model switching (default true)",
   }),
+  // Precedence rule for the effective smart-model supervision gate (see
+  // `smartModelSupervisionEnabled` below): a present `smartModelSupervision`
+  // block governs — its `enabled` decides, and a present block without
+  // `enabled` means false. When the key is absent, the legacy
+  // `dynamicModelSwitch.enabled` (default true) stays in charge unchanged.
+  smartModelSupervision: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable smart-model supervision; a present block without this value disables it",
+      }),
+    }),
+  ).annotate({
+    description:
+      "Smart-model supervision gate for the SMART_MODELS/ORIGINAL_MODEL env lines and the switch_model tool. Present block overrides dynamicModelSwitch (missing enabled = disabled); absent key leaves dynamicModelSwitch (default-on) in charge",
+  }),
   enterprise: Schema.optional(
     Schema.Struct({
       url: Schema.optional(Schema.String).annotate({ description: "Enterprise URL" }),
@@ -437,6 +452,18 @@ export type Info = DeepMutable<Schema.Schema.Type<typeof Info>> & {
   // with the file and scope it came from so later runtime code can make location-sensitive decisions.
   plugin_origins?: ConfigPlugin.Origin[]
 }
+
+/**
+ * Effective smart-model supervision gate — the ONE derived boolean for the
+ * SMART_MODELS/ORIGINAL_MODEL env emission and the switch_model tool surface.
+ * Precedence (see the smartModelSupervision schema annotation above):
+ * - a present `smartModelSupervision` block governs: its `enabled` decides,
+ *   and a present block without `enabled` evaluates to false;
+ * - an absent key leaves today's `dynamicModelSwitch?.enabled ?? true` in charge
+ *   (default-on, unchanged).
+ */
+export const smartModelSupervisionEnabled = (cfg: Pick<Info, "smartModelSupervision" | "dynamicModelSwitch">) =>
+  cfg.smartModelSupervision ? (cfg.smartModelSupervision.enabled ?? false) : (cfg.dynamicModelSwitch?.enabled ?? true)
 
 type State = {
   config: Info

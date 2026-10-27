@@ -1771,7 +1771,7 @@ export const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            const modelSwitchEnabled = (yield* config.get()).dynamicModelSwitch?.enabled ?? true
+            const modelSwitchEnabled = Config.smartModelSupervisionEnabled(yield* config.get())
             const originalModel = resolveOriginalModel(session, msgs)
             // Format dynamic skills discovered so far into system prompt content
             // (non-blocking; errors handled internally by injectDiscoveredSkills)
