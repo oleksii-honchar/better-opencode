@@ -6,11 +6,10 @@ category: behavior-pattern
 createdAt: "2026-10-25"
 updatedAt: "2026-10-26"
 tags: [session, title, prompt-loop, small-model, observability, diagnostics]
-system: id
+system: opencode
 see_also:
   - [[0003-llm-turn-management.concept.md]]
   - [[0001-session-model.concept.md]]
-  - [[0035-session-title-generation-retry-remediation.memory.md]]
   - [[0035-session-title-generation-retry-remediation.memory.md]]
 ---
 
@@ -29,3 +28,5 @@ Default-timestamp titles in the session list look like "the client never names m
 ## Resolution guidance
 
 Diagnose counts from `session.title` per agent first (main vs `parent_id` split) — don't trust perceived frequency. Robust fixes if wanted: retry `ensureTitle` on later steps, add a deterministic fallback title (truncated first user message), broaden think-tag stripping, and log guard exits at debug level instead of `Effect.ignore`.
+
+> **Status update 2026-10-26:** the "robust fixes" above are implemented on branch `261026-feat-title-retry` (cross-turn retry + bounded in-call retry + deterministic fallback + guard logging; uncommitted at this note's time) — see [[0035-session-title-generation-retry-remediation.memory.md]]. Until that branch ships and is built/restarted, the one-shot behavior described in this node is still live mainline behavior.
