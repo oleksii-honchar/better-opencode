@@ -1478,7 +1478,23 @@ export const layer = Layer.effect(
     const prompt = (Effect.fn("SessionPrompt.prompt")(function* (input: PromptInput) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
-      const message = yield* createUserMessage(input)
+      // Hoist the client-visible busy state above the creation window: `chat.message`
+      // plugin hooks and part persistence can await before runLoop's first busy-set,
+      // and the client would render nothing meanwhile. runLoop re-asserts busy each
+      // iteration (idempotent), so normal turns are unchanged. noReply callers never
+      // hand off to the loop and must not flip session status (task.ts injects these
+      // into active parent sessions).
+      const hoistedBusy = input.noReply !== true
+      if (hoistedBusy) yield* status.set(input.sessionID, { type: "busy" })
+      // Creation-window symmetry: errors from createUserMessage (agent validation,
+      // the chat.message trigger, part resolution) now throw with busy set but
+      // before the runner exists, so run-state's onIdle cleanup cannot cover them
+      // — land idle instead of leaving the session stuck busy.
+      const message = yield* createUserMessage(input).pipe(
+        Effect.onExit((exit) =>
+          hoistedBusy && Exit.isFailure(exit) ? status.set(input.sessionID, { type: "idle" }) : Effect.void,
+        ),
+      )
       yield* sessions.touch(input.sessionID)
 
       const permissions: Permission.Rule[] = []
