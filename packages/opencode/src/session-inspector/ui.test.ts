@@ -281,3 +281,184 @@ describe("ad2 wiring pins on the served page", () => {
     expect(INSPECTOR_UI_HTML).toContain("cfg.cell && cfg.cell.height")
   })
 })
+
+// AD3 — stable data-testid hooks (behavior-neutral marking only). Scheme: si-*
+// (full table documented in materials/task-ad3-evidence.md + ui.ts comment block).
+// Pins: static landmark presence + uniqueness in the SERVED HTML; data-suffixed
+// naming via PURE export cores (single source, same pattern as AD1/AD2); wiring
+// regexes prove the runtime builders actually use the cores; negatives protect
+// the seams we consolidate instead of duplicate (data-category, data-sid).
+
+import { siRowTestId, siColTestId, siColHeaderTestId, siCellTestId } from "./ui"
+
+describe("ad3 testid cores — stability + uniqueness (pure)", () => {
+  test("data-suffixed names are deterministic and unique per fixture entity", () => {
+    const sids = ["ses_a", "ses_b", "ses_with:colon/slash", "ses_a"]
+    const rows = sids.map(siRowTestId)
+    expect(rows[0]).toBe("si-session-row-ses_a") // stable literal shape
+    expect(new Set(rows).size).toBe(3) // duplicate sid -> duplicate row id (same row), no collision ACROSS ids
+    expect(siRowTestId("ses_a")).toBe(rows[0]) // stable across renders (pure)
+    // cells unique within a column, namespaced by column
+    const cells = [siCellTestId("tool-calls", 0), siCellTestId("tool-calls", 1), siCellTestId("nudges", 0)]
+    expect(new Set(cells).size).toBe(3)
+    expect(cells[0]).toBe("si-cell-tool-calls-0")
+  })
+
+  test("column + header names compose from config category ids (no volatile classes)", () => {
+    expect(siColTestId("meta_catalog")).toBe("si-column-meta_catalog")
+    expect(siColHeaderTestId("meta_catalog")).toBe("si-col-header-meta_catalog")
+  })
+})
+
+describe("ad3 static landmarks — present exactly once in served HTML", () => {
+  const statics = [
+    "si-header", "si-theme-toggle", "si-sidebar", "si-filter", "si-session-list",
+    "si-resizer", "si-stage", "si-livebar", "si-live-status", "si-live-toggle",
+    "si-grid", "si-empty", "si-drawer",
+  ] as const
+  for (const id of statics) {
+    test(`landmark ${id}`, () => {
+      const hits = INSPECTOR_UI_HTML.split(`data-testid="${id}"`).length - 1
+      expect(hits).toBe(1) // present AND statically unique
+    })
+  }
+
+  test("drawer sections + absence/truncation note markers", () => {
+    expect(INSPECTOR_UI_HTML).toContain('data-testid": "si-drawer-meta') // meta table seam (h() attrs)
+    expect(INSPECTOR_UI_HTML).toMatch(/"si-drawer-payload"/)
+    expect(INSPECTOR_UI_HTML).toMatch(/"si-drawer-note"/)
+    expect(INSPECTOR_UI_HTML).toMatch(/"si-drawer-source-absent"/)
+    expect(INSPECTOR_UI_HTML).toMatch(/"si-sessions-empty"/)
+    // conditional-by-design guard: marker ONLY when the list is genuinely empty
+    expect(INSPECTOR_UI_HTML).toMatch(/if \(!box\.childElementCount\) box\.appendChild\(h\("div", \{ "data-testid": "si-sessions-empty"/)
+  })
+
+  test("runtime builders consume the cores (wiring, not wishful markup)", () => {
+    expect(INSPECTOR_UI_HTML).toMatch(/"data-testid": siRowTestId\(r\.id\)/)
+    expect(INSPECTOR_UI_HTML).toMatch(/"data-testid": siColTestId\(c\.id\)/)
+    expect(INSPECTOR_UI_HTML).toMatch(/"data-testid": siColHeaderTestId\(c\.id\)/)
+    expect(INSPECTOR_UI_HTML).toMatch(/"data-testid": siCellTestId\(env\.category, cellSeq\+\+\)/)
+  })
+
+  test("consolidation not duplication: existing seams survive unchanged", () => {
+    expect(INSPECTOR_UI_HTML).toContain('"data-category": env.category') // AD2-F14 seam stays
+    expect(INSPECTOR_UI_HTML).toContain('"data-sid": r.id') // AD-era row identity seam stays
+    expect(INSPECTOR_UI_HTML).toContain('"data-cat": c.id') // column seam stays
+  })
+})
+
+// AD4 — drawer close button + Esc-to-close. Pure core for the keyboard semantic
+// (exact focus semantics pinned here): the handler fires ONLY on key === "Escape"
+// WHILE the drawer is open; every other key (typing in the sidebar filter) and
+// Escape-while-closed are strict no-ops. No focus management of any kind.
+
+import { escShouldCloseDrawer } from "./ui"
+
+describe("ad4 pure core — esc-close semantics", () => {
+  test("closes only on Escape while open; typing and closed-state are no-ops", () => {
+    expect(escShouldCloseDrawer("Escape", true)).toBe(true)
+    expect(escShouldCloseDrawer("Escape", false)).toBe(false) // no-op when closed
+    expect(escShouldCloseDrawer("a", true)).toBe(false) // sidebar typing untouched
+    expect(escShouldCloseDrawer("Escape ", true)).toBe(false) // exact key match
+  })
+})
+
+describe("ad4 markup + wiring on the served page", () => {
+  test("close control: icon-only button, AD3 testid, AD1 aria idiom, drawer-header position", () => {
+    expect(INSPECTOR_UI_HTML).toMatch(/"data-testid": "si-drawer-close"/)
+    expect(INSPECTOR_UI_HTML).toMatch(/"aria-label": "close drawer"/)
+    // icon-only: the button carries ONLY an inline SVG (innerHTML-parsed so the
+    // browser namespaces it correctly — same visual idiom as the AD1 static toggle)
+    expect(INSPECTOR_UI_HTML).toMatch(/h\("button", \{[^)]*"data-testid": "si-drawer-close"[^)]*html: '<svg [^>]*aria-hidden="true"/)
+    // positioned top-right inside the drawer (AD2 clamp untouched: rule targets .dclose only)
+    expect(INSPECTOR_UI_HTML).toMatch(/#drawer \.dclose \{[^}]*position: absolute;[^}]*top:[^}]*right:/)
+  })
+
+  test("document-level keydown wired through the core + click-close seam", () => {
+    expect(INSPECTOR_UI_HTML).toMatch(/document\.addEventListener\("keydown", function \(ev\) \{/)
+    expect(INSPECTOR_UI_HTML).toMatch(/escShouldCloseDrawer\(ev\.key, .*classList\.contains\("open"\)\)/)
+    expect(INSPECTOR_UI_HTML).toMatch(/function closeDrawer\(\) \{[^}]*classList\.remove\("open"\)/)
+    // close control consumes the documented AD3 idiom exactly once
+    expect(INSPECTOR_UI_HTML.split('"si-drawer-close"').length - 1).toBe(1)
+    // AD2 clamp still the drawer's only width rule
+    expect(INSPECTOR_UI_HTML).toMatch(/#drawer\.open \{ width: min\(/)
+  })
+})
+
+// AD5 — resizable drawer (persona-graph #dragbar idiom mirrored, not copied).
+// Pure cores single-source (AD1/AD2/AD3 pattern). Clamps: min 240,
+// max = DRAWER_VIEWPORT_GUTTER-composed viewport fit: min(720, vw - sidebar - 14).
+// Exact max composition pinned here + restated in evidence.
+
+import {
+  DRAWER_MIN_WIDTH, DRAWER_MAX_WIDTH, DRAWER_DEFAULT_WIDTH, DRAWER_WIDTH_KEY,
+  DRAWER_VIEWPORT_GUTTER, DRAWER_DIVIDER_BOX, DRAWER_STAGE_MIN, DRAWER_FIT_RESERVE,
+  clampDrawerWidth, decodeStoredDrawerWidth,
+} from "./ui"
+
+describe("ad5 pure cores — drawer width clamp + codec", () => {
+  test("constants: persona-graph-mirrored bounds and AD1-namespaced key", () => {
+    expect(DRAWER_MIN_WIDTH).toBe(240)
+    expect(DRAWER_MAX_WIDTH).toBe(720)
+    expect(DRAWER_DEFAULT_WIDTH).toBe(360) // AD5 default constant (supersedes AD2-era 380 var; flagged)
+    expect(DRAWER_VIEWPORT_GUTTER).toBe(14) // same gutter constant AD2's drawer clamp uses
+    // AD5 exact fit composition: reserve = 14 gutter + 9 divider box + 24 stage min = 47
+    expect(DRAWER_DIVIDER_BOX).toBe(9)
+    expect(DRAWER_STAGE_MIN).toBe(24)
+    expect(DRAWER_FIT_RESERVE).toBe(47)
+    expect(DRAWER_WIDTH_KEY).toBe("session-inspector:drawer-width")
+  })
+
+  test("clampDrawerWidth: absolute clamps and the exact viewport-fit max composition", () => {
+    expect(clampDrawerWidth(300, 1920, 280)).toBe(300) // free
+    expect(clampDrawerWidth(100, 1920, 280)).toBe(240) // min
+    expect(clampDrawerWidth(900, 1920, 280)).toBe(720) // hard max (720 << 1920-280-47)
+    // viewport-fit wins between the two: max = 1000-280-47 = 673 < 720
+    expect(clampDrawerWidth(900, 1000, 280)).toBe(673)
+    // narrow viewport: 700-280-47 = 373 in [240, 720]
+    expect(clampDrawerWidth(600, 700, 280)).toBe(373)
+    // fit falls BELOW min -> fit wins (AD2-fit honored, floor never forces overflow)
+    expect(clampDrawerWidth(600, 560, 280)).toBe(560 - 280 - 47) // 233
+    expect(clampDrawerWidth(600, 500, 280)).toBe(500 - 280 - 47) // 173 < 240 -> 173
+  })
+
+  test("decodeStoredDrawerWidth: null-safe codec (null/empty/garbage -> null; callers fall to default)", () => {
+    expect(decodeStoredDrawerWidth(null)).toBeNull()
+    expect(decodeStoredDrawerWidth("")).toBeNull()
+    expect(decodeStoredDrawerWidth("360")).toBe(360)
+    expect(decodeStoredDrawerWidth("garbage")).toBeNull()
+    expect(decodeStoredDrawerWidth("NaN")).toBeNull()
+  })
+})
+
+describe("ad5 served-page wiring — dragbar idiom + persistence seams", () => {
+  test("divider markup: testid + title hint, present in static template exactly once", () => {
+    expect(INSPECTOR_UI_HTML.split('data-testid="si-drawer-resizer"').length - 1).toBe(1)
+    expect(INSPECTOR_UI_HTML).toMatch(/id="drawerresizer"[^>]*title="drag to resize drawer"/)
+  })
+
+  test("hidden-while-closed rule (persona-graph idiom) + 7px col-resize bar", () => {
+    const style = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("<style>"), INSPECTOR_UI_HTML.indexOf("</style>"))
+    expect(style).toMatch(/#drawerresizer \{[^}]*display: none/)
+    expect(style).toMatch(/#drawerresizer\.show \{[^}]*display: block/)
+    expect(style).toMatch(/#drawerresizer \{[^}]*width: 7px[^}]*cursor: col-resize/)
+    // CSS hygiene regression (AD5 battery incident): the stylesheet is plain CSS —
+    // slash-slash comment lines silently KILL every rule they precede. Must never appear.
+    expect(style).not.toMatch(/(^|\n)\s*\/\//)
+  })
+
+  test("drag + persistence wired through cores; open/close toggle visibility; openDrawer+AD4 intact", () => {
+    expect(INSPECTOR_UI_HTML).toMatch(/clampDrawerWidth\(/)
+    expect(INSPECTOR_UI_HTML).toMatch(/decodeStoredDrawerWidth\(localStorage\.getItem\(DRAWER_WIDTH_KEY\)\)/)
+    expect(INSPECTOR_UI_HTML).toMatch(/localStorage\.setItem\(DRAWER_WIDTH_KEY, String\(/)
+    // visibility toggles with the drawer: open adds .show, closeDrawer removes it (AD4 seam intact)
+    expect(INSPECTOR_UI_HTML).toMatch(/drawerresizer.*classList\.add\("show"\)|\$\("drawerresizer"\)\.classList\.add\("show"\)/)
+    expect(INSPECTOR_UI_HTML).toMatch(/function closeDrawer\(\) \{[^}]*classList\.remove\("open"\)/)
+    expect(INSPECTOR_UI_HTML).toMatch(/function closeDrawer\(\) \{[^}]*drawerresizer[^}]*classList\.remove\("show"\)/)
+    // AD2 clamp untouched + width now rides the persisted var, not a hardcoded constant
+    expect(INSPECTOR_UI_HTML).toMatch(/#drawer\.open \{ width: min\(/)
+    // AD5 fit-reserve composition mirrored in CSS = 14+9 gutter/divider + 24 stage-min
+    expect(INSPECTOR_UI_HTML).toMatch(/calc\(100vw - var\(--sidebar-w, 280px\) - 23px - var\(--stage-min, 24px\)\)/)
+    expect(INSPECTOR_UI_HTML).toMatch(/setProperty\("--drawer", /)
+  })
+})

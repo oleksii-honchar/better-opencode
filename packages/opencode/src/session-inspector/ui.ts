@@ -56,6 +56,82 @@ export function gridTrackTemplate(n: number): string {
   return tracks.join(" ")
 }
 
+// AD3 — stable testid hooks (behavior-neutral; pure naming cores, single source:
+// the served page injects THESE functions' compiled text, unit tests import them).
+// Scheme (full table: materials/task-ad3-evidence.md):
+//   static landmarks: si-header si-theme-toggle si-sidebar si-filter si-session-list
+//     si-resizer si-stage si-livebar si-live-status si-live-toggle si-grid si-empty
+//     si-drawer | drawer parts (runtime): si-drawer-meta si-drawer-payload
+//     si-drawer-note si-drawer-source-absent | si-sessions-empty (absent-state)
+//   data-suffixed (runtime, via cores below): si-session-row-<sid>
+//     si-column-<catId> si-col-header-<catId> si-cell-<catId>-<seq>
+// Existing seams (data-sid / data-cat / data-category) are KEPT — consolidated,
+// not duplicated.
+
+export function siRowTestId(sid: string): string {
+  return "si-session-row-" + sid
+}
+
+export function siColTestId(catId: string): string {
+  return "si-column-" + catId
+}
+
+export function siColHeaderTestId(catId: string): string {
+  return "si-col-header-" + catId
+}
+
+export function siCellTestId(catId: string, seq: number): string {
+  return "si-cell-" + catId + "-" + seq
+}
+
+// AD4 keyboard semantic (exact focus semantics pinned in ui.test.ts): the
+// document-level handler closes the drawer ONLY on key === "Escape" while it is
+// open. Every other key — including sidebar-filter typing — is a strict no-op,
+// and Escape while closed is a no-op. No focus management, no preventDefault.
+
+export function escShouldCloseDrawer(key: string, drawerOpen: boolean): boolean {
+  return key === "Escape" && drawerOpen
+}
+
+// AD5 — resizable drawer (persona-graph #dragbar idiom mirrored: 7px col-resize
+// bar, visible only while the drawer is open). Pure cores, single source: the
+// page injects their compiled text; unit tests import them.
+// Clamp composition (pinned): [DRAWER_MIN_WIDTH, min(DRAWER_MAX_WIDTH,
+// vw - sidebarWidth - DRAWER_VIEWPORT_GUTTER)] and when the viewport-fit max
+// falls BELOW the min, the FIT WINS (AD2: the drawer can never force overflow).
+// DRAWER_DEFAULT_WIDTH=360 is the AD5 constant (supersedes the 380px
+// :root-era default — flagged in evidence), persisted via the AD1 pattern.
+
+export const DRAWER_MIN_WIDTH = 240
+export const DRAWER_MAX_WIDTH = 720
+export const DRAWER_DEFAULT_WIDTH = 360
+export const DRAWER_VIEWPORT_GUTTER = 14
+// AD5 exact viewport-fit composition (implementer call, pinned + documented):
+// max = min(DRAWER_MAX_WIDTH, vw - sidebar - DRAWER_FIT_RESERVE) where the
+// reserve = 14 (AD2 gutter vocabulary) + 9 (divider box: 7px + 2px border-left)
+// + 24 (stage minimum: flex min-width:0 leaves its padding box) = 47. Without
+// this the open drawer + divider overflowed the page at narrow vw (caught live,
+// 717 vs 700 — measured sibling rects).
+export const DRAWER_DIVIDER_BOX = 9
+export const DRAWER_STAGE_MIN = 24
+export const DRAWER_FIT_RESERVE = DRAWER_VIEWPORT_GUTTER + DRAWER_DIVIDER_BOX + DRAWER_STAGE_MIN
+export const DRAWER_WIDTH_KEY = "session-inspector:drawer-width"
+
+export function clampDrawerWidth(raw: number, viewportWidth: number, sidebarWidth: number): number {
+  const fitMax = Math.min(DRAWER_MAX_WIDTH, viewportWidth - sidebarWidth - DRAWER_FIT_RESERVE)
+  if (!Number.isFinite(raw)) return Math.round(Math.min(DRAWER_MIN_WIDTH, fitMax))
+  const min = Math.min(DRAWER_MIN_WIDTH, fitMax) // narrow viewport: fit wins over the 240 floor
+  if (raw < min) return min
+  if (raw > fitMax) return Math.round(fitMax)
+  return Math.round(raw)
+}
+
+export function decodeStoredDrawerWidth(stored: string | null): number | null {
+  if (stored === null || stored.length === 0) return null
+  const n = Number(stored)
+  return Number.isFinite(n) ? n : null
+}
+
 export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -107,8 +183,18 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
   .cell.clip::before { content: "•"; position: absolute; right: 6px; top: 4px; color: var(--warn); font-weight: 700; }
   .cell.unattr { opacity: 0.55; border-style: dashed; }
   .badges { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
-  #drawer { width: 0; flex: none; border-left: 1px solid var(--line); overflow: hidden; transition: width 120ms; max-height: calc(100vh - 44px); }
-  #drawer.open { width: min(var(--drawer), calc(100vw - var(--sidebar-w, 280px) - 14px)); max-width: 92vw; padding: 12px; overflow-y: auto; }
+  #drawer { width: 0; flex: none; border-left: 1px solid var(--line); overflow: hidden; transition: width 120ms; max-height: calc(100vh - 44px); position: relative; }
+  #drawer .dclose { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; background: var(--badge); color: var(--accent); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; padding: 0; }
+  #drawer .dclose svg { width: 14px; height: 14px; }
+  /* AD5 divider (persona-graph #dragbar idiom): 7px col-resize bar hugging the
+     drawer's left edge; visible ONLY while the drawer is open (.show toggled by
+     openDrawer/closeDrawer, so AD4 close/Esc hide it too). Stylesheet is plain
+     CSS: slash-slash comments are illegal here and silently kill the rules that
+     follow them — caught live in the AD5 battery, do not reintroduce. */
+  #drawerresizer { display: none; width: 7px; flex: none; cursor: col-resize; background: transparent; border-left: 2px solid var(--line); }
+  #drawerresizer.show { display: block; }
+  #drawerresizer:hover, #drawerresizer:active { border-left-color: var(--accent); }
+  #drawer.open { width: min(var(--drawer), calc(100vw - var(--sidebar-w, 280px) - 23px - var(--stage-min, 24px))); max-width: 92vw; padding: 12px; overflow-y: auto; } /* AD5: reserve = 14 gutter + 9 divider box (=23) + 24 stage-min; composition mirrored by clampDrawerWidth (DRAWER_FIT_RESERVE=47) */
   #drawer h2 { font-size: 13px; margin: 0 0 8px; }
   #drawer table { border-collapse: collapse; width: 100%; font-size: 11px; margin-bottom: 10px; }
   #drawer td { border: 1px solid var(--line); padding: 3px 6px; vertical-align: top; word-break: break-word; }
@@ -123,15 +209,16 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
 </style>
 </head>
 <body>
-<header><h1>Session Inspector</h1><span id="status"></span><button id="themeToggle" type="button" aria-label="toggle light/dark theme"><svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="currentColor"/></svg></button></header>
+<header data-testid="si-header"><h1>Session Inspector</h1><span id="status"></span><button id="themeToggle" data-testid="si-theme-toggle" type="button" aria-label="toggle light/dark theme"><svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="currentColor"/></svg></button></header>
 <main>
-  <aside id="sidebar">
-    <input id="filter" type="search" placeholder="filter sessions (server-side LIKE)">
-    <div id="sessions"></div>
+  <aside id="sidebar" data-testid="si-sidebar">
+    <input id="filter" data-testid="si-filter" type="search" placeholder="filter sessions (server-side LIKE)">
+    <div id="sessions" data-testid="si-session-list"></div>
   </aside>
-  <div id="resizer" role="separator" aria-orientation="vertical" aria-label="resize sidebar"></div>
-  <section id="stage"><div id="livebar"><span id="live" class="off">idle</span><button id="livebtn">pause</button></div><div id="grid"></div><div id="empty">pick a session on the left - timeline streams in</div></section>
-  <aside id="drawer"></aside>
+  <div id="resizer" data-testid="si-resizer" role="separator" aria-orientation="vertical" aria-label="resize sidebar"></div>
+  <section id="stage" data-testid="si-stage"><div id="livebar" data-testid="si-livebar"><span id="live" class="off" data-testid="si-live-status">idle</span><button id="livebtn" data-testid="si-live-toggle">pause</button></div><div id="grid" data-testid="si-grid"></div><div id="empty" data-testid="si-empty">pick a session on the left - timeline streams in</div></section>
+  <div id="drawerresizer" data-testid="si-drawer-resizer" title="drag to resize drawer"></div>
+  <aside id="drawer" data-testid="si-drawer"></aside>
 </main>
 <script>
 "use strict";
@@ -226,7 +313,7 @@ function renderSidebar() {
   feedRows.forEach(function (r) { if (r.parent_id && ids[r.parent_id]) (kids[r.parent_id] = kids[r.parent_id] || []).push(r); });
   function addRow(r, isChild) {
     var r2 = h("div", { class: "r2" }, (r.agent || "?"), h("span", { text: fmtTime(r.time_updated || r.time_created) }));
-    var row = h("div", { class: "row" + (isChild ? " child" : "") + (current && current.id === r.id ? " selected" : ""), "data-sid": r.id, onclick: function () { selectSession(r.id, r.title); } },
+    var row = h("div", { class: "row" + (isChild ? " child" : "") + (current && current.id === r.id ? " selected" : ""), "data-sid": r.id, "data-testid": siRowTestId(r.id), onclick: function () { selectSession(r.id, r.title); } },
       h("div", { class: "r1", text: r.title || r.id }), r2);
     box.appendChild(row);
     (kids[r.id] || []).forEach(function (k) { addRow(k, true); });
@@ -234,10 +321,12 @@ function renderSidebar() {
   roots.forEach(function (r) { addRow(r, false); });
   folderOnly.forEach(function (rec) {
     if (ids[rec.sessionId]) return;
-    box.appendChild(h("div", { class: "row", "data-sid": rec.sessionId, onclick: function () { selectSession(rec.sessionId, rec.title || rec.sessionId); } },
+    box.appendChild(h("div", { class: "row", "data-sid": rec.sessionId, "data-testid": siRowTestId(rec.sessionId), onclick: function () { selectSession(rec.sessionId, rec.title || rec.sessionId); } },
       h("div", { class: "r1", text: rec.title || rec.sessionId }),
       h("div", { class: "r2" }, rec.sessionId, h("span", { class: "tag folder", text: "folder-only" }))));
   });
+  // AD3 absent-state marker (only when the list is genuinely empty — no rows at all)
+  if (!box.childElementCount) box.appendChild(h("div", { "data-testid": "si-sessions-empty", text: "no sessions matched" }));
 }
 
 // -- grid + incremental NDJSON appends ----------------------------------------
@@ -251,7 +340,7 @@ function buildGrid() {
   // decides the COUNT and ORDER (columns()) — never a fixed px track here.
   grid.style.gridTemplateColumns = gridTrackTemplate(columns().length);
   columns().forEach(function (c) {
-    var col = h("div", { class: "col", "data-cat": c.id }, h("h2", { text: c.title }));
+    var col = h("div", { class: "col", "data-cat": c.id, "data-testid": siColTestId(c.id) }, h("h2", { "data-testid": siColHeaderTestId(c.id), text: c.title }));
     col.style.minHeight = "60px";
     col.dataset.cellHeight = String(hh);
     colById[c.id] = col;
@@ -264,7 +353,9 @@ function appendCell(env) {
   if (!col) { hiddenByConfig++; status(current.id + ": " + shown + " rows" + (hiddenByConfig ? " (" + hiddenByConfig + " rows hidden: column removed from config)" : "")); return; }
   var hh = Number(col.dataset.cellHeight || 120);
   var sr = env.sourceRef || {};
-  var cell = h("div", { class: "cell", "data-category": env.category, "data-db": sr.dbId || "", "data-ts": env.ts, title: env.ts, style: "width:100%;height:" + hh + "px", onclick: function () { openDrawer(env); } });
+  var cellSeq = Number(col._cellSeq || 0); // AD3 per-column monotonic seq (naming only)
+  var cell = h("div", { class: "cell", "data-category": env.category, "data-testid": siCellTestId(env.category, cellSeq++), "data-db": sr.dbId || "", "data-ts": env.ts, title: env.ts, style: "width:100%;height:" + hh + "px", onclick: function () { openDrawer(env); } });
+  col._cellSeq = cellSeq;
   cell.appendChild(h("span", { class: "cts", text: fmtTime(env.ts) }));
   cell.appendChild(h("div", { class: "preview", text: env.summary }));
   var badges = [];
@@ -376,29 +467,39 @@ async function fetchPayload(ref) {
   return await res.json();
 }
 function jsonBlock(v) {
-  return h("pre", { text: typeof v === "string" ? v : JSON.stringify(v, null, 2) });
+  return h("pre", { "data-testid": "si-drawer-payload", text: typeof v === "string" ? v : JSON.stringify(v, null, 2) });
 }
+function closeDrawer() {
+  $("drawer").classList.remove("open"); $("drawerresizer").classList.remove("show"); // state-light: grid/selection/scroll untouched; AD5 divider hides with it
+}
+// AD4: document-level Esc (semantic core is unit-pinned; additive, no re-render).
+document.addEventListener("keydown", function (ev) {
+  if (escShouldCloseDrawer(ev.key, $("drawer").classList.contains("open"))) closeDrawer();
+});
 async function openDrawer(env) {
   var d = $("drawer");
   d.classList.add("open");
+  $("drawerresizer").classList.add("show"); // AD5: divider visible only while open
   d.textContent = "";
+  // AD4 close control: icon-only (AD1 idiom), AD3 testid, top-right via .dclose rule.
+  d.appendChild(h("button", { class: "dclose", "data-testid": "si-drawer-close", type: "button", "aria-label": "close drawer", onclick: closeDrawer, html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' }));
   d.appendChild(h("h2", { text: "cell · " + env.category }));
-  var meta = h("table");
+  var meta = h("table", { "data-testid": "si-drawer-meta" });
   function mrow(k, v) { meta.appendChild(h("tr", null, h("td", { text: k }), h("td", { text: String(v) }))); }
   mrow("category", env.category); mrow("ts", env.ts);
   var sr = env.sourceRef || {};
   Object.keys(sr).forEach(function (k) { mrow("sourceRef." + k, sr[k]); });
   d.appendChild(meta);
   if (env.payloadRef && env.payloadRef.truncated === true) {
-    d.appendChild(h("div", { class: "note", text: "payload exceeds configured cap - shown truncated at the reference level; fullLength: " + env.payloadRef.fullLength + " bytes" }));
+    d.appendChild(h("div", { class: "note", "data-testid": "si-drawer-note", text: "payload exceeds configured cap - shown truncated at the reference level; fullLength: " + env.payloadRef.fullLength + " bytes" }));
   }
   var body = await fetchPayload(env.payloadRef);
-  if (!body) { d.appendChild(h("div", { class: "note", text: "no payloadRef on this row" })); return; }
+  if (!body) { d.appendChild(h("div", { class: "note", "data-testid": "si-drawer-note", text: "no payloadRef on this row" })); return; }
   if (body.sourceAbsent) {
-    d.appendChild(h("div", { class: "note", text: "source absent: " + body.sourceAbsent.reason + (body.sourceAbsent.file ? " (" + body.sourceAbsent.file + ")" : "") }));
+    d.appendChild(h("div", { class: "note", "data-testid": "si-drawer-source-absent", text: "source absent: " + body.sourceAbsent.reason + (body.sourceAbsent.file ? " (" + body.sourceAbsent.file + ")" : "") }));
     return;
   }
-  if (body.truncated) d.appendChild(h("div", { class: "note", text: "truncated at cap - fullLength " + body.fullLength + " bytes" }));
+  if (body.truncated)     d.appendChild(h("div", { class: "note", "data-testid": "si-drawer-note", text: "truncated at cap - fullLength " + body.fullLength + " bytes" }));
   d.appendChild(h("h2", { text: "payload (" + body.kind + ")" }));
   d.appendChild(jsonBlock(body.payload));
   // cross-links ONLY where refs actually exist
@@ -451,6 +552,56 @@ ${decodeStoredWidth.toString()}
 // can never drift — the served track template IS the tested function).
 var GRID_COL_MIN_PX = ${GRID_COL_MIN_PX};
 ${gridTrackTemplate.toString()}
+
+// AD3 testid cores (same single-source injection; naming only — zero behavior).
+${siRowTestId.toString()}
+${siColTestId.toString()}
+${siColHeaderTestId.toString()}
+${siCellTestId.toString()}
+${escShouldCloseDrawer.toString()}
+
+// AD5 drawer-resize cores (single source). Width rides the --drawer CSS var so
+// AD2's open-clamp composes with it; closed state is untouched (var only affects
+// the .open rule).
+var DRAWER_MIN_WIDTH = ${DRAWER_MIN_WIDTH};
+var DRAWER_MAX_WIDTH = ${DRAWER_MAX_WIDTH};
+var DRAWER_DEFAULT_WIDTH = ${DRAWER_DEFAULT_WIDTH};
+var DRAWER_VIEWPORT_GUTTER = ${DRAWER_VIEWPORT_GUTTER};
+var DRAWER_DIVIDER_BOX = ${DRAWER_DIVIDER_BOX};
+var DRAWER_STAGE_MIN = ${DRAWER_STAGE_MIN};
+var DRAWER_FIT_RESERVE = ${DRAWER_FIT_RESERVE};
+var DRAWER_WIDTH_KEY = "${DRAWER_WIDTH_KEY}";
+${clampDrawerWidth.toString()}
+${decodeStoredDrawerWidth.toString()}
+
+// AD5 drag block — pointer-capture idiom shared with the AD1 sidebar resizer
+// (deliberately parallel, zero layout machinery beyond setting --drawer).
+(function () {
+  var rz = $("drawerresizer");
+  function applyDrawerWidth(w) { document.documentElement.style.setProperty("--drawer", w + "px"); }
+  function sidebarNow() { return parseFloat(getComputedStyle($("sidebar")).width) || ${SIDEBAR_DEFAULT_WIDTH}; }
+  var saved = decodeStoredDrawerWidth(localStorage.getItem(DRAWER_WIDTH_KEY));
+  applyDrawerWidth(clampDrawerWidth(saved === null ? DRAWER_DEFAULT_WIDTH : saved, innerWidth, sidebarNow()));
+  var dragging = false, startX = 0, wNow = 0;
+  rz.addEventListener("pointerdown", function (ev) {
+    dragging = true; startX = ev.clientX;
+    wNow = clampDrawerWidth(parseFloat(getComputedStyle($("drawer")).width) || DRAWER_DEFAULT_WIDTH, innerWidth, sidebarNow());
+    try { rz.setPointerCapture(ev.pointerId); } catch (e) {}
+    ev.preventDefault();
+  });
+  rz.addEventListener("pointermove", function (ev) {
+    if (!dragging) return;
+    wNow = clampDrawerWidth(wNow - (ev.clientX - startX), innerWidth, sidebarNow()); // drag LEFT widens
+    startX = ev.clientX;
+    applyDrawerWidth(wNow);
+  });
+  rz.addEventListener("pointerup", function () {
+    if (!dragging) return;
+    dragging = false;
+    localStorage.setItem(DRAWER_WIDTH_KEY, String(wNow)); // AD1 persistence pattern
+  });
+  rz.addEventListener("pointercancel", function () { dragging = false; });
+})();
 
 function applySidebarWidth(w) {
   document.documentElement.style.setProperty("--sidebar-w", String(clampSidebarWidth(w)) + "px");
