@@ -76,6 +76,7 @@ import { providerHandlers } from "./handlers/provider"
 import { ptyConnectRoute, ptyHandlers } from "./handlers/pty"
 import { questionHandlers } from "./handlers/question"
 import { sessionHandlers } from "./handlers/session"
+import { sessionInspectorRoutes } from "@/session-inspector/routes"
 import { syncHandlers } from "./handlers/sync"
 import { tuiHandlers } from "./handlers/tui"
 import { v2Handlers } from "./handlers/v2"
@@ -186,7 +187,16 @@ type RouteRequirements =
 export function createRoutes(
   corsOptions?: CorsOptions,
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
-  return Layer.mergeAll(rootApiRoutes, eventApiRoutes, instanceRoutes, docRoute, uiRoute).pipe(
+  return Layer.mergeAll(
+    rootApiRoutes,
+    eventApiRoutes,
+    instanceRoutes,
+    docRoute,
+    // Session Inspector (read-only feature area): self-registers its routes; auth handling
+    // composed exactly like docRoute. See src/session-inspector/routes.ts.
+    sessionInspectorRoutes.pipe(Layer.provide(authOnlyRouterLayer)),
+    uiRoute,
+  ).pipe(
     Layer.provide([
       errorLayer,
       compressionLayer,

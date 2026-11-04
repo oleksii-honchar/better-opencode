@@ -11,15 +11,23 @@ import * as Session from "./session"
 import PROMPT_PLAN from "./prompt/plan.txt"
 import BUILD_SWITCH from "./prompt/build-switch.txt"
 import PLAN_MODE from "./prompt/plan-mode.txt"
+import { productionNudgeEmit, type NudgeInfo, type NudgeKind } from "./nudge-emit"
 
 export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   messages: MessageV2.WithParts[]
   agent: Agent.Info
   session: Session.Info
+  // Task 8 (DEC-H): one plugin.nudge attribution line per synthetic append, gated
+  // default-OFF through the session-inspector config surface; never-throws (see
+  // nudge-emit.ts). Injectable seam for tests; production default is inert while OFF.
+  nudgeEmit?: (info: NudgeInfo) => void
 }) {
   const flags = yield* RuntimeFlags.Service
   const fsys = yield* AppFileSystem.Service
   const sessions = yield* Session.Service
+  const nudgeEmit = input.nudgeEmit ?? productionNudgeEmit
+  const nudge = (kind: NudgeKind, text: string, partID: string) =>
+    nudgeEmit({ sessionID: input.session.id, kind, text, partID })
   const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
   if (!userMessage) return input.messages
 
@@ -35,30 +43,39 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
       sessionsDir: sessionsDir(),
       io: nodeIO(),
     })
+    const before = userMessage.parts.length
     applyScaffoldReminder({ messages: input.messages, agent: input.agent, met })
+    if (userMessage.parts.length > before) {
+      const appended = userMessage.parts[before]!
+      nudge("scaffold-reminder", SCAFFOLD_NUDGE, appended.id)
+    }
   }
 
   if (!flags.experimentalPlanMode) {
     if (input.agent.name === "plan") {
-      userMessage.parts.push({
+      const part = {
         id: PartID.ascending(),
         messageID: userMessage.info.id,
         sessionID: userMessage.info.sessionID,
-        type: "text",
+        type: "text" as const,
         text: PROMPT_PLAN,
         synthetic: true,
-      })
+      }
+      userMessage.parts.push(part)
+      nudge("plan-switch", PROMPT_PLAN, part.id)
     }
     const wasPlan = input.messages.some((msg) => msg.info.role === "assistant" && msg.info.agent === "plan")
     if (wasPlan && input.agent.name === "build") {
-      userMessage.parts.push({
+      const part = {
         id: PartID.ascending(),
         messageID: userMessage.info.id,
         sessionID: userMessage.info.sessionID,
-        type: "text",
+        type: "text" as const,
         text: BUILD_SWITCH,
         synthetic: true,
-      })
+      }
+      userMessage.parts.push(part)
+      nudge("plan-switch", BUILD_SWITCH, part.id)
     }
     return input.messages
   }
@@ -68,17 +85,19 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
     const ctx = yield* InstanceState.context
     const plan = Session.plan(input.session, ctx)
     const exists = yield* fsys.existsSafe(plan)
+    const planReminderText = exists
+      ? `${BUILD_SWITCH}\n\nA plan file exists at ${plan}. You should execute on the plan defined within it`
+      : BUILD_SWITCH
     const part = yield* sessions.updatePart({
       id: PartID.ascending(),
       messageID: userMessage.info.id,
       sessionID: userMessage.info.sessionID,
       type: "text",
-      text: exists
-        ? `${BUILD_SWITCH}\n\nA plan file exists at ${plan}. You should execute on the plan defined within it`
-        : BUILD_SWITCH,
+      text: planReminderText,
       synthetic: true,
     })
     userMessage.parts.push(part)
+    nudge("plan-switch", planReminderText, part.id)
     return input.messages
   }
 
@@ -88,19 +107,21 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   const plan = Session.plan(input.session, ctx)
   const exists = yield* fsys.existsSafe(plan)
   if (!exists) yield* fsys.ensureDir(path.dirname(plan)).pipe(Effect.catch(Effect.die))
+  const planModeText = PLAN_MODE.replace("${planInfo}", () =>
+    exists
+      ? `A plan file already exists at ${plan}. You can read it and make incremental edits using the edit tool.`
+      : `No plan file exists yet. You should create your plan at ${plan} using the write tool.`,
+  )
   const part = yield* sessions.updatePart({
     id: PartID.ascending(),
     messageID: userMessage.info.id,
     sessionID: userMessage.info.sessionID,
     type: "text",
-    text: PLAN_MODE.replace("${planInfo}", () =>
-      exists
-        ? `A plan file already exists at ${plan}. You can read it and make incremental edits using the edit tool.`
-        : `No plan file exists yet. You should create your plan at ${plan} using the write tool.`,
-    ),
+    text: planModeText,
     synthetic: true,
   })
   userMessage.parts.push(part)
+  nudge("plan-mode", planModeText, part.id)
   return input.messages
 })
 
