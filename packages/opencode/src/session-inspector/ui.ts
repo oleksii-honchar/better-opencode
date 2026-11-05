@@ -40,29 +40,31 @@ export function decodeStoredWidth(raw: string | null | undefined): number | null
 }
 
 // ── AD-HOC owner task 2 (2026-11-04): responsive 100 %-width grid ────────────
-// Config keeps owning column SET/ORDER and cell HEIGHT (spec §7 "fixed for now"
-// survives — heights don't flex). Widths flex: one `minmax(floor, 1fr)` track per
-// configured column stretches to fill sidebar-edge→viewport-edge, floors at a
-// readable minimum, and below the fit point the stage scrolls honestly (the floor
-// is what makes that scroll an honest scrollbar instead of unreachable content).
-// GRID_COL_MIN_PX is chosen by the fit math pinned in ui.test.ts: 12 default
-// columns must fit a ~1910 vw desktop (12*120 + 11*10 = 1550 ≤ ~1600 px).
+// SUPERSEDED-IN-PLACE by AD10 (owner 2026-11-05): the flex-stretch template
+// (minmax(GRID_COL_MIN_PX,1fr) per column) is REPLACED by fixed narrow left-aligned
+// tracks — named delta, recorded in task-ad10 evidence. What still stands from AD2:
+// config owns column SET/ORDER (never this function), the stage stays the scroll
+// context, and no page scroll ever exists.
 
-export const GRID_COL_MIN_PX = 120
+export const GRID_TRACK_PX = 64 // one block + its gutter (AD10 card ruling 4: ≈64 px/track)
 
 export function gridTrackTemplate(n: number): string {
-  const tracks: string[] = []
-  for (let i = 0; i < n; i++) tracks.push(`minmax(${GRID_COL_MIN_PX}px, 1fr)`)
-  return tracks.join(" ")
+  if (n <= 0) return ""
+  return `repeat(${n}, ${GRID_TRACK_PX}px)`
 }
 
 // AD3 — stable testid hooks (behavior-neutral; pure naming cores, single source:
 // the served page injects THESE functions' compiled text, unit tests import them).
 // Scheme (full table: materials/task-ad3-evidence.md):
-//   static landmarks: si-header si-theme-toggle si-sidebar si-filter si-session-list
-//     si-resizer si-stage si-livebar si-live-status si-live-toggle si-grid si-empty
-//     si-drawer | drawer parts (runtime): si-drawer-meta si-drawer-payload
-//     si-drawer-note si-drawer-source-absent | si-sessions-empty (absent-state)
+//   static landmarks: si-header si-theme-toggle si-sidebar si-filter si-filter-dock
+//     si-session-list si-resizer si-stage si-livebar si-live-status si-live-toggle
+//     si-grid si-empty si-drawer | drawer parts (runtime): si-drawer-meta
+//     si-drawer-payload si-drawer-note si-drawer-source-absent | si-sessions-empty (absent-state)
+//     si-payload-mode-tree si-payload-mode-raw si-payload-expand-all si-payload-collapse-all
+//     si-payload-fallback-note  (AD8: payload mode switch + tree controls; nodes carry join-safe data-path)
+//     si-hover-card si-hover-card-ts si-hover-card-cat si-hover-card-src si-hover-card-preview
+//       (AD9: ONE reused floating hover card shown from a 150 ms hover intent)
+//     (si-filter-dock added AD6: sticky sidebar head wrapper; input id/testid unchanged)
 //   data-suffixed (runtime, via cores below): si-session-row-<sid>
 //     si-column-<catId> si-col-header-<catId> si-cell-<catId>-<seq>
 // Existing seams (data-sid / data-cat / data-category) are KEPT — consolidated,
@@ -132,6 +134,275 @@ export function decodeStoredDrawerWidth(stored: string | null): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+// AD7 — timestamp-keyed 1:1 row assignment (owner 2026-11-04: "every data point
+// gets its OWN row ... I can trace the sequence"). PURE CORE, single source: the
+// page injects this compiled text; ui-rows.test.ts imports and property-tests it.
+// Contract (documented tie-order): rows sort by ts ASC across ALL columns (union
+// timeline); same-ts rows ordered by colRank (config column order), then seq
+// (per-column arrival counter). rowInsert returns the splice index that keeps the
+// array totally ordered; equal (ts,colRank,seq) duplicates land AFTER equals
+// (stable). Pure: never mutates. Strict 1:1 lives in the renderer's use:
+// appendCell creates exactly one row entry per accepted envelope and mirrors it
+// into EVERY column (cell for the owner, .slot filler for the others).
+export interface RowKey {
+  ts: string
+  colRank: number
+  seq: number
+}
+
+// Row pitch (mini) metric — the 1:1 spine rhythm of AD7: one pitch unit per row in
+// EVERY column. It lives as a CSS custom property (--cell-mini declared on #grid
+// from this constant — one source, no px literals in the .cell rule per the L220
+// config-discipline). The AD7 mini WIDTH metric (--cell-w / 86px) was RETIRED by
+// AD10: the narrow fixed track IS the width now (named delta in ui.test.ts).
+// AD11 NAMED SUPERSESSION (density contract, card ruling 1): the pitch is vertical
+// box+gutter. The box now equals the block (14); the spacing is the fixed gutter
+// token below. (AD11's governing ratio ceiling ≤1.25× was RETIRED by AD12 — the
+// owner model is a fixed px gutter; history in task-ad11/-evidence.) Old values: box
+// 28 (+8 literal margin = 36 pitch, 2.57× — measured baseline in task-ad11 JSON).
+export const CELL_MINI_H_PX = 14
+// AD11: the vertical row gutter. AD12 (owner 2026-11-05: "the gap should be not like
+// factor of height, e.g. x0.2, but some fixed number, e.g. 4px") makes this THE model:
+// a FIXED px gutter is the single source of the rhythm; the AD11 ratio-of-height
+// ceiling (≤1.25×block) is retired as the governing contract (history: task-ad11
+// evidence). The owner knob is exactly this one line: 4.
+export const CELL_GUTTER_PX = 4
+// AD12: the row PITCH is a DERIVED value — block box + fixed gutter. No independent
+// pitch constant may exist (unit-pinned against the source); --cell-pitch serves this
+// derivation to the page, and the vertical hit consumes the same chain (gap-0
+// never-overlap invariant, re-derived at the new rhythm: hit ≡ pitch → gap 0).
+export const CELL_PITCH_PX = CELL_MINI_H_PX + CELL_GUTTER_PX
+
+// ── AD10 (owner 2026-11-05 with screenshot): contentless "arkanoid" blocks ────
+// A cell is a solid COLOR BLOCK with ZERO content. These tokens are the single
+// source (same var discipline as the mini metrics above): #grid declares them as
+// custom properties from HERE; ui.test.ts pins them; the visible target is ~24×14
+// and the hit area's HORIZONTAL comfort floor (40) is unchanged. The vertical hit
+// token and its old floor (26) were superseded by AD11 card rule 2 and are now
+// DERIVED from the fixed-gutter pitch (AD12): hit ≡ pitch, so adjacent hit rects
+// touch at gap 0, never overlap; the floor is the visible block height (comfort
+// never undercuts paint).
+export const CELL_BLOCK_W_PX = 24
+export const CELL_BLOCK_H_PX = 14
+export const CELL_HIT_MIN_W_PX = 40
+export const CELL_HIT_MIN_H_PX = 14
+export const CELL_HIT_W_PX = 44
+export const CELL_HIT_H_PX = CELL_PITCH_PX
+
+// Per-lane block colors — a deterministic lane→color mapping over vendored STATIC
+// hex constants (official palette values carried as data; no external CSS/JS, no
+// build step, nothing fetched). F27 ruling (developer, from the owner's AC "different
+// color to EACH column"): EVERY known lane key is explicit here — the full shipped
+// §5.6 category vocabulary (config.schema defaults; the 12 fixture headers are the
+// live evidence). The hash cycle serves ONLY unknown/config-renamed keys: degraded,
+// never silent — and its hues are disjoint from every explicit hex.
+// Dark theme = the SAME hues one step brighter (-400 of the -500/-600 light base).
+// F27 palette rules, all pinned by the unit battery: pairwise Euclidean distance ≥35
+// between known hues in BOTH modes (measured minima: 36.0 light, 38.1 dark); light
+// slots clear the 2.1 absolute contrast floor on the rendered page surface, and the
+// amber rule holds — tool-calls light is amber-600 (≥2.3). Where a -500 light step
+// broke a floor, that one lane's light base is -600 (documented exceptions:
+// tool-calls, amt-activity). user-messages moved sky→blue so its -400 pair keeps
+// distance from pipeline's cyan; the catch-all "other" carries pink (its old hashed
+// teal slot belongs to coach-activity's explicit hue now).
+export const LANE_BLOCK_BASE: Record<string, { light: string; dark: string }> = {
+  usermessages: { light: "#3b82f6", dark: "#60a5fa" },
+  assistanttext: { light: "#10b981", dark: "#34d399" },
+  reasoning: { light: "#8b5cf6", dark: "#a78bfa" },
+  toolcalls: { light: "#d97706", dark: "#fbbf24" },
+  transitions: { light: "#f43f5e", dark: "#fb7185" },
+  pipeline: { light: "#0891b2", dark: "#22d3ee" },
+  coachjudge: { light: "#6366f1", dark: "#818cf8" },
+  coachactivity: { light: "#14b8a6", dark: "#2dd4bf" },
+  amtactivity: { light: "#65a30d", dark: "#a3e635" },
+  enginenudges: { light: "#f97316", dark: "#fb923c" },
+  lifecycle: { light: "#d946ef", dark: "#e879f9" },
+  other: { light: "#ec4899", dark: "#f472b6" },
+}
+// Overflow cycle (F27 v2): hues NO known lane uses — disjoint from all 24 explicit
+// hexes so a renamed lane can never wear a known lane's color. sky is kept for
+// continuity of renamed user-message ids; the rest are unclaimed palette hues.
+export const LANE_BLOCK_OVERFLOW: { light: string[]; dark: string[] } = {
+  light: ["#0ea5e9", "#ef4444", "#a855f7", "#16a34a", "#ca8a04"],
+  dark: ["#38bdf8", "#f87171", "#c084fc", "#4ade80", "#facc15"],
+}
+
+// Contract (documented): keys normalize case + separators, so config ids
+// ("user-messages") and canonical lane names ("userMessages") are the SAME lane.
+// Malformed input never throws — it falls into the overflow branch. Any theme value
+// that is not "dark" resolves to the light step (documented default).
+export function laneBlockColor(laneKey: string, themeMode: "light" | "dark"): string {
+  const raw = laneKey === null || laneKey === undefined ? "" : String(laneKey)
+  const norm = raw.toLowerCase().replace(/[-_.\s]/g, "")
+  const base = LANE_BLOCK_BASE[norm]
+  if (base) return themeMode === "dark" ? base.dark : base.light
+  let h = 0x811c9dc5 // FNV-1a 32-bit
+  for (let i = 0; i < norm.length; i++) {
+    h ^= norm.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  const idx = (h >>> 0) % LANE_BLOCK_OVERFLOW.light.length
+  return themeMode === "dark" ? LANE_BLOCK_OVERFLOW.dark[idx] : LANE_BLOCK_OVERFLOW.light[idx]
+}
+
+export function rowInsert(rows: readonly RowKey[], item: RowKey): number {
+  let lo = 0
+  let hi = rows.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    const a = rows[mid]
+    const c = a.ts < item.ts ? -1 : a.ts > item.ts ? 1 : a.colRank - item.colRank || a.seq - item.seq
+    if (c <= 0) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+// AD8 — interactive JSON tree for the drawer payload (owner 2026-11-04: "find a
+// way to render interactive json tree ... and switch between raw text and
+// interactive json"; zero-deps ⇒ hand-rolled). PURE CORES, single source: the
+// page injects .toString() + the interpolated constants below; ui.test.ts
+// accesses them through the module namespace. Input is the payload TEXT exactly
+// as jsonBlock would render it (same-source text for both modes). Nodes carry
+// RFC6901-escaped JSON-pointer paths (join-safe data-path). Pure: never throws.
+export const TREE_NODE_BUDGET = 2000 // tree render cap; exceeding → forced raw + honest notice
+export const TREE_DEFAULT_EXPAND_DEPTH = 2 // fresh open: containers at depth < 2 expanded (root=0)
+
+export interface JsonTreeNode {
+  path: string
+  key: string | null
+  kind: "object" | "array" | "string" | "number" | "boolean" | "null"
+  value?: unknown
+  children?: JsonTreeNode[]
+  count?: number
+}
+export interface JsonTreeModelOk {
+  ok: true
+  root: JsonTreeNode
+  nodeCount: number
+  overBudget: boolean
+}
+export interface JsonTreeModelFail {
+  ok: false
+  reason: "invalid-json"
+}
+
+export function jsonTreeModel(text: string): JsonTreeModelOk | JsonTreeModelFail {
+  let data: unknown
+  try {
+    if (typeof text !== "string" || text.length === 0) return { ok: false, reason: "invalid-json" }
+    data = JSON.parse(text)
+  } catch (_e) {
+    return { ok: false, reason: "invalid-json" }
+  }
+  const esc = (k: string): string => k.replace(/~/g, "~0").replace(/\//g, "~1")
+  let nodeCount = 0
+  const build = (v: unknown, path: string, key: string | null): JsonTreeNode => {
+    nodeCount++
+    if (v !== null && typeof v === "object") {
+      const isArr = Array.isArray(v)
+      const items = isArr ? (v as unknown[]) : undefined
+      const keys = isArr ? (v as unknown[]).map((_x, i) => String(i)) : Object.keys(v as object)
+      const children: JsonTreeNode[] = []
+      for (const k of keys) {
+        const raw = isArr ? (items as unknown[])[Number(k)] : (v as Record<string, unknown>)[k]
+        children.push(build(raw, path + "/" + esc(k), isArr ? null : k))
+      }
+      return { path, kind: isArr ? "array" : "object", key, children, count: children.length }
+    }
+    const kind = v === null ? "null" : typeof v === "number" ? "number" : typeof v === "boolean" ? "boolean" : "string"
+    return { path, kind, key, value: v }
+  }
+  const root = build(data, "", null)
+  return { ok: true, root, nodeCount, overBudget: nodeCount > TREE_NODE_BUDGET }
+}
+
+// Expand/collapse state — pure reducer. containers = every object/array path
+// (incl. root), computed ONCE from the model; all later transitions are model-free.
+export interface TreeUiState {
+  expanded: string[]
+  containers: readonly string[]
+}
+
+export function initialTreeState(root: JsonTreeNode): TreeUiState {
+  const expanded: string[] = []
+  const containers: string[] = []
+  const walk = (n: JsonTreeNode, depth: number): void => {
+    if (n.kind === "object" || n.kind === "array") {
+      containers.push(n.path)
+      if (depth < TREE_DEFAULT_EXPAND_DEPTH) expanded.push(n.path)
+      for (const c of n.children || []) walk(c, depth + 1)
+    }
+  }
+  walk(root, 0)
+  return { expanded, containers }
+}
+
+export function treeStateReducer(state: TreeUiState, action: { type: string; path?: string }): TreeUiState {
+  if (action.type === "toggle-node") {
+    const p = action.path as string
+    const has = state.expanded.includes(p)
+    return { expanded: has ? state.expanded.filter((x) => x !== p) : [...state.expanded, p], containers: state.containers }
+  }
+  if (action.type === "expand-all") return { expanded: [...state.containers], containers: state.containers }
+  if (action.type === "collapse-all") return { expanded: [], containers: state.containers }
+  return state
+}
+
+// AD9 — floating hover card PURE CORES (owner 2026-11-04: "magnifier - probably
+// it's bad idea - let's remove it, instead show only timestamp on each box and on
+// hover show popup card with more details ... like floating-ui.com"). Zero-deps:
+// hand-rolled flip/shift placement (floating-ui semantics, pure math). Single
+// source: page injects .toString(); ui-rows.test.ts unit-tests every vector.
+export const POPOVER_GAP_PX = 8
+export const POPOVER_EDGE_MARGIN_PX = 8
+export const POPOVER_INTENT_MS = 150
+export const POPOVER_PREVIEW_CAP = 400
+
+export interface PopoverRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+// Placement contract (documented): prefer BOTTOM (center under anchor), FLIP to
+// TOP when the bottom edge would clip; if BOTH clip (viewport taller-blocked),
+// placement "center" with vertical clamp active; x is always SHIFTED (clamped)
+// into [margin, vw - card.w - margin]. Returns top-left x,y in viewport coords
+// (rendered into a position:fixed element — the floating-ui pattern). Pure:
+// never mutates arguments.
+export function computePopoverPlacement(
+  anchor: PopoverRect,
+  viewport: PopoverRect,
+  card: { width: number; height: number },
+  gap: number = POPOVER_GAP_PX,
+  margin: number = POPOVER_EDGE_MARGIN_PX,
+): { placement: "bottom" | "top" | "center"; x: number; y: number } {
+  const vw = viewport.width
+  const vh = viewport.height
+  let x = viewport.left + anchor.left + anchor.width / 2 - card.width / 2
+  const xMin = viewport.left + margin
+  const xMax = viewport.left + vw - card.width - margin
+  x = Math.min(Math.max(x, xMin), xMax)
+  const below = viewport.top + anchor.top + anchor.height + gap
+  const above = viewport.top + anchor.top - card.height - gap
+  if (below + card.height <= viewport.top + vh - margin) return { placement: "bottom", x, y: below }
+  if (above >= viewport.top + margin) return { placement: "top", x, y: above }
+  const yMin = viewport.top + margin
+  const yMax = viewport.top + vh - card.height - margin
+  return { placement: "center", x, y: Math.min(Math.max(viewport.top + anchor.top + anchor.height / 2 - card.height / 2, yMin), yMax) }
+}
+
+// Card preview truncation — pinned pure cap; the FULL text always remains one
+// click away in the drawer. Nullish inputs → honest "" (renderer chooses wording).
+export function hoverPreviewText(text: string | undefined | null): { text: string; capped: boolean; displayedLength: number } {
+  if (typeof text !== "string" || text.length === 0) return { text: "", capped: false, displayedLength: 0 }
+  if (text.length <= POPOVER_PREVIEW_CAP) return { text, capped: false, displayedLength: text.length }
+  const t = text.slice(0, POPOVER_PREVIEW_CAP - 1) + "…"
+  return { text: t, capped: true, displayedLength: t.length }
+}
+
 export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -150,8 +421,13 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
     --tooltip: #ffffff; --folder-bg: #f0e3c8; --live-on: #1d7a3a;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 system-ui, sans-serif; }
-  header { padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: baseline; position: sticky; top: 0; z-index: 20; background: var(--bg); }
+  /* AD6 viewport-height app shell: the page NEVER scrolls (page-scroll stays
+     0 by construction); scrolling lives in two independent regions, each with
+     its own pinned head: the sidebar (filter dock sticky) and the stage
+     (livebar + column headers sticky). Plain-CSS sheet: slash-slash would
+     void the rules below it (F20), comments here stay block-style. */
+  body { margin: 0; overflow: hidden; background: var(--bg); color: var(--ink); font: 13px/1.45 system-ui, sans-serif; }
+  header { box-sizing: border-box; height: 44px; padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: center; background: var(--bg); } /* AD6: fixed 44px band = the constant every 100vh - 44px / top: 44px in this sheet references */
   header h1 { font-size: 15px; margin: 0; }
   header #status { color: var(--dim); }
   #themeToggle { margin-left: auto; width: 30px; height: 30px; padding: 0; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; flex: none; }
@@ -159,12 +435,13 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
   #themeToggle .i-moon { display: none; }                     /* dark (default): sun icon offers the flip */
   [data-theme="light"] #themeToggle .i-sun { display: none; } /* light: moon icon */
   [data-theme="light"] #themeToggle .i-moon { display: block; }
-  main { display: flex; min-height: calc(100vh - 44px); }
-  #sidebar { width: var(--sidebar-w, 280px); border-right: 1px solid var(--line); padding: 10px; flex: none; overflow-y: auto; max-height: calc(100vh - 44px); }
+  main { display: flex; height: calc(100vh - 44px); overflow: hidden; } /* AD6: fixed shell; children are the scroll contexts */
+  #sidebar { width: var(--sidebar-w, 280px); border-right: 1px solid var(--line); padding: 10px; flex: none; overflow-y: auto; } /* AD6: full shell-height own scroller (stretch child; max-height trick retired) */
   #resizer { flex: none; width: 6px; margin: 0 -3px; cursor: col-resize; background: var(--line); opacity: 0.35; }
   #resizer:hover, #resizer.active { opacity: 1; }
   body.resizing { cursor: col-resize; user-select: none; }
-  #filter { width: 100%; padding: 6px 8px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 8px; }
+  #filterdock { position: sticky; top: 0; z-index: 3; background: var(--bg); padding-bottom: 8px; } /* AD6: the sidebar's pinned head; occludes rows sliding under the filter */
+  #filter { width: 100%; padding: 6px 8px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; }
   #sessions .row { padding: 6px 8px; border-radius: 6px; cursor: pointer; margin-bottom: 2px; }
   #sessions .row:hover { background: var(--panel); }
   #sessions .row.selected { background: var(--badge); }
@@ -173,17 +450,61 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
   #sessions .r2 { color: var(--dim); font-size: 11px; display: flex; gap: 6px; align-items: center; }
   .tag { font-size: 10px; padding: 0 6px; border-radius: 8px; background: var(--badge); color: var(--accent); }
   .tag.folder { background: var(--folder-bg); color: var(--warn); }
-  #stage { flex: 1; min-width: 0; overflow: auto; padding: 12px; }
-  #grid { display: grid; gap: 10px; align-items: start; }
-  .col h2 { font-size: 12px; margin: 0 0 6px; color: var(--dim); border-bottom: 1px solid var(--line); padding-bottom: 4px; }
-  .cell { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; overflow: hidden; cursor: pointer; }
-  .cell .preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; word-break: break-word; }
-  .cell .cts { color: var(--dim); font-size: 10px; margin-bottom: 4px; display: block; }
-  .cell:hover::after { content: attr(data-ts); position: absolute; right: 6px; bottom: 4px; background: var(--tooltip); border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px; font-size: 10px; color: var(--accent); }
-  .cell.clip::before { content: "•"; position: absolute; right: 6px; top: 4px; color: var(--warn); font-weight: 700; }
-  .cell.unattr { opacity: 0.55; border-style: dashed; }
-  .badges { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
-  #drawer { width: 0; flex: none; border-left: 1px solid var(--line); overflow: hidden; transition: width 120ms; max-height: calc(100vh - 44px); position: relative; }
+  #stage { flex: 1; min-width: 0; overflow: auto; padding: 0 12px 12px; } /* AD6: top gutter owned by the sticky livebar, not scrollable padding */
+  #grid { display: grid; gap: 10px; --cell-mini: ${CELL_MINI_H_PX}px; --cell-gutter: ${CELL_GUTTER_PX}px; --cell-pitch: ${CELL_PITCH_PX}px; --cell-block-w: ${CELL_BLOCK_W_PX}px; --cell-block-h: ${CELL_BLOCK_H_PX}px; --cell-hit-w: ${CELL_HIT_W_PX}px; --cell-hit-h: ${CELL_HIT_H_PX}px; } /* AD6: items STRETCH (was align-items:start) so short columns keep their sticky headers bounded to full row height. AD7: the row PITCH lives here as the single source — AD11: pitch = box(--cell-mini)+gutter(--cell-gutter). AD12: the gutter is a FIXED constant (owner knob); --cell-pitch is the DERIVED rhythm, served for the chain — no independent value literals in the rules (L220). */
+  .col h2 { font-size: 12px; margin: 0 0 6px; color: var(--dim); border-bottom: 1px solid var(--line); padding: 6px 0 4px; position: sticky; top: 44px; z-index: 5; background: var(--bg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* AD6: pins directly under the 44px livebar (test-pinned constant). AD10: labels ALWAYS exceed the narrow track — honest ellipsis, the full title rides the h2 title attribute (developer ruling 4). */
+  /* AD10 trace mode (supersedes the AD7/AD9 mini-box visuals): a .cell is a
+     TRANSPARENT row-pitch box — zero content, zero paint. The visible block is a
+     ::after rounded rect painted from the per-column lane color (set once per
+     column at buildGrid; theme rides the [data-theme] cascade below). Hover/click
+     comfort is the ::before hit-area pseudo; the box itself takes no pointer
+     events, so comfort never means "the whole row is clickable". Height stays
+     var(--cell-mini): the AD7 1:1 row spine is unchanged — AD11 only NARROWED the
+     pitch (box=14, gutter=→ token; vertical hit = pitch, adjacent hit rects touch,
+     never overlap). Zero px literals in these rules (L220). */
+  .cell { position: relative; cursor: pointer; pointer-events: none; height: var(--cell-mini, 14px); margin-bottom: var(--cell-gutter, 4px); }
+  .cell::before { content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: var(--cell-hit-w, 44px); height: var(--cell-hit-h, var(--cell-pitch)); pointer-events: auto; } /* the interactive extension — height CONSUMES the pitch chain (AD12: hit ≡ pitch ⇒ adjacent hit rects gap 0, never overlap); events retarget to the cell (DOM-zero) */
+  .cell::after { content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: var(--cell-block-w, 24px); height: var(--cell-block-h, 14px); border-radius: 4px; background: var(--block-light, var(--dim)); } /* the arkanoid block: solid, rounded, centered, zero content */
+  [data-theme="dark"] .cell::after { background: var(--block-dark, var(--block-light, var(--dim))); } /* theme flip = the existing [data-theme] token path ONLY — no JS recolor path exists */
+  .slot { height: var(--cell-mini, 14px); margin-bottom: var(--cell-gutter, 4px); } /* invisible row-keeper: same pitch, zero chrome — the 1:1 alignment survives at the new rhythm */
+  /* AD8 — payload tree + mode switch. ALL colors are theme tokens (both themes, no literals). */
+  .payload-bar { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+  .pmode { font: inherit; font-size: 12px; background: var(--badge); color: var(--dim); border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; cursor: pointer; }
+  .pmode.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+  .pmode:disabled { opacity: 0.45; cursor: not-allowed; }
+  .ptool { font: inherit; font-size: 12px; background: none; color: var(--dim); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .payload-hint { color: var(--dim); font-size: 12px; margin: 2px 0 6px; }
+  .jt_row { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .jt_tw { background: none; border: none; color: var(--dim); cursor: pointer; font: inherit; padding: 0 4px; }
+  .jt_key { color: var(--accent); }
+  .jt_string { color: var(--live-on); }
+  .jt_number { color: var(--warn); }
+  .jt_boolean { color: var(--accent); }
+  .jt_null { color: var(--dim); }
+  .jt_count { color: var(--dim); }
+  .jt_punct { color: var(--dim); }
+  .jt_children { padding-left: 14px; border-left: 1px solid var(--line); }
+   /* AD9: the column-hover magnification rule and the cell preview rule were
+      DELETED here — superseded by the floating hover card below (text in ONE
+      place, ever). Kept this note selector-free on purpose (grep-probe). */
+   /* (AD10) The ts-text rule, the state dots, the truncation dot and the
+      unattributed dashed-border variant were ALL deleted here: cells carry zero
+      content and zero paint, so in-cell marking cannot exist. Truncation and
+      attribution states were never cell-only anyway — they stay stated in full
+      in the hover card and the drawer, which are unchanged surfaces.
+      Selector-free notes, same grep-clean discipline. */
+  /* AD9 — ONE reused floating hover card (floating-ui FEEL, hand-rolled): fixed +
+     measured (never absolute-in-scroller: no clipping, AD6 pinning unaffected).
+     z 40 = above column headers (5) and livebar (6); #drawer carries z 60 ABOVE
+     this card. pointer-events:none → the card never blocks hover or click. */
+  #hovercard { position: fixed; left: 0; top: 0; z-index: 40; pointer-events: none; visibility: hidden; min-width: 240px; max-width: 340px; background: var(--tooltip); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  #hovercard.show { visibility: visible; }
+  #hovercard .hc-ts { color: var(--dim); font: 11px ui-monospace, monospace; }
+  #hovercard .hc-cat { color: var(--ink); font-weight: 600; margin-top: 2px; }
+  #hovercard .hc-src { color: var(--dim); font-size: 12px; margin-top: 2px; }
+  #hovercard .hc-prev { color: var(--ink); white-space: pre-wrap; word-break: break-word; margin-top: 6px; }
+  #hovercard .hc-absent { color: var(--warn); margin-top: 2px; }
+  #drawer { width: 0; flex: none; overflow: hidden; transition: width 120ms; max-height: calc(100vh - 44px); position: relative; z-index: 60; } /* AD7: border-left removed by owner instruction — the AD5 divider (#drawerresizer) is the seam now. AD9: explicit z above the hover card (40) — card is ALWAYS fully under the drawer. */
   #drawer .dclose { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; background: var(--badge); color: var(--accent); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; padding: 0; }
   #drawer .dclose svg { width: 14px; height: 14px; }
   /* AD5 divider (persona-graph #dragbar idiom): 7px col-resize bar hugging the
@@ -201,7 +522,7 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
   #drawer pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; white-space: pre-wrap; word-break: break-word; font-size: 11px; }
   #drawer .note { color: var(--warn); margin-bottom: 8px; font-size: 11px; }
   #drawer button { margin: 2px 4px 2px 0; background: var(--badge); color: var(--accent); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; cursor: pointer; }
-  #livebar { display: flex; gap: 8px; align-items: center; padding: 4px 10px; border-bottom: 1px solid var(--line); }
+  #livebar { position: sticky; top: 0; z-index: 6; height: 44px; background: var(--bg); white-space: nowrap; margin: 0 -12px; padding: 0 12px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); } /* AD6: stage's pinned head; 44px matches .col h2 top AND the shell's header height constant (both test-pinned) */
   #live.on { color: var(--live-on); font-weight: 600; }
   #live.off { color: var(--dim); }
   #livebtn { background: var(--badge); color: var(--accent); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; cursor: pointer; }
@@ -212,12 +533,13 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
 <header data-testid="si-header"><h1>Session Inspector</h1><span id="status"></span><button id="themeToggle" data-testid="si-theme-toggle" type="button" aria-label="toggle light/dark theme"><svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="currentColor"/></svg></button></header>
 <main>
   <aside id="sidebar" data-testid="si-sidebar">
-    <input id="filter" data-testid="si-filter" type="search" placeholder="filter sessions (server-side LIKE)">
+    <div id="filterdock" data-testid="si-filter-dock"><input id="filter" data-testid="si-filter" type="search" placeholder="filter sessions (server-side LIKE)"></div>
     <div id="sessions" data-testid="si-session-list"></div>
   </aside>
   <div id="resizer" data-testid="si-resizer" role="separator" aria-orientation="vertical" aria-label="resize sidebar"></div>
   <section id="stage" data-testid="si-stage"><div id="livebar" data-testid="si-livebar"><span id="live" class="off" data-testid="si-live-status">idle</span><button id="livebtn" data-testid="si-live-toggle">pause</button></div><div id="grid" data-testid="si-grid"></div><div id="empty" data-testid="si-empty">pick a session on the left - timeline streams in</div></section>
   <div id="drawerresizer" data-testid="si-drawer-resizer" title="drag to resize drawer"></div>
+  <div id="hovercard" role="tooltip" aria-hidden="true" data-testid="si-hover-card"><span class="hc-ts" data-testid="si-hover-card-ts"></span><div class="hc-cat" data-testid="si-hover-card-cat"></div><div class="hc-src" data-testid="si-hover-card-src"></div><div class="hc-prev" data-testid="si-hover-card-preview"></div></div>
   <aside id="drawer" data-testid="si-drawer"></aside>
 </main>
 <script>
@@ -331,18 +653,30 @@ function renderSidebar() {
 
 // -- grid + incremental NDJSON appends ----------------------------------------
 var colById = {};
+// AD7 row spine: rowSlots is the GLOBAL vertical order (one entry per rendered
+// row, 1:1 with accepted envelopes); EVERY column carries an aligned child per
+// row (its cell, or a .slot keeper) so vertical position is monotonic in ts
+// across columns. rankById maps category -> config column index (tie-order rank).
+var rowSlots = [], rankById = {};
 function buildGrid() {
   var grid = $("grid");
   grid.textContent = "";
   colById = {};
+  rowSlots = []; rankById = {}; // AD7: both structures reset together with the columns
   var hh = (cfg.cell && cfg.cell.height) || 120;
-  // AD2: tracks FILL the stage width (1fr) with the readable floor; config still
-  // decides the COUNT and ORDER (columns()) — never a fixed px track here.
+  // AD10 (supersedes AD2 stretch): fixed narrow left-aligned tracks; config still
+  // decides the COUNT and ORDER (columns()) — the track template is the single core.
   grid.style.gridTemplateColumns = gridTrackTemplate(columns().length);
-  columns().forEach(function (c) {
-    var col = h("div", { class: "col", "data-cat": c.id, "data-testid": siColTestId(c.id) }, h("h2", { "data-testid": siColHeaderTestId(c.id), text: c.title }));
+  columns().forEach(function (c, ci) {
+    var col = h("div", { class: "col", "data-cat": c.id, "data-testid": siColTestId(c.id) }, h("h2", { "data-testid": siColHeaderTestId(c.id), "title": c.title, text: c.title }));
     col.style.minHeight = "60px";
-    col.dataset.cellHeight = String(hh);
+    col.dataset.cellHeight = String(hh); // config cell height stays observable on the column (AD2 surface)
+    // AD10: the column's block color — both theme steps computed ONCE from the
+    // pure core and carried as vars; the [data-theme] cascade picks the step on
+    // flip (no repaint path exists). Renamed/unknown lanes resolve deterministically.
+    col.style.setProperty("--block-light", laneBlockColor(c.id, "light"));
+    col.style.setProperty("--block-dark", laneBlockColor(c.id, "dark"));
+    rankById[c.id] = ci; // config column order = documented tie-order rank
     colById[c.id] = col;
     grid.appendChild(col);
   });
@@ -351,24 +685,33 @@ var shown = 0, hiddenByConfig = 0, dropped = 0;
 function appendCell(env) {
   var col = colById[env.category];
   if (!col) { hiddenByConfig++; status(current.id + ": " + shown + " rows" + (hiddenByConfig ? " (" + hiddenByConfig + " rows hidden: column removed from config)" : "")); return; }
-  var hh = Number(col.dataset.cellHeight || 120);
   var sr = env.sourceRef || {};
-  var cellSeq = Number(col._cellSeq || 0); // AD3 per-column monotonic seq (naming only)
-  var cell = h("div", { class: "cell", "data-category": env.category, "data-testid": siCellTestId(env.category, cellSeq++), "data-db": sr.dbId || "", "data-ts": env.ts, title: env.ts, style: "width:100%;height:" + hh + "px", onclick: function () { openDrawer(env); } });
-  col._cellSeq = cellSeq;
-  cell.appendChild(h("span", { class: "cts", text: fmtTime(env.ts) }));
-  cell.appendChild(h("div", { class: "preview", text: env.summary }));
-  var badges = [];
-  if (sr.bankAuthoritative) badges.push(h("span", { class: "tag bank", text: "bank" }));
-  if (sr.attributed === false) badges.push(h("span", { class: "tag unattr", text: "unattributed" }));
-  if (sr.lineage) badges.push(h("span", { class: "tag", text: sr.lineage === "db-parent" ? "db-sub" : "history-sub" }));
-  if (badges.length) cell.appendChild(h("div", { class: "badges" }, badges[0], badges.slice(1)));
-  col.appendChild(cell);
+  var seq = Number(col._cellSeq || 0); // AD3 per-column monotonic seq (naming only)
+  col._cellSeq = seq + 1;
+  // AD7: ONE row per data point, positioned by the injected pure core —
+  // never by per-column stacking counters. All columns get a child at the
+  // SAME index (cell for the owner, .slot filler for the others).
+  var key = { ts: env.ts, colRank: rankById[env.category], seq: seq };
+  var idx = rowInsert(rowSlots, key); rowSlots.splice(idx, 0, key);
+  var cell = h("div", { class: "cell", "data-category": env.category, "data-testid": siCellTestId(env.category, seq), "data-db": sr.dbId || "", "data-ts": env.ts, "aria-label": env.ts, onclick: function () { hideHoverCard(); openDrawer(env); } });
+  cell._rk = key;
+  cell._env = env; // AD9: the ONE reused hover card renders from this ref (no global lookup)
+  // AD10 (supersedes the AD9 ts-text + dots build): the cell carries ZERO content —
+  // no text nodes, no child elements, no markers. ts and lane live ONLY in the
+  // attributes above (data-ts / data-category / aria-label = ts for a11y); the
+  // visible block and the hit comfort are the ::after / ::before pseudos (pure
+  // CSS from the injected vars). Full detail remains exactly two surfaces: the
+  // hover card (unchanged) on hover and the drawer (unchanged) on click.
+  // AD7 placement: same row index in EVERY column (header occupies child 0).
+  var colsAll = $("grid").children;
+  for (var ci = 0; ci < colsAll.length; ci++) {
+    var node = ci === key.colRank ? cell : h("div", { class: "slot", "data-ts": env.ts });
+    colsAll[ci].insertBefore(node, colsAll[ci].children[idx + 1] || null);
+  }
   shown++;
-  // clip + dot indicator (client-observed) and payloadRef.truncated (server flag)
-  requestAnimationFrame(function () {
-    if (cell.scrollHeight > cell.clientHeight + 1 || (env.payloadRef && env.payloadRef.truncated === true)) cell.classList.add("clip");
-  });
+  // (AD10) the rAF clip-dot block was removed WITH the clip rule: a zero-content
+  // block cannot show an in-cell truncation dot; server-side truncation and the
+  // card's own cap note stay stated where they always were (hover card + drawer).
   status(current.id + ": " + shown + " rows" + (hiddenByConfig ? " (" + hiddenByConfig + " rows hidden: column removed from config)" : ""));
 }
 // ONE line parser for BOTH transports (Task 6 contract): the pushed SSE frames carry
@@ -377,6 +720,7 @@ function appendCell(env) {
 function parseLine(s) { return JSON.parse(s); }
 async function selectSession(id, title) {
   current = { id: id, title: title || id };
+  var stage = $("stage"); stage.scrollTop = 0; stage.scrollLeft = 0; // AD6: session switch = new document top; the sidebar's own scroll is deliberately untouched
   renderSidebar();
   buildGrid();
   shown = 0; hiddenByConfig = 0; dropped = 0;
@@ -432,7 +776,18 @@ function subscribeLive(id) {
       var sr = env.sourceRef || {};
       if (sr.removed && sr.dbId) {
         var cell = document.querySelector('[data-db="' + sr.dbId + '"]');
-        if (cell) { cell.parentNode.removeChild(cell); if (shown > 0) shown--; }
+        if (cell) {
+          // AD7: remove the WHOLE row — identity join through the row key.
+          var rIdx = cell._rk ? rowSlots.indexOf(cell._rk) : -1;
+          if (rIdx > -1) {
+            rowSlots.splice(rowSlots.indexOf(cell._rk), 1);
+            var colsRm = $("grid").children;
+            for (var ri = 0; ri < colsRm.length; ri++) { var kid = colsRm[ri].children[rIdx + 1]; if (kid) colsRm[ri].removeChild(kid); }
+          } else if (cell.parentNode) {
+            cell.parentNode.removeChild(cell); // defensive: untracked cell removes alone
+          }
+          if (shown > 0) shown--;
+        }
         status(current.id + ": " + shown + " rows (part removed by bus event)");
         return;
       }
@@ -469,6 +824,73 @@ async function fetchPayload(ref) {
 function jsonBlock(v) {
   return h("pre", { "data-testid": "si-drawer-payload", text: typeof v === "string" ? v : JSON.stringify(v, null, 2) });
 }
+// AD8 — payload modes. Choice persists for the PAGE LOAD via module state (explicit
+// choice; NO new storage keys). Raw mode delegates to jsonBlock UNCHANGED (byte-
+// identical rendering); tree mode renders model nodes via textContent only (XSS
+// discipline — payload data never touches innerHTML).
+var payloadMode = "tree";
+function payloadTextOf(p) { return typeof p === "string" ? p : JSON.stringify(p, null, 2); }
+function renderPayloadSection(sec, body) {
+  sec.textContent = "";
+  var payloadText = payloadTextOf(body.payload); // ONE text value feeds both modes
+  var model = jsonTreeModel(payloadText);
+  var forcedRaw = body.truncated === true || model.ok !== true || model.overBudget === true;
+  var bar = h("div", { class: "payload-bar" });
+  var treeBtn = h("button", { type: "button", class: "pmode", "data-testid": "si-payload-mode-tree", text: "tree", onclick: function () { payloadMode = "tree"; renderPayloadSection(sec, body); } });
+  var rawBtn = h("button", { type: "button", class: "pmode", "data-testid": "si-payload-mode-raw", text: "raw", onclick: function () { payloadMode = "raw"; renderPayloadSection(sec, body); } });
+  if (payloadMode === "tree" && !forcedRaw) treeBtn.classList.add("on");
+  if (payloadMode === "raw") rawBtn.classList.add("on");
+  if (forcedRaw) treeBtn.setAttribute("disabled", "");
+  bar.appendChild(treeBtn); bar.appendChild(rawBtn);
+  var showingTree = payloadMode === "tree" && !forcedRaw;
+  if (showingTree) {
+    bar.appendChild(h("button", { type: "button", class: "ptool", "data-testid": "si-payload-expand-all", text: "expand all", onclick: function () { treeState = treeStateReducer(treeState, { type: "expand-all" }); paintTree(); } }));
+    bar.appendChild(h("button", { type: "button", class: "ptool", "data-testid": "si-payload-collapse-all", text: "collapse all", onclick: function () { treeState = treeStateReducer(treeState, { type: "collapse-all" }); paintTree(); } }));
+  }
+  sec.appendChild(bar);
+  if (forcedRaw && payloadMode === "tree") {
+    sec.appendChild(h("div", { class: "payload-hint", "data-testid": "si-payload-fallback-note", text: body.truncated === true ? "not valid JSON (payload truncated at cap) — raw view shown, full raw text below" : model.ok !== true ? "not valid JSON — raw view shown" : "too many nodes for the tree view (over " + TREE_NODE_BUDGET + ") — raw view shown, complete" }));
+  }
+  if (showingTree) {
+    treeRoot = model.root;
+    treeState = initialTreeState(model.root); // fresh open: root expanded to default depth
+    treeHost = h("div", { class: "jt_children" });
+    sec.appendChild(treeHost);
+    paintTree();
+  } else {
+    sec.appendChild(jsonBlock(body.payload)); // raw: existing rendering, unchanged
+  }
+}
+var treeRoot = null, treeState = null, treeHost = null;
+function paintTree() {
+  if (!treeHost) return;
+  treeHost.textContent = ""; // rebuild from state (data volume is capped by TREE_NODE_BUDGET)
+  treeHost.appendChild(buildTreeRow(treeRoot));
+}
+function buildTreeRow(node) {
+  var row = h("div", { class: "jt_row", "data-path": node.path });
+  var isContainer = node.kind === "object" || node.kind === "array";
+  var open = isContainer && treeState.expanded.indexOf(node.path) !== -1;
+  if (isContainer) {
+    row.appendChild(h("button", { type: "button", class: "jt_tw", "aria-expanded": open ? "true" : "false", "aria-label": "toggle node", text: open ? "▾" : "▸", onclick: function () { treeState = treeStateReducer(treeState, { type: "toggle-node", path: node.path }); paintTree(); } }));
+  }
+  if (node.key !== null && node.key !== undefined) row.appendChild(h("span", { class: "jt_key", text: JSON.stringify(node.key) }));
+  if (isContainer) {
+    row.appendChild(h("span", { class: "jt_punct", text: node.kind === "array" ? " [" : " {" }));
+    row.appendChild(h("span", { class: "jt_count", text: "{" + node.count + "}" }));
+    if (open) {
+      var kids = h("div", { class: "jt_children" });
+      for (const c of node.children) kids.appendChild(buildTreeRow(c));
+      row.appendChild(kids);
+      row.appendChild(h("span", { class: "jt_punct", text: node.kind === "array" ? " ]" : " }" }));
+    } else {
+      row.appendChild(h("span", { class: "jt_punct", text: " …" }));
+    }
+  } else {
+    row.appendChild(h("span", { class: "jt_" + node.kind, text: node.kind === "string" ? JSON.stringify(node.value) : String(node.value) }));
+  }
+  return row;
+}
 function closeDrawer() {
   $("drawer").classList.remove("open"); $("drawerresizer").classList.remove("show"); // state-light: grid/selection/scroll untouched; AD5 divider hides with it
 }
@@ -501,7 +923,11 @@ async function openDrawer(env) {
   }
   if (body.truncated)     d.appendChild(h("div", { class: "note", "data-testid": "si-drawer-note", text: "truncated at cap - fullLength " + body.fullLength + " bytes" }));
   d.appendChild(h("h2", { text: "payload (" + body.kind + ")" }));
-  d.appendChild(jsonBlock(body.payload));
+  // AD8: mode-bar + tree/raw section (raw path = jsonBlock unchanged; tree only for
+  // parseable, non-truncated, in-budget payloads — otherwise forced raw + hint).
+  var psec = h("div", { class: "payload-sec" });
+  d.appendChild(psec);
+  renderPayloadSection(psec, body);
   // cross-links ONLY where refs actually exist
   var links = [];
   if (sr.ref_part_id) links.push(h("button", { onclick: function () { openDrawer({ category: "linked", ts: env.ts, sourceRef: { kind: "dbId", dbId: sr.ref_part_id }, payloadRef: { kind: "dbId", dbId: sr.ref_part_id } }); }, text: "→ part " + sr.ref_part_id }));
@@ -528,7 +954,11 @@ async function showLogLine(callId) {
   d.appendChild(h("h2", { text: "tools.log line " + callId }));
   if (!body) return;
   if (body.sourceAbsent) { d.appendChild(h("div", { class: "note", text: "tools.log line absent: " + body.sourceAbsent.reason + " - enrichment degraded only, DB state above stands" })); return; }
-  d.appendChild(jsonBlock(body.payload));
+  // AD8: the debug line goes through the SAME payload section discipline — raw log
+  // text forces raw view honestly with the controls present-disabled; JSON lines tree.
+  var lsec = h("div", { class: "payload-sec" });
+  d.appendChild(lsec);
+  renderPayloadSection(lsec, body);
 }
 function showLogLineFromHistory(env) {
   // history lines carry no callID: open the payload we have and say so explicitly
@@ -536,6 +966,56 @@ function showLogLineFromHistory(env) {
   d.appendChild(h("div", { class: "note", text: "this source is a history line - no tools.log reference exists for it (none shown)" }));
 }
 function status(msg) { $("status").textContent = msg || ""; }
+
+// ── AD9 — floating hover card (supersedes the AD7 dock magnifier) ──────────
+// ONE reused fixed-position card (role=tooltip, pointer-events:none): 150 ms
+// cancellable intent delay, delegated pointerover/out on the grid (re-renders and
+// .slot neighbors unaffected), hides on leave, on any scroll (capture = every
+// scroller; stated choice: hide, no reposition-thrash tracking) and before the
+// drawer opens (its onclick). Placement + preview cap ride the injected pure
+// cores — this block only measures and assigns.
+var hoverTimer = null, hoverCard = null, hoverFor = null;
+function showHoverFor() {
+  hoverTimer = null;
+  if (!hoverFor || !hoverFor._env) return;
+  if (!hoverCard) hoverCard = $("hovercard");
+  var env = hoverFor._env, sr = env.sourceRef || {};
+  var parts = [];
+  if (sr.kind) parts.push("source: " + sr.kind);
+  if (sr.bankAuthoritative) parts.push("bank (authoritative)");
+  else if (sr.attributed === false) parts.push("UNATTRIBUTED");
+  if (sr.lineage) parts.push(sr.lineage === "db-parent" ? "db-sub" : "history-sub");
+  hoverCard.children[0].textContent = env.ts || "";
+  hoverCard.children[1].textContent = env.category || "";
+  hoverCard.children[2].textContent = parts.length ? parts.join(" · ") : "source: unknown";
+  var pv = hoverPreviewText(env.summary);
+  hoverCard.children[3].textContent = pv.text.length ? pv.text + (pv.capped ? " [truncated in card - drawer shows full]" : "") : "no preview text available for this row - full payload (or its honest absence) opens with the click";
+  if (pv.text.length === 0) hoverCard.children[3].className = "hc-absent";
+  else hoverCard.children[3].className = "hc-prev";
+  var p = computePopoverPlacement(hoverFor.getBoundingClientRect(), { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }, hoverCard.getBoundingClientRect());
+  hoverCard.style.left = Math.round(p.x) + "px";
+  hoverCard.style.top = Math.round(p.y) + "px";
+  hoverCard.classList.add("show");
+  hoverCard.setAttribute("aria-hidden", "false");
+}
+function hideHoverCard() {
+  if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+  hoverFor = null;
+  if (hoverCard) { hoverCard.classList.remove("show"); hoverCard.setAttribute("aria-hidden", "true"); }
+}
+$("grid").addEventListener("pointerover", function (ev) {
+  var cell = ev.target && ev.target.closest ? ev.target.closest(".cell") : null;
+  if (!cell || cell === hoverFor) return;
+  hoverFor = cell;
+  if (hoverTimer) clearTimeout(hoverTimer);
+  hoverTimer = setTimeout(showHoverFor, POPOVER_INTENT_MS);
+});
+$("grid").addEventListener("pointerout", function (ev) {
+  var to = ev.relatedTarget && ev.relatedTarget.closest ? ev.relatedTarget.closest(".cell") : null;
+  if (to && to === hoverFor) return; // moving within the SAME cell: keep intent
+  hideHoverCard();
+});
+window.addEventListener("scroll", hideHoverCard, true); // capture=true: hides on ANY scroller (stated choice)
 
 // ── AD-UI controls (owner 2026-11-04): drag-resize sidebar + icon-only theme ──
 // The clamp/codec constants+functions are INJECTED from ui.ts (single source;
@@ -548,16 +1028,35 @@ var THEME_CHOICE_KEY = "${THEME_CHOICE_KEY}";
 ${clampSidebarWidth.toString()}
 ${decodeStoredWidth.toString()}
 
-// AD2 responsive cores (same injection discipline as AD1: browser and unit tests
+// AD2→AD10 track core (same injection discipline as AD1: browser and unit tests
 // can never drift — the served track template IS the tested function).
-var GRID_COL_MIN_PX = ${GRID_COL_MIN_PX};
+var GRID_TRACK_PX = ${GRID_TRACK_PX};
 ${gridTrackTemplate.toString()}
+
+// AD10 lane colors: the tested pure core and its vendored data, injected once.
+// (CSS custom properties for the per-column steps are set in buildGrid; the
+// block/hit metric vars are declared on #grid from the module constants above.)
+var LANE_BLOCK_BASE = ${JSON.stringify(LANE_BLOCK_BASE)};
+var LANE_BLOCK_OVERFLOW = ${JSON.stringify(LANE_BLOCK_OVERFLOW)};
+${laneBlockColor.toString()}
 
 // AD3 testid cores (same single-source injection; naming only — zero behavior).
 ${siRowTestId.toString()}
 ${siColTestId.toString()}
 ${siColHeaderTestId.toString()}
 ${siCellTestId.toString()}
+${rowInsert.toString()}
+var TREE_NODE_BUDGET = ${TREE_NODE_BUDGET};
+var TREE_DEFAULT_EXPAND_DEPTH = ${TREE_DEFAULT_EXPAND_DEPTH};
+${jsonTreeModel.toString()}
+${initialTreeState.toString()}
+${treeStateReducer.toString()}
+var POPOVER_GAP_PX = ${POPOVER_GAP_PX};
+var POPOVER_EDGE_MARGIN_PX = ${POPOVER_EDGE_MARGIN_PX};
+var POPOVER_INTENT_MS = ${POPOVER_INTENT_MS};
+var POPOVER_PREVIEW_CAP = ${POPOVER_PREVIEW_CAP};
+${computePopoverPlacement.toString()}
+${hoverPreviewText.toString()}
 ${escShouldCloseDrawer.toString()}
 
 // AD5 drawer-resize cores (single source). Width rides the --drawer CSS var so
