@@ -48,9 +48,43 @@ export function decodeStoredWidth(raw: string | null | undefined): number | null
 
 export const GRID_TRACK_PX = 64 // one block + its gutter (AD10 card ruling 4: ≈64 px/track)
 
+// AD14 (owner card A): the AD13 per-lane FIT-WIDEN is REVERSED — "do not extend
+// column". All 12 tracks return to exactly GRID_TRACK_PX; the per-lane width core,
+// its override map and the fit math are DELETED outright (named delta with BEFORE/
+// AFTER widths in task-ad14 evidence; the suite carries the negative greps — which
+// is why this comment spells none of those identifiers). The
+// owner's "unfold" is now delivered by WRAPPING full labels inside the track
+// (header rules below + the declared one-step fit assist), never by width.
 export function gridTrackTemplate(n: number): string {
   if (n <= 0) return ""
   return `repeat(${n}, ${GRID_TRACK_PX}px)`
+}
+
+// AD14 (owner card B/C): wrapped-header fit assist + row-hover band tokens.
+// HEADER_LINE_H_PX = the line rhythm (line-height 1.15 over the EXISTING 12 px
+// header font — the font itself is unchanged, only long labels wrap). HEADER_MAX_LINES
+// is the card's declared 2-line envelope; the ONE allowed degradation step is a
+// 90 % scale-down, after which unfixed labels SURFACE a flag (dataset.
+// siHeaderOversize) for the battery — never a silent return of the abbreviation.
+export const HEADER_FONT_PX = 12 // tokenizes the pre-existing .col h2 font size (single source)
+export const HEADER_LINE_H_PX = 14
+export const HEADER_MAX_LINES = 2
+export const HEADER_MIN_FONT_PCT = 90
+
+// Row-hover band (card C): rows are contiguous at the derived pitch, so the nearest
+// row from a Y offset is floor math on the grid's OWN rhythm. The edge tolerance is
+// TWO pitch rows — generous for empty-area navigation inside the wall, honest beyond
+// it (returns -1: the band HIDES, per card it never guesses a row).
+export const ROW_HL_EDGE_TOL_PX = 24
+
+export function headerLineCount(heightPx: number, lineH: number): number {
+  return Math.max(0, Math.round(heightPx / lineH))
+}
+
+export function rowIndexNearestY(yRel: number, pitchPx: number, rowCount: number, edgeTolPx: number): number {
+  if (rowCount <= 0) return -1
+  if (yRel < -edgeTolPx || yRel > rowCount * pitchPx + edgeTolPx) return -1
+  return Math.min(rowCount - 1, Math.max(0, Math.floor(yRel / pitchPx)))
 }
 
 // AD3 — stable testid hooks (behavior-neutral; pure naming cores, single source:
@@ -165,8 +199,10 @@ export const CELL_MINI_H_PX = 14
 // factor of height, e.g. x0.2, but some fixed number, e.g. 4px") makes this THE model:
 // a FIXED px gutter is the single source of the rhythm; the AD11 ratio-of-height
 // ceiling (≤1.25×block) is retired as the governing contract (history: task-ad11
-// evidence). The owner knob is exactly this one line: 4.
-export const CELL_GUTTER_PX = 4
+// evidence). The owner knob is exactly this one line: AD13 retunes 4 -> 2 (denser
+// Arkanoid wall; the whole chain re-derives from this single edit — no other value
+// moves by hand).
+export const CELL_GUTTER_PX = 2
 // AD12: the row PITCH is a DERIVED value — block box + fixed gutter. No independent
 // pitch constant may exist (unit-pinned against the source); --cell-pitch serves this
 // derivation to the page, and the vertical hit consumes the same chain (gap-0
@@ -182,11 +218,16 @@ export const CELL_PITCH_PX = CELL_MINI_H_PX + CELL_GUTTER_PX
 // DERIVED from the fixed-gutter pitch (AD12): hit ≡ pitch, so adjacent hit rects
 // touch at gap 0, never overlap; the floor is the visible block height (comfort
 // never undercuts paint).
-export const CELL_BLOCK_W_PX = 24
 export const CELL_BLOCK_H_PX = 14
 export const CELL_HIT_MIN_W_PX = 40
 export const CELL_HIT_MIN_H_PX = 14
-export const CELL_HIT_W_PX = 44
+// AD16 (owner: "brick rows" look): visible width = track − 2 px inset per side (64−4=60),
+// DERIVED from the chain like every other metric — the old literal 24 is retired (named delta).
+// Horizontal hit re-derived to hit ≡ visible (the 44 comfort pad belonged to the small-chip era);
+// vertical hit stays hit ≡ pitch (ad11/ad12 lane untouched). Comfort floor 40 holds by construction (60 ≥ 40).
+export const CELL_CHIP_INSET_PX = 2
+export const CELL_BLOCK_W_PX = GRID_TRACK_PX - 2 * CELL_CHIP_INSET_PX
+export const CELL_HIT_W_PX = CELL_BLOCK_W_PX
 export const CELL_HIT_H_PX = CELL_PITCH_PX
 
 // Per-lane block colors — a deterministic lane→color mapping over vendored STATIC
@@ -285,6 +326,44 @@ export interface JsonTreeModelOk {
 export interface JsonTreeModelFail {
   ok: false
   reason: "invalid-json"
+}
+
+// AD15 (owner: "replace \n with real newline, remove multiple escaping"): the ONE value-text
+// channel for tree leaves. Strings pass through DECODED — the model already holds the true
+// value; the old display-time JSON.stringify re-escaped it (literal \n, doubled backslashes).
+// Nested-JSON strings show decoded-ONCE text — no reparse (declared boundary). Non-string
+// kinds keep byte-stable String() text. The RAW view stays byte-exact via jsonBlock (untouched).
+export function treeValueText(node: { kind: string; value: unknown }): string {
+  return String(node.value)
+}
+
+// AD16 (owner screenshot: band a half-row BELOW the blocks): the band must share the block's
+// CENTER line, not the row box's top. The renderer centers blocks inside the rendered row box;
+// so the band centers on that SAME box (same-source rule — one geometry source, no new data).
+export function bandCenterTop(rowBoxTop: number, rowBoxH: number, bandH: number): number {
+  return Math.round(rowBoxTop + (rowBoxH - bandH) / 2)
+}
+
+// AD16 (owner: column popup should prefer TOP): the COLUMN TIP's own placement core —
+// prefers ABOVE the anchor (tip.bottom ≤ anchor.top − gap), flips BELOW ONLY when the
+// viewport lacks room above, x always clamped (same edge discipline as the card core).
+// The hover CARD keeps computePopoverPlacement (unchanged surfaces stay unchanged).
+export function topPreferredTipPlacement(
+  anchor: { top: number; bottom: number; left: number; right: number },
+  viewport: { top: number; left: number; width: number; height: number },
+  tip: { width: number; height: number }
+): { placement: "top" | "bottom"; x: number; y: number } {
+  const margin = POPOVER_EDGE_MARGIN_PX
+  const xMin = viewport.left + margin
+  const xMax = viewport.left + viewport.width - tip.width - margin
+  const aCx = (anchor.left + anchor.right) / 2
+  const raw = aCx - tip.width / 2
+  const x = Math.min(Math.max(raw, xMin), Math.max(xMin, xMax)) // clamp; never leaves the viewport (same as card core)
+  const above = anchor.top - POPOVER_GAP_PX - tip.height
+  if (above >= viewport.top + margin) return { placement: "top", x, y: above } // PREFERRED by owner instruction
+  const below = anchor.bottom + POPOVER_GAP_PX
+  if (below + tip.height <= viewport.top + viewport.height - margin) return { placement: "bottom", x, y: below }
+  return { placement: "top", x, y: Math.max(above, viewport.top + margin) } // both tight: hold top, clamp into view — honest degenerate case, still no below-preference
 }
 
 export function jsonTreeModel(text: string): JsonTreeModelOk | JsonTreeModelFail {
@@ -450,9 +529,10 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
   #sessions .r2 { color: var(--dim); font-size: 11px; display: flex; gap: 6px; align-items: center; }
   .tag { font-size: 10px; padding: 0 6px; border-radius: 8px; background: var(--badge); color: var(--accent); }
   .tag.folder { background: var(--folder-bg); color: var(--warn); }
-  #stage { flex: 1; min-width: 0; overflow: auto; padding: 0 12px 12px; } /* AD6: top gutter owned by the sticky livebar, not scrollable padding */
+  #stage { flex: 1; min-width: 0; overflow: auto; padding: 0 12px 12px; position: relative; } /* AD6: top gutter owned by the sticky livebar, not scrollable padding. AD14: positioning context for the in-scroll row band (absolute here = rides with rows, zero reposition code). */
   #grid { display: grid; gap: 10px; --cell-mini: ${CELL_MINI_H_PX}px; --cell-gutter: ${CELL_GUTTER_PX}px; --cell-pitch: ${CELL_PITCH_PX}px; --cell-block-w: ${CELL_BLOCK_W_PX}px; --cell-block-h: ${CELL_BLOCK_H_PX}px; --cell-hit-w: ${CELL_HIT_W_PX}px; --cell-hit-h: ${CELL_HIT_H_PX}px; } /* AD6: items STRETCH (was align-items:start) so short columns keep their sticky headers bounded to full row height. AD7: the row PITCH lives here as the single source — AD11: pitch = box(--cell-mini)+gutter(--cell-gutter). AD12: the gutter is a FIXED constant (owner knob); --cell-pitch is the DERIVED rhythm, served for the chain — no independent value literals in the rules (L220). */
-  .col h2 { font-size: 12px; margin: 0 0 6px; color: var(--dim); border-bottom: 1px solid var(--line); padding: 6px 0 4px; position: sticky; top: 44px; z-index: 5; background: var(--bg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* AD6: pins directly under the 44px livebar (test-pinned constant). AD10: labels ALWAYS exceed the narrow track — honest ellipsis, the full title rides the h2 title attribute (developer ruling 4). */
+  .col { position: relative; } /* AD14: offset-parent for the row band's Y math (band top = col + slot offsets — read from the row ELEMENTS themselves) */
+  .col h2 { font-size: ${HEADER_FONT_PX}px; line-height: ${HEADER_LINE_H_PX}px; margin: 0 0 6px; color: var(--dim); border-bottom: 1px solid var(--line); padding: 6px 0 4px; position: sticky; top: 44px; z-index: 5; background: var(--bg); white-space: normal; overflow-wrap: anywhere; } /* AD6: pins under the 44px livebar (top constant unchanged — nothing consumes header HEIGHT). AD14 NAMED SUPERSESSION (card B): the ellipsis model (nowrap + clip + text-overflow) is REMOVED — labels render FULL inside the 64 px track by wrapping to the declared line envelope (owner: "don't use abbr"); the header row grows to fit its wrapped lines. Full text ALSO rides si-col-tip on hover (AD13, extended in AD14). */
   /* AD10 trace mode (supersedes the AD7/AD9 mini-box visuals): a .cell is a
      TRANSPARENT row-pitch box — zero content, zero paint. The visible block is a
      ::after rounded rect painted from the per-column lane color (set once per
@@ -475,6 +555,7 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
   .ptool { font: inherit; font-size: 12px; background: none; color: var(--dim); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
   .payload-hint { color: var(--dim); font-size: 12px; margin: 2px 0 6px; }
   .jt_row { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .jt_value { white-space: pre-wrap; word-break: break-word; } /* AD15: explicit on the VALUE SPAN (card) — decoded newlines inside rows render as line breaks, long tokens wrap, no clipping */
   .jt_tw { background: none; border: none; color: var(--dim); cursor: pointer; font: inherit; padding: 0 4px; }
   .jt_key { color: var(--accent); }
   .jt_string { color: var(--live-on); }
@@ -504,6 +585,10 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
   #hovercard .hc-src { color: var(--dim); font-size: 12px; margin-top: 2px; }
   #hovercard .hc-prev { color: var(--ink); white-space: pre-wrap; word-break: break-word; margin-top: 6px; }
   #hovercard .hc-absent { color: var(--warn); margin-top: 2px; }
+  #coltip { position: fixed; left: 0; top: 0; z-index: 45; pointer-events: none; visibility: hidden; background: var(--tooltip); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; white-space: nowrap; } /* AD13: the ONE reused header tooltip (full lane label; replaces the native title — named delta). z 45: above the sticky headers (5) and the cell card (40), still below the drawer (60). */
+  #coltip.show { visibility: visible; }
+  #rowrect { position: absolute; left: 0; top: 0; width: 0; height: var(--cell-pitch, 16px); background: color-mix(in srgb, var(--dim) 10%, transparent); z-index: 0; pointer-events: none; visibility: hidden; border-radius: 3px; } /* AD14 row-hover band: ONE reused strip living in the stage scroll (absolute here = rides rows with zero reposition code); FIRST DOM child + z 0 = above the plain stage bg, below the positioned blocks; tint composed ONLY from the existing dim token — subtle in both themes; never blocks a block. */
+  #rowrect.show { visibility: visible; } /* AD14: the si-h2-tight fit hook is inline-style-driven (see applyHeaderFit) — deliberately NO empty CSS rule here (no-dead-CSS discipline); grepping the page for that class finds the JS surface only. */
   #drawer { width: 0; flex: none; overflow: hidden; transition: width 120ms; max-height: calc(100vh - 44px); position: relative; z-index: 60; } /* AD7: border-left removed by owner instruction — the AD5 divider (#drawerresizer) is the seam now. AD9: explicit z above the hover card (40) — card is ALWAYS fully under the drawer. */
   #drawer .dclose { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; background: var(--badge); color: var(--accent); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; padding: 0; }
   #drawer .dclose svg { width: 14px; height: 14px; }
@@ -537,9 +622,10 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
     <div id="sessions" data-testid="si-session-list"></div>
   </aside>
   <div id="resizer" data-testid="si-resizer" role="separator" aria-orientation="vertical" aria-label="resize sidebar"></div>
-  <section id="stage" data-testid="si-stage"><div id="livebar" data-testid="si-livebar"><span id="live" class="off" data-testid="si-live-status">idle</span><button id="livebtn" data-testid="si-live-toggle">pause</button></div><div id="grid" data-testid="si-grid"></div><div id="empty" data-testid="si-empty">pick a session on the left - timeline streams in</div></section>
+  <section id="stage" data-testid="si-stage"><div id="livebar" data-testid="si-livebar"><span id="live" class="off" data-testid="si-live-status">idle</span><button id="livebtn" data-testid="si-live-toggle">pause</button></div><div id="rowrect" data-testid="si-row-rect" aria-hidden="true"></div><div id="grid" data-testid="si-grid"></div><div id="empty" data-testid="si-empty">pick a session on the left - timeline streams in</div></section>
   <div id="drawerresizer" data-testid="si-drawer-resizer" title="drag to resize drawer"></div>
   <div id="hovercard" role="tooltip" aria-hidden="true" data-testid="si-hover-card"><span class="hc-ts" data-testid="si-hover-card-ts"></span><div class="hc-cat" data-testid="si-hover-card-cat"></div><div class="hc-src" data-testid="si-hover-card-src"></div><div class="hc-prev" data-testid="si-hover-card-preview"></div></div>
+  <div id="coltip" role="tooltip" aria-hidden="true" data-testid="si-col-tip"></div>
   <aside id="drawer" data-testid="si-drawer"></aside>
 </main>
 <script>
@@ -666,9 +752,14 @@ function buildGrid() {
   var hh = (cfg.cell && cfg.cell.height) || 120;
   // AD10 (supersedes AD2 stretch): fixed narrow left-aligned tracks; config still
   // decides the COUNT and ORDER (columns()) — the track template is the single core.
+  // AD14 (named delta): the count form returns with the fit path — "do not extend column".
   grid.style.gridTemplateColumns = gridTrackTemplate(columns().length);
   columns().forEach(function (c, ci) {
-    var col = h("div", { class: "col", "data-cat": c.id, "data-testid": siColTestId(c.id) }, h("h2", { "data-testid": siColHeaderTestId(c.id), "title": c.title, text: c.title }));
+    // AD13 (named delta): the native title attribute is REMOVED — the full label is
+    // staved on the column node and served by the single reused si-col-tip surface.
+    var head = h("h2", { "data-testid": siColHeaderTestId(c.id), text: c.title });
+    var col = h("div", { class: "col", "data-cat": c.id, "data-testid": siColTestId(c.id) }, head);
+    head._label = c.title; // FULL label for the tip — the elided paint never travels
     col.style.minHeight = "60px";
     col.dataset.cellHeight = String(hh); // config cell height stays observable on the column (AD2 surface)
     // AD10: the column's block color — both theme steps computed ONCE from the
@@ -679,6 +770,7 @@ function buildGrid() {
     rankById[c.id] = ci; // config column order = documented tie-order rank
     colById[c.id] = col;
     grid.appendChild(col);
+    applyHeaderFit(head); // AD14: ONE measured fit pass right after layout — declared step, oversize SURFACED, never silent clipping
   });
 }
 var shown = 0, hiddenByConfig = 0, dropped = 0;
@@ -887,7 +979,7 @@ function buildTreeRow(node) {
       row.appendChild(h("span", { class: "jt_punct", text: " …" }));
     }
   } else {
-    row.appendChild(h("span", { class: "jt_" + node.kind, text: node.kind === "string" ? JSON.stringify(node.value) : String(node.value) }));
+    row.appendChild(h("span", { class: "jt_value jt_" + node.kind, text: treeValueText(node) })); /* AD15: ONE plain-text channel — decoded strings, real newlines render (root cause: display-time JSON.stringify re-escaped values) */
   }
   return row;
 }
@@ -1003,19 +1095,94 @@ function hideHoverCard() {
   hoverFor = null;
   if (hoverCard) { hoverCard.classList.remove("show"); hoverCard.setAttribute("aria-hidden", "true"); }
 }
+// AD13: the header tooltip — ONE reused si-col-tip surface, IMMEDIATE (headers are
+// large stable targets: the 150 ms intent delay belongs to the other target class,
+// the 44px cells — POPOVER_INTENT_MS stays cell-only). Anchored through the SAME
+// placement core (computePopoverPlacement — no second implementation). Content is
+// only the full column label (col._label staved at build time). Mutual exclusion:
+// showing one cancels the other; scroll hides both.
+var colTip = null, colTipFor = null;
+function showColTipFor(col) {
+  hideHoverCard(); // mutual exclusion, column side
+  var head = col && col.querySelector ? col.querySelector("h2") : null; // ANCHOR stays the column header (AD13 placement) — the TRIGGER was widened (AD14)
+  if (!colTip) colTip = $("coltip");
+  if (!colTip || !head || typeof head._label !== "string" || !head._label) return;
+  if (colTip.textContent !== head._label) colTip.textContent = head._label;
+  colTip.classList.add("show");
+  colTip.setAttribute("aria-hidden", "false");
+  var p = topPreferredTipPlacement(head.getBoundingClientRect(), { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }, colTip.getBoundingClientRect()); // AD16 (owner): tip prefers ABOVE the header; flips below only when the top lacks room
+  colTip.style.left = Math.round(p.x) + "px";
+  colTip.style.top = Math.round(p.y) + "px";
+  colTipFor = col;
+}
+function hideColTip() {
+  colTipFor = null;
+  if (colTip) { colTip.classList.remove("show"); colTip.setAttribute("aria-hidden", "true"); }
+}
+// AD14: the row-hover band + the ONE declared header-fit step. Both derive from the
+// grid's OWN render data: a column's children ARE the rows (.cell/.slot appended in
+// rowSlots order), so row index = child slot index and the band's Y reads from the
+// row ELEMENT itself — immune to any wrapped-header height drift. The band is
+// #rowrect: pointer-events none (never blocks a block), first-child + z 0 (under the
+// blocks, over the stage bg), height = the derived pitch.
+function applyHeaderFit(head) {
+  if (headerLineCount(head.getBoundingClientRect().height, HEADER_LINE_H_PX) <= HEADER_MAX_LINES) return; // inside the declared envelope
+  head.style.fontSize = Math.round(HEADER_FONT_PX * HEADER_MIN_FONT_PCT / 100) + "px"; // the ONE allowed step (card B)…
+  head.style.lineHeight = Math.round(HEADER_LINE_H_PX * HEADER_MIN_FONT_PCT / 100) + "px"; // …line rhythm scales with it
+  head.classList.add("si-h2-tight");
+  if (headerLineCount(head.getBoundingClientRect().height, Math.round(HEADER_LINE_H_PX * HEADER_MIN_FONT_PCT / 100)) > HEADER_MAX_LINES) head.dataset.siHeaderOversize = "1"; // NEVER SILENT: still over the envelope after the one step = flagged for the battery (F-code surface), never clipped back into an abbreviation
+}
+function showRowBandFor(idx) {
+  var band = $("rowrect");
+  if (!band) return;
+  if (idx < 0) { band.classList.remove("show"); return; } // outside the wall: hide, never guess
+  var col = $("grid").querySelector(".col");
+  if (!col) return;
+  var slot = col.children[1 + idx]; // rows ARE the column's appended children (the renderer's own order)
+  if (!slot) return;
+  band.style.width = $("stage").clientWidth + "px"; // full stage width per card (visible row)
+  // AD16 (owner screenshot "band below the blocks"): the OLD row-box-TOP math is replaced by
+  // CENTERING on the same rendered row box the renderer centers blocks in — same source, Δ ≤ 2 px.
+  band.style.top = bandCenterTop(col.offsetTop + slot.offsetTop, slot.offsetHeight, ROW_BAND_PITCH) + "px";
+  band.classList.add("show");
+}
+function hideRowBand() {
+  var band = $("rowrect");
+  if (band) band.classList.remove("show");
+}
+function rowIndexOfEl(el) {
+  var kids = el.parentNode ? el.parentNode.children : [];
+  var n = 0;
+  for (var i = 1; i < kids.length; i++) { // children[0] is the header; the rest are the row slots
+    if (kids[i] === el) return n;
+    if (kids[i].classList && (kids[i].classList.contains("cell") || kids[i].classList.contains("slot"))) n++;
+  }
+  return -1;
+}
 $("grid").addEventListener("pointerover", function (ev) {
   var cell = ev.target && ev.target.closest ? ev.target.closest(".cell") : null;
-  if (!cell || cell === hoverFor) return;
-  hoverFor = cell;
-  if (hoverTimer) clearTimeout(hoverTimer);
-  hoverTimer = setTimeout(showHoverFor, POPOVER_INTENT_MS);
+  if (cell) {
+    hideColTip(); // CELL STILL WINS (card B): the card shows ONLY — no stacking
+    showRowBandFor(rowIndexOfEl(cell)); // row = its slot index in the column (the append-order contract)
+    if (cell === hoverFor) return;
+    hoverFor = cell;
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(showHoverFor, POPOVER_INTENT_MS);
+    return;
+  }
+  var col = ev.target && ev.target.closest ? ev.target.closest('[data-testid^="si-column-"]') : null; // AD14 (named delta on AD13): the trigger is the WHOLE column container — empty track included
+  if (!col) { hideRowBand(); return; }
+  if (col !== colTipFor) showColTipFor(col); // immediate, same anchoring/placement as AD13
+  var first = col.children[1]; var ry = first ? ev.clientY - first.getBoundingClientRect().top : 0; // offset from row 0 — measured off the grid's own row element
+  showRowBandFor(rowIndexNearestY(ry, ROW_BAND_PITCH, rowSlots.length, ROW_HL_EDGE_TOL_PX));
 });
 $("grid").addEventListener("pointerout", function (ev) {
+  if (!(ev.relatedTarget && $("grid").contains(ev.relatedTarget))) { hideRowBand(); hideColTip(); } // leaving the grid entirely: band and column tip clear (band would follow scroll — its home IS the scroll space)
   var to = ev.relatedTarget && ev.relatedTarget.closest ? ev.relatedTarget.closest(".cell") : null;
   if (to && to === hoverFor) return; // moving within the SAME cell: keep intent
   hideHoverCard();
 });
-window.addEventListener("scroll", hideHoverCard, true); // capture=true: hides on ANY scroller (stated choice)
+window.addEventListener("scroll", function () { hideHoverCard(); hideColTip(); }, true); // capture=true: hides BOTH surfaces on ANY scroller (stated choice; AD13 covers the header tip)
 
 // ── AD-UI controls (owner 2026-11-04): drag-resize sidebar + icon-only theme ──
 // The clamp/codec constants+functions are INJECTED from ui.ts (single source;
@@ -1028,10 +1195,23 @@ var THEME_CHOICE_KEY = "${THEME_CHOICE_KEY}";
 ${clampSidebarWidth.toString()}
 ${decodeStoredWidth.toString()}
 
-// AD2→AD10 track core (same injection discipline as AD1: browser and unit tests
-// can never drift — the served track template IS the tested function).
+// AD2→AD14 track core (same injection discipline as AD1: browser and unit tests
+// can never drift — the served track template IS the tested function). AD14 reverts
+// the uniform form; the fit path is gone and is NOT served.
 var GRID_TRACK_PX = ${GRID_TRACK_PX};
 ${gridTrackTemplate.toString()}
+// AD14 wrapped-header fit + row band — single-source as ever: these served values
+// ARE the unit-tested tokens; the served helpers ARE the tested pure cores.
+var HEADER_FONT_PX = ${HEADER_FONT_PX};
+var HEADER_LINE_H_PX = ${HEADER_LINE_H_PX};
+var HEADER_MAX_LINES = ${HEADER_MAX_LINES};
+var HEADER_MIN_FONT_PCT = ${HEADER_MIN_FONT_PCT};
+var ROW_HL_EDGE_TOL_PX = ${ROW_HL_EDGE_TOL_PX};
+var ROW_BAND_PITCH = ${CELL_PITCH_PX}; // the derived rhythm — the band consumes the chain, never a literal
+${headerLineCount.toString()}
+${rowIndexNearestY.toString()}
+${bandCenterTop.toString()}
+${topPreferredTipPlacement.toString()}
 
 // AD10 lane colors: the tested pure core and its vendored data, injected once.
 // (CSS custom properties for the per-column steps are set in buildGrid; the
@@ -1049,6 +1229,7 @@ ${rowInsert.toString()}
 var TREE_NODE_BUDGET = ${TREE_NODE_BUDGET};
 var TREE_DEFAULT_EXPAND_DEPTH = ${TREE_DEFAULT_EXPAND_DEPTH};
 ${jsonTreeModel.toString()}
+${treeValueText.toString()}
 ${initialTreeState.toString()}
 ${treeStateReducer.toString()}
 var POPOVER_GAP_PX = ${POPOVER_GAP_PX};

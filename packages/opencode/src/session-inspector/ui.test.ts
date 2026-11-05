@@ -247,29 +247,43 @@ describe("ad-ui wiring pins on the served page", () => {
 // ("GRID_COL_MIN_PX fit math" + "minmax(min,1fr) fills") were REMOVED — fixed-narrow
 // left-aligned tracks replace viewport-stretching columns. AD2's 100 %-width container,
 // page-never-scrolls and drawer-clamp pins in the wiring lane below STAND unchanged.
+// DELTA (AD14 reverts AD13 per card a): the per-lane FIT-WIDEN is REVERSED — ALL
+// lanes return to exactly GRID_TRACK_PX; the fit code path is DELETED entirely (no
+// dead code; negative grep-pinned below). The per-track list signature existed only
+// to carry per-lane widths, so the generator RETURNS as the AD10 count form —
+// named delta recorded on the units it replaces. The owner's "unfold" is now
+// WRAPPING (see the ad14 wrapped-headers lane), never width.
 import { gridTrackTemplate } from "./ui"
 
-describe("ad10 pure core — fixed narrow tracks (supersedes AD2 stretch)", () => {
-  test("GRID_TRACK_PX: ~64 px fixed narrow track; 12 default columns fit any desktop without stretching", () => {
-    const t = (uiAll as unknown as Record<string, any>)
-    if (t.GRID_TRACK_PX === undefined) throw new Error("ad10 core missing: GRID_TRACK_PX")
-    expect(t.GRID_TRACK_PX).toBe(64) // block + gutter (AD10 card design ruling 2/4)
-    // honest fit: 12 tracks + 11 gaps stay inside the AD2-fit stage at the narrow value
-    expect(12 * t.GRID_TRACK_PX + 11 * 10).toBeLessThanOrEqual(1600)
-  })
+// Namespace access keeps RED scoped to new lanes (AD8/AD10 pattern).
+const ad14 = uiAll as unknown as Record<string, any>
+const a14Need = (name: string): any => {
+  if (ad14[name] === undefined) throw new Error("ad14 core missing: " + name)
+  return ad14[name]
+}
 
-  test("gridTrackTemplate: one fixed repeat(track) per configured column — no flex fill, no floor", () => {
+describe("ad14 uniform tracks RETURN — AD13 fit path deleted (named delta on the ad13 per-lane units)", () => {
+  test('gridTrackTemplate(n) is the UNIFORM repeat again — "do not extend column" taken literally', () => {
+    expect(ad14.GRID_TRACK_PX).toBe(64) // the base constant stands (AD10 ruling returns)
     expect(gridTrackTemplate(3)).toBe("repeat(3, 64px)")
     expect(gridTrackTemplate(0)).toBe("")
-    expect((gridTrackTemplate(12).match(/repeat\(/g) ?? []).length).toBe(1) // ONE constructor: repeat(12, …)
-    expect(gridTrackTemplate(12)).toContain("repeat(12, 64px)")
-    // stretch vocabulary is GONE (named delta — no 1fr fill, no minmax floor anywhere)
-    expect(gridTrackTemplate(5)).not.toMatch(/1fr|minmax/)
+    expect(gridTrackTemplate(12)).toBe("repeat(12, 64px)") // the fixture's 12 lanes: one width everywhere
+  })
+
+  test('the fit path exists NOWHERE: no laneTrackWidth, no override map, no list signature, no served fit constants (negative pins)', () => {
+    const src = require("node:fs").readFileSync(new URL("./ui.ts", import.meta.url), "utf8") as string
+    expect(src).not.toMatch(/laneTrackWidth/)
+    expect(src).not.toMatch(/LANE_TRACK_(OVERRIDES|FIT_PAD_PX|APPROX_CHAR_PX|MAX_PX)/)
+    expect(src).not.toMatch(/gridTrackTemplate\(columns\(\)\)/) // list form existed ONLY for per-lane widths — retired
+    expect(INSPECTOR_UI_HTML).not.toMatch(/LANE_TRACK_/)
+    // NAMED delta: this unit replaces the AD13 "fit = clamp(64,220,approx)" +
+    // "PER-LANE widths from the config list" units (AD14 card reverses that ruling).
+    expect(INSPECTOR_UI_HTML).toMatch(/grid\.style\.gridTemplateColumns = gridTrackTemplate\(columns\(\)\.length\)/)
   })
 })
 
 describe("ad2 wiring pins on the served page", () => {
-  test("buildGrid feeds config COUNT into the (now fixed-narrow) template — no per-column track builder", () => {
+  test("buildGrid feeds the CONFIG COUNT into the single template core (AD14 named delta: list reverts to count with the fit path)", () => {
     expect(INSPECTOR_UI_HTML).toContain("function gridTrackTemplate(")
     expect(INSPECTOR_UI_HTML).toMatch(/grid\.style\.gridTemplateColumns = gridTrackTemplate\(columns\(\)\.length\)/)
     expect(INSPECTOR_UI_HTML).not.toMatch(/gridTemplateColumns = columns\(\)\.map\(/) // negative guard: single template core only
@@ -912,9 +926,13 @@ const a10Need = (name: string): any => {
 
 // Block metric tokens (card ruling 2: "exact tokens worker-pinned by test").
 describe("ad10 block tokens — visible 24x14, hit area ≥ 40x26, track 64", () => {
-  test("visible block ~24x14; hit comfort: W floor kept at 40, H floor re-anchored by the AD11 pitch rule (NAMED DELTA)", () => {
-    expect(a10Need("CELL_BLOCK_W_PX")).toBe(24)
-    expect(a10Need("CELL_BLOCK_H_PX")).toBe(14)
+  test("visible block BRICK-width 60x14 (AD16 named delta: was 24); hit comfort floors kept", () => {
+    // NAMED DELTA (AD16 part 2, owner: "Arkanoid look becomes brick rows"): width := track − 2 px inset per side,
+    // DERIVED from the chain — the old literal 24 moves here and only here.
+    expect(a10Need("CELL_CHIP_INSET_PX")).toBe(2)
+    expect(a10Need("CELL_BLOCK_W_PX")).toBe(a10Need("GRID_TRACK_PX") - 2 * a10Need("CELL_CHIP_INSET_PX"))
+    expect(a10Need("CELL_BLOCK_W_PX")).toBe(60)
+    expect(a10Need("CELL_BLOCK_H_PX")).toBe(14) // height UNCHANGED (card)
     expect(a10Need("CELL_HIT_MIN_W_PX")).toBe(40) // horizontal comfort floor — UNCHANGED by AD11 (card rule 2 keeps it)
     // NAMED SUPERSESSION (AD11 card rule 2): the old vertical comfort floor (26) cannot exist at
     // any pitch that satisfies the density contract (26 > 1.25×14=17.5). The vertical floor is
@@ -1088,9 +1106,9 @@ describe("ad10 served-page structure — transparent row box, block + hit pseudo
     // AD11 NAMED DELTA: the hit-height literal expectation (30px) is superseded — the pin
     // derives from the tested constants now; the honest value is pinned by the ad11 units.
     const gridRule = rule1("#grid")
-    expect(gridRule).toMatch(/--cell-block-w: 24px;/) // interpolated from the tested constants
+    expect(gridRule).toContain(`--cell-block-w: ${a10Need("CELL_BLOCK_W_PX")}px;`) // AD16 NAMED DELTA: brick width now DERIVES from the tested constants (was literal 24px) — no hand-lit values in rules
     expect(gridRule).toMatch(/--cell-block-h: 14px;/)
-    expect(gridRule).toMatch(/--cell-hit-w: 44px;/)
+    expect(gridRule).toContain(`--cell-hit-w: ${a10Need("CELL_HIT_W_PX")}px;`) // AD16: hit derives from the brick chain too (was literal 44px) — hit ≡ visible horizontally
     expect(gridRule).toContain(`--cell-hit-h: ${a10Need("CELL_HIT_H_PX")}px;`)
     // AD11: the vertical gutter becomes a token too (density contract) — sourced from core, never a rule literal:
     expect(gridRule).toContain(`--cell-gutter: ${a10Need("CELL_GUTTER_PX")}px;`)
@@ -1108,15 +1126,22 @@ describe("ad10 served-page structure — transparent row box, block + hit pseudo
     expect(handler).not.toMatch(/laneBlockColor|recolor|setProperty/)
   })
 
-  test("buildGrid paints lanes: per-column block vars from the core (both themes), header ellipsis + title survive into narrow tracks", () => {
+  test("buildGrid paints lanes: per-column block vars (both themes), header WRAPS full labels (AD14 REPLACES the ellipsis model); native title stays removed", () => {
     const build = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function buildGrid"), INSPECTOR_UI_HTML.indexOf("function appendCell"))
     expect(build).toMatch(/setProperty\("--block-light", laneBlockColor\(c\.id, "light"\)\)/)
     expect(build).toMatch(/setProperty\("--block-dark", laneBlockColor\(c\.id, "dark"\)\)/)
-    expect(build).toMatch(/"title": c\.title/) // truncated titles must stay reachable (card ruling 4)
+    // NAMED SUPERSESSION (AD13 card c KEPT): native title remains removed — the real
+    // tooltip surface (si-col-tip) is the full-label carrier next to the wrapped paint.
+    expect(build).not.toMatch(/"title": c\.title/)
+    // NAMED SUPERSESSION (AD14 card b): the AD10/AD13 ellipsis model (nowrap + clip +
+    // text-overflow) is REPLACED — labels render FULL inside the 64 px track via
+    // wrapping (owner: "don't use abbr - i don't get what it is").
     const h2 = rule1(".col h2")
-    expect(h2).toMatch(/text-overflow: ellipsis/)
-    expect(h2).toMatch(/white-space: nowrap/)
-    expect(h2).toMatch(/overflow: hidden/)
+    expect(h2).toMatch(/white-space: normal/)
+    expect(h2).toMatch(/overflow-wrap/)
+    expect(h2).not.toMatch(/text-overflow/)
+    expect(h2).not.toMatch(/white-space: nowrap/)
+    expect(h2).not.toMatch(/overflow: hidden/) // a clipped label is the abbreviation this card removes
     // testid scheme (AD3) untouched: header + cell builders still consume the cores
     expect(build).toMatch(/siColHeaderTestId\(c\.id\)/)
   })
@@ -1152,7 +1177,60 @@ describe("ad10 served-page structure — transparent row box, block + hit pseudo
 // hit-gap-0-never-overlap invariant is RE-DERIVED at the new pitch (hit ≡ pitch), not
 // dropped. The 1:1 spine, ordering (rowInsert byte-identical), horizontal hit comfort,
 // and block shape stay KEEP.
-describe("ad11/ad12 density contract — FIXED gutter, derived pitch and vertical hit honesty", () => {
+describe("ad13 header tooltip si-col-tip — ONE reused surface, immediate, mutually exclusive with the cell card", () => {
+  test("one reused si-col-tip element; z above sticky headers (5), below the drawer (60)", () => {
+    expect((INSPECTOR_UI_HTML.match(/data-testid="si-col-tip"/g) ?? []).length).toBe(1) // one reused element, ever
+    const tip = (INSPECTOR_UI_HTML.match(/#coltip \{[^}]*\}/) ?? [""])[0]
+    expect(tip).toMatch(/position: fixed/)
+    expect(tip).toMatch(/pointer-events: none/)
+    const z = parseInt((tip.match(/z-index: (\d+)/) ?? ["", "0"])[1], 10)
+    expect(z).toBeGreaterThan(5) // above the sticky headers
+    expect(z).toBeLessThan(60) // below the drawer
+  })
+  test("column-area hover (ANY .col container area) shows the FULL label IMMEDIATELY; AD16 TOP-PREFERENCE placement core; cell card still wins", () => {
+    const js = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function showColTipFor"))
+    expect(js.length).toBeGreaterThan(0)
+    const fn = js.slice(0, js.indexOf("function hideColTip"))
+    expect(fn).toMatch(/textContent/) // single text node = the full column label — no preview, no other content
+    expect(fn).toMatch(/_label/) // label staved from the config title at build time (full text, never the elided paint)
+    // NAMED DELTA (AD16 part 3, owner: popup above the header): the coltip MOVES from the shared
+    // bottom-preferring card core to its OWN top-preferring pure core (single placement rule per
+    // surface remains — still no inline math here). The hover-CARD keeps computePopoverPlacement.
+    expect(fn).toMatch(/topPreferredTipPlacement\(/)
+    expect(fn).not.toMatch(/computePopoverPlacement\(/)
+    expect(fn).toMatch(/hideHoverCard\(\)/) // mutual exclusion, column side
+    expect(fn).not.toMatch(/setTimeout/) // immediate for columns: the 150ms intent delay belongs to the other target class
+    // NAMED EXTENSION (AD14 card b): the AD13 header-cell trigger (closest("h2")) is
+    // WIDENED to the whole column container — hovering empty track areas works too.
+    expect(INSPECTOR_UI_HTML).toMatch(/closest\('\[data-testid\^="si-column-"\]'\)/)
+    expect(INSPECTOR_UI_HTML).not.toMatch(/closest\("h2"\)/)
+    const h = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf('$("grid").addEventListener("pointerover"'))
+    const handler = h.slice(0, h.indexOf("});"))
+    // ORDER is the contract: the CELL branch precedes the column branch — a block hover
+    // resolves to the card ONLY (no stacking, owner: cell hover-card STILL WINS).
+    expect(handler.indexOf('closest(".cell")')).toBeLessThan(handler.indexOf('closest(\'[data-testid^="si-column-"]\')'))
+    expect(INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf('window.addEventListener("scroll"')).slice(0, 160)).toMatch(/hideColTip/) // hide-on-scroll covers both surfaces
+  })
+  test("mutual exclusion cell-side: the cell hover path cancels the column tip", () => {
+    const h = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf('$("grid").addEventListener("pointerover"'))
+    const handler = h.slice(0, h.indexOf("});"))
+    expect(handler).toMatch(/closest\("\.cell"\)/) // the pre-existing cell branch stays first
+    expect(handler).toMatch(/hideColTip\(\)/) // hovering a cell cancels any column tip (single active tip)
+  })
+})
+
+describe("ad13 label staving + template feed (AD14 updated: uniform-count feed; staving unchanged) — no native titles", () => {
+  test("buildGrid: the template core receives the config COUNT (single uniform constructor)", () => {
+    expect(INSPECTOR_UI_HTML).toMatch(/grid\.style\.gridTemplateColumns = gridTrackTemplate\(columns\(\)\.length\)/)
+  })
+  test('the column node staves its FULL label for the tip; zero native title attrs on headers', () => {
+    const build = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function buildGrid"), INSPECTOR_UI_HTML.indexOf("function appendCell"))
+    expect(build).toMatch(/_label = c\.title/) // full label travels with the column (the tooltip surface reads it)
+    expect(build).not.toMatch(/"title": c\.title/) // grep pin: no native title left (named delta — no double tooltips)
+  })
+})
+
+describe("ad12 fixed-gutter model — single source constant; pitch/hit derived (AD13 retunes the knob to 2)", () => {
   const pitch = () => a10Need("CELL_MINI_H_PX") + a10Need("CELL_GUTTER_PX")
   test("FIXED GUTTER model (AD12): gutter 4 single source; pitch/vertical-hit DERIVED — ratio ceiling DELETED as named delta", () => {
     const block = a10Need("CELL_BLOCK_H_PX")
@@ -1160,9 +1238,10 @@ describe("ad11/ad12 density contract — FIXED gutter, derived pitch and vertica
     // NAMED SUPERSESSION DELTA (AD12 card): this unit previously asserted
     // `gutter ≤ 4` + `pitch ≤ floor(1.25×block)` — the ratio-of-height ceiling. Deleted:
     // the owner model is a fixed constant; the number below IS the contract.
-    expect(a10Need("CELL_GUTTER_PX")).toBe(4) // the one owner knob (value ruling: "e.g. 4px" implemented literally)
+    // THE CONTRACT is the fixed constant itself (AD13 retuned 4 -> 2: one line, the owner knob).
+    expect(a10Need("CELL_GUTTER_PX")).toBe(2) // the one owner knob (AD13 card: value 2)
     expect(a10Need("CELL_PITCH_PX")).toBe(a10Need("CELL_MINI_H_PX") + a10Need("CELL_GUTTER_PX")) // pitch is a DERIVED value
-    expect(pitch()).toBe(18) // and its derived value — pinned once, here only
+    expect(pitch()).toBe(16) // and its derived value — pinned once, here only
     expect(a10Need("CELL_HIT_H_PX")).toBe(a10Need("CELL_PITCH_PX")) // vertical hit derives from pitch (gap-0 by construction)
     expect(pitch()).toBeGreaterThan(block) // a real gutter exists (never box-on-box contact)
   })
@@ -1179,14 +1258,212 @@ describe("ad11/ad12 density contract — FIXED gutter, derived pitch and vertica
   })
   test("derivation chain is real: served tokens come from the chain; SOURCE carries NO independent pitch/hit literals", () => {
     const grid = (INSPECTOR_UI_HTML.match(/#grid \{[^}]*\}/) ?? [""])[0]
-    expect(grid).toContain("--cell-gutter: 4px;") // the fixed gutter, served from the single source
-    expect(grid).toContain("--cell-pitch: 18px;") // served pitch exists ONLY as a derived constant's value
-    expect(grid).toContain("--cell-hit-h: 18px;") // served hit likewise
+    expect(grid).toContain("--cell-gutter: 2px;") // the fixed gutter (AD13 value), served from the single source
+    expect(grid).toContain("--cell-pitch: 16px;") // served pitch exists ONLY as a derived constant's value
+    expect(grid).toContain("--cell-hit-h: 16px;") // served hit likewise
     const hitRule = (INSPECTOR_UI_HTML.match(/\.cell::before \{[^}]*\}/) ?? [""])[0]
     expect(hitRule).toMatch(/height: var\(--cell-hit-h, var\(--cell-pitch/) // the rule consumes the chain, never a standalone value
     const src = require("node:fs").readFileSync(new URL("./ui.ts", import.meta.url), "utf8") as string
     expect(src).toMatch(/export const CELL_PITCH_PX = CELL_MINI_H_PX \+ CELL_GUTTER_PX/)
     expect(src).toMatch(/export const CELL_HIT_H_PX = CELL_PITCH_PX/)
     expect(src).not.toMatch(/export const CELL_(PITCH|HIT_H)_PX = \d+/) // no independent pitch/hit values exist anywhere
+  })
+})
+
+// ── AD14 (owner 2026-11-05): full labels by WRAPPING in 64 px (no abbreviation),
+// container-wide column tooltip, and the row-hover band for visual navigation
+// ("there is no real row you need to render div element probably and visually
+// attach it to the row"). Row data contract (inspected FIRST, per card): every
+// column's children ARE the rows — .cell/.slot appended in rowSlots order, so the
+// child index IS the row index; the band attaches to the grid's own row elements.
+describe("ad14 wrapped-header fit assist — declared ONE degradation step (90 %, once), never a silent ellipsis", () => {
+  test("headerLineCount(height, lineHeight): honest line math used by the fit decision", () => {
+    const f = a14Need("headerLineCount")
+    expect(f(28, 14)).toBe(2)
+    expect(f(42, 14)).toBe(3)
+    expect(f(0, 14)).toBe(0)
+    expect(f(34, 14)).toBe(2) // rounding is CONSERVATIVE toward the declared max: a 2.4-line box is 2 full lines of paint
+    expect(a14Need("HEADER_LINE_H_PX")).toBe(14) // token: line-height 1.15 x the existing 12px header font (unchanged font, measured rhythm token)
+    expect(a14Need("HEADER_MAX_LINES")).toBe(2) // the card's declared 2-line envelope
+    expect(a14Need("HEADER_MIN_FONT_PCT")).toBe(90) // the ONE allowed scale step, per card
+  })
+  test("buildGrid runs one fit pass per header: over 2 lines -> shrink ONCE to the min font; STILL over -> dataset flag (surface, never silently re-abbreviate)", () => {
+    const build = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function buildGrid"), INSPECTOR_UI_HTML.indexOf("function appendCell"))
+    const js = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function applyHeaderFit"))
+    expect(js.length).toBeGreaterThan(0)
+    const fn = js.slice(0, js.indexOf("function showRowBand")) // mechanism bounded at the named page-function boundary (checker self-validation)
+    expect(fn).toMatch(/headerLineCount/) // consumes the exported core (single source, not a page fork)
+    expect(fn).toMatch(/HEADER_MIN_FONT_PCT/)
+    expect(fn).toMatch(/si-h2-tight/)
+    // NEVER SILENT: an unfixed header is FLAGGED for the battery (F-code surface), not clipped back into hiding
+    expect(fn).toMatch(/dataset\.(siHeaderOversize|si_header_oversize)/)
+    expect(build).toMatch(/applyHeaderFit\(/)
+    expect(INSPECTOR_UI_HTML).not.toMatch(/\.si-h2-tight[^}]*text-overflow/) // the fallback must not smuggle ellipsis back
+  })
+})
+
+describe("ad14 row-hover band si-row-rect — ONE reused strip glued to the grid's own rows", () => {
+  test("one reused si-row-rect: absolute in the stage scroll (rides with rows), pointer-events none, BELOW blocks above bg, height = derived pitch, token-only subtle bg", () => {
+    expect((INSPECTOR_UI_HTML.match(/data-testid="si-row-rect"/g) ?? []).length).toBe(1)
+    const cs = (INSPECTOR_UI_HTML.match(/#rowrect \{[^}]*\}/) ?? [""])[0]
+    expect(cs).toMatch(/position: absolute/) // stage-space coordinates: scrolling needs NO reposition machinery
+    expect(cs).toMatch(/pointer-events: none/) // never blocks a block
+    expect(cs).toMatch(/height: var\(--cell-pitch/) // band == the exact rhythm row (derivation chain)
+    expect(cs).toMatch(/z-index: 0/) // with FIRST-child DOM order: above the stage bg, below the positioned blocks
+    expect(cs).toMatch(/background: color-mix\(in srgb, var\(--dim\)/) // subtle tint composed ONLY from an existing theme token — works in both themes
+    expect(cs).toMatch(/visibility: hidden/) // shown only while hovering the grid
+    expect(INSPECTOR_UI_HTML).toMatch(/#rowrect\.show \{ visibility: visible; \}/)
+    // DOM ORDER is load-bearing (z-order below blocks): the band precedes the grid.
+    expect(INSPECTOR_UI_HTML.indexOf('id="rowrect"')).toBeLessThan(INSPECTOR_UI_HTML.indexOf('id="grid"'))
+  })
+  test("rowIndexNearestY (pure): floor(y/pitch) with clamps; edge tolerance returns -1 — outside the wall the band HIDES, never guesses", () => {
+    const f = a14Need("rowIndexNearestY")
+    expect(a14Need("ROW_HL_EDGE_TOL_PX")).toBe(24) // tolerance = 2 pitch rows: generous inside the wall, honest beyond it
+    expect(f(0, 16, 73, 24)).toBe(0)
+    expect(f(20, 16, 73, 24)).toBe(1)
+    expect(f(73 * 16 - 1, 16, 73, 24)).toBe(72)
+    expect(f(73 * 16 + 24, 16, 73, 24)).toBe(72) // inside the tolerance: nearest row
+    expect(f(73 * 16 + 25, 16, 73, 24)).toBe(-1) // past it: hide
+    expect(f(-24, 16, 73, 24)).toBe(0)
+    expect(f(-25, 16, 73, 24)).toBe(-1)
+    expect(f(10, 16, 0, 24)).toBe(-1) // empty grid: nothing to highlight
+  })
+  test("delegated wiring: row index from the grid's OWN render data; band Y from the row element CENTERED on it (AD16 named delta — old TOP-alignment pinned below as superseded); follows rows; hides on leaving; clicks unbroken", () => {
+    const js = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function showRowBandFor"))
+    expect(js.length).toBeGreaterThan(0)
+    const fn = js.slice(0, js.indexOf("function hideRowBand"))
+    expect(fn).toMatch(/children\[/) // row = the column's child slot (the append-order contract) — the grid's own row data, no new source
+    expect(fn).toMatch(/\.offsetTop/) // band Y comes from the row ELEMENT — exact under any header height drift
+    // NAMED DELTA (AD16 part 1, owner screenshot: band a half-row BELOW the blocks): centering is
+    // delegated to the pure core — the OLD top-alignment arithmetic (top = col + slot offsetTop) is replaced:
+    expect(fn).toMatch(/bandCenterTop\(/) // centerY := the rendered row box center — the SAME element the renderer centers blocks in
+    expect(fn).not.toMatch(/style\.top = \(col\.offsetTop \+ slot\.offsetTop\) \+ "px"/) // the row-box-TOP math is GONE (named delta)
+    expect(fn).toMatch(/clientWidth/) // full stage width per card
+    const h = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf('$("grid").addEventListener("pointerover"'))
+    const handler = h.slice(0, h.indexOf("});"))
+    expect(handler).toMatch(/showRowBandFor/) // the existing delegation drives it — no per-column listeners
+    expect(handler).toMatch(/rowIndexNearestY/) // empty-area hovers map through the justified pure core
+    expect(handler).toMatch(/rowSlots\.length/) // row extent comes from the same render state
+    const o = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf('$("grid").addEventListener("pointerout"'))
+    expect(o.slice(0, o.lastIndexOf("});"))).toMatch(/hideRowBand/) // leaving the grid hides the band
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD15 — tree string values render DECODED (owner: real newlines, no doubled escapes).
+// Root cause (developer-verified): the ONE leaf emit site re-serialized strings with
+// JSON.stringify at DISPLAY time. Fix rides the pure-core lane this suite already owns:
+// treeValueText(node) is the single value-text channel, toString-injected at the emit
+// site; the value span gets an explicit pre-wrap rule so real newlines render.
+// NAMED DELTA substitution (recorded): the card expected "existing string-value display
+// pins" to move — the suite has NONE (rg-verified: no display-side string pins exist;
+// the only stringify display-adjacent pin is the RAW-path jsonBlock guard, which per
+// the card's own boundary MUST NOT move — it stays asserted green unmodified below).
+// Boundary: nested-JSON strings show decoded-ONCE text; no reparse (T1 locks it).
+const a15c = uiAll as unknown as Record<string, any>
+const a15Need = (name: string): any => {
+  if (a15c[name] === undefined) throw new Error("ad15 core missing: " + name)
+  return a15c[name]
+}
+const a15leaf = (kind: string, value: unknown) => ({ kind, value, key: null, path: "/v" })
+
+// ---------------------------------------------------------------------------
+// AD16 — (1) band CENTERED on the row's block line (same-source rule), (2) brick
+// cells = track − 2 px inset (60 uniform), (3) coltip TOP-preference with viewport
+// flip fallback. Pure cores carry the geometry; wiring pins show the page consumes
+// them. Named deltas land in the ad10/ad13/ad14 lanes (width tokens, served bytes,
+// coltip placement core, band alignment) — never as silent edits.
+const a16 = uiAll as unknown as Record<string, any>
+const a16Need = (name: string): any => {
+  if (a16[name] === undefined) throw new Error("ad16 core missing: " + name)
+  return a16[name]
+}
+
+describe("ad16 bandCenterTop — centerY on the row's rendered box, NOT its top", () => {
+  test("centering math (pure): top = rowBoxTop + rowBoxH/2 − bandH/2 — reproduces the owner defect and its fix", () => {
+    const f = a16Need("bandCenterTop")
+    // owner crop scenario: block visually centers in a TALLER row box; band (height = pitch 16)
+    // aligned to the box TOP sits half a band above center — i.e. its centerY misses the block's.
+    expect(f(100, 14, 16)).toBe(99) // thin row box (14): nearly the old top math — unchanged look
+    expect(f(100, 48, 16)).toBe(116) // tall row box (48): band follows the block's CENTER (old math: 100)
+    expect(f(0, 16, 16)).toBe(0) // exactly-pitch row: identical to the old top math (regression floor)
+    expect(f(50, 17, 16)).toBe(50 + Math.round(17 / 2 - 8)) // integer-safe rounding contract
+  })
+})
+
+describe("ad16 topPreferredTipPlacement — column tip prefers ABOVE the header, flips only when top lacks room", () => {
+  const vp = { top: 0, left: 0, width: 1200, height: 800 }
+  test("room above: tip.bottom sits at or above anchor.top (+2 tolerance from the AC) — the TOP placement is the preference", () => {
+    const f = a16Need("topPreferredTipPlacement")
+    const anchor = { top: 400, bottom: 424, left: 200, right: 264 }
+    const tip = { width: 120, height: 30 }
+    const p = f(anchor as any, vp as any, tip as any)
+    expect(p.placement).toBe("top")
+    expect(p.y + tip.height).toBeLessThanOrEqual(anchor.top + 2) // AC inequality — evaluated live later
+    expect(p.y).toBeGreaterThanOrEqual(vp.top) // inside viewport vertically
+  })
+  test("no room above (anchor near viewport top): flips BELOW — the only fallback; x stays clamped inside the viewport", () => {
+    const f = a16Need("topPreferredTipPlacement")
+    const anchor = { top: 6, bottom: 30, left: 200, right: 264 }
+    const p = f(anchor as any, vp as any, { width: 120, height: 30 } as any)
+    expect(p.placement).toBe("bottom")
+    expect(p.y).toBeGreaterThanOrEqual(anchor.bottom) // below the header when the top is out of room
+    const edge = f({ top: 400, bottom: 424, left: 1150, right: 1214 } as any, vp as any, { width: 120, height: 30 } as any)
+    expect(edge.x + 120).toBeLessThanOrEqual(vp.width) // horizontal clamp rides the same edge-margin discipline
+    expect(edge.x).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe("ad16 brick geometry — width 60 derived, hit ≡ visible horizontally, no overlap on either axis", () => {
+  test("horizontal non-overlap re-derived at brick width (mirror of the vertical gap-0 invariant): brick seam > 0, hits never cross the track center", () => {
+    const w = a16Need("CELL_BLOCK_W_PX")
+    const hitW = a16Need("CELL_HIT_W_PX")
+    const track = a16Need("GRID_TRACK_PX")
+    expect(track - w).toBe(2 * a16Need("CELL_CHIP_INSET_PX")) // the 2 px per-side inset IS the seam (4 total)
+    expect(hitW).toBe(w) // AD16 re-derivation: hit ≡ visible horizontally (was a wider comfort pad at 24 px — superseded); vertical hit math untouched (ad11/ad12 lane)
+    expect(track - hitW).toBeGreaterThan(0) // adjacent hit rects never overlap
+    expect(w).toBeGreaterThan(track / 2) // brick rows are the dominant look (owner's explicit call)
+  })
+})
+
+describe("ad15 decoded value text — treeValueText is the ONE plain-text value channel", () => {
+  test("string values render DECODED: embedded newlines, quotes and backslashes pass through as-is; no surrounding quotes, no backslash-n sequences, NO doubled backslashes", () => {
+    const t = a15Need("treeValueText")
+    const multi = "line1\nline2\nline3"
+    expect(t(a15leaf("string", multi))).toBe(multi) // real newline CHARACTERS, verbatim — that is what pre-wrap will render
+    expect(t(a15leaf("string", 'He said "hi" and C:\\tmp'))).toBe('He said "hi" and C:\\tmp')
+    const out = t(a15leaf("string", "a\nb"))
+    expect(out.startsWith('"')).toBe(false) // no stringify quoting ever returned
+    expect(out.includes("\\n")).toBe(false) // no literal backslash-n artifact
+    expect(out.split("\\").length - 1).toBe(0) // no escape doubling for a plain string
+  })
+  test("declared boundary + non-string kinds byte-stable: nested-JSON string shows its decoded-ONCE text (no reparse); number/boolean/null render exactly as before; empty string stays empty", () => {
+    const t = a15Need("treeValueText")
+    const nested = '{"nestedKey":"inner\\nvalue"}' // a string whose VALUE is JSON text with an escaped newline
+    expect(t(a15leaf("string", nested))).toBe(nested) // decoded-ONCE (the value itself) — never re-encoded, never re-parsed to objects
+    expect(t(a15leaf("string", ""))).toBe("") // no '""' display
+    expect(t(a15leaf("number", 1.5))).toBe("1.5")
+    expect(t(a15leaf("boolean", true))).toBe("true")
+    expect(t(a15leaf("null", null))).toBe("null")
+  })
+  test("ONE emit site: the leaf span feeds treeValueText(node) through the text channel — the string-branch JSON.stringify display is GONE (named delta)", () => {
+    expect(INSPECTOR_UI_HTML).toMatch(/treeValueText/) // core present in the served page
+    const js = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function treeValueText"))
+    expect(js.length).toBeGreaterThan(0)
+    const f = js.slice(0, js.indexOf("\n}")) // the served copy IS the tested core (single source); window = the core body itself
+    expect(f.length).toBeGreaterThan(10)
+    // one plain-text channel for ALL kinds (strings decode = pass-through): no value re-serialization anywhere on it
+    expect(f).not.toContain("JSON.stringify")
+    const build = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function buildTreeRow"), INSPECTOR_UI_HTML.indexOf("function buildTreeRow") + 3000)
+    expect(build).toMatch(/text:\s*treeValueText\(/) // the ONE leaf emit site uses the plain-text channel
+    expect(build).not.toMatch(/node\.kind === "string" \? JSON\.stringify/) // the root cause is deleted, not commented out
+    // keys and non-value punctuation keep their existing display contract (scope discipline):
+    expect(build).toMatch(/class: "jt_key", text: JSON\.stringify\(node\.key\)/)
+  })
+  test("value span gets an explicit pre-wrap rule so decoded newlines RENDER as line breaks (row structure otherwise unchanged)", () => {
+    const build = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function buildTreeRow"), INSPECTOR_UI_HTML.indexOf("function buildTreeRow") + 3000)
+    expect(build).toMatch(/jt_value/) // shared value-span class at the emit site — kind classes stay for coloring
+    const cs = (INSPECTOR_UI_HTML.match(/\.jt_value \{[^}]*\}/) ?? [""])[0]
+    expect(cs).toMatch(/white-space: pre-wrap/) // explicit on the VALUE SPAN per card — real newlines inside rows, no clipping
   })
 })
