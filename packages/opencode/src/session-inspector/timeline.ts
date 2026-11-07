@@ -58,6 +58,11 @@ export interface TimelineEnvelope {
   // null only for Task 6 live-event envelopes (bare events have no payload source —
   // the drawer renders this as an explicit statement, never a silent hole).
   payloadRef: TimelinePayloadRef | null
+  // AD22 (reasoning lane only — attached as the LAST key on reasoning rows, nowhere else):
+  // EXACT char count of the reasoning text measured in the READ JOIN from the uncapped
+  // p.data it already loads. The payload endpoint is byte-capped and FORBIDDEN as a length
+  // source (silent under-report class, DEC-I). Census tests updated as NAMED changes.
+  contentChars?: number
 }
 
 export type TimelineFailure = { ok: false; code: "DB_UNREADABLE" | "INVALID_FILTER"; message: string }
@@ -73,6 +78,12 @@ export interface BuildTimelineInput {
 }
 
 const byteLength = (text: string): number => Buffer.byteLength(text, "utf8")
+
+// AD18 — owner directive (2026-11-05): step-start / step-finish are "not informative at all";
+// they are dropped at the JOIN, BEFORE category routing (config-deletion was rejected: the
+// unmatched-fallback would merely relocate them to Other). Global by design — the list below
+// is the single toggle if the owner ever re-wants them. Read-side only: DB rows untouched.
+export const EXCLUDED_EVENT_TYPES: readonly string[] = ["step-start", "step-finish"]
 
 function truncationFor(raw: string, capBytes: number): TruncationFields {
   if (byteLength(raw) <= capBytes) return {}
@@ -109,8 +120,15 @@ export function partEnvelope(
   const parsed = tryJson(row.data)
   const partType = typeof parsed?.type === "string" ? parsed.type : ""
   const role = typeof tryJson(row.msg_data ?? undefined)?.role === "string" ? (tryJson(row.msg_data ?? undefined) as { role: string }).role : null
+  const category = router.partCategory(partType, role)
+  // AD27 (DECLARED data path, AD22 precedent): lifecycle cells must SHOW the event kind.
+  // Scope-tight optional field: the THREE visible lifecycle kinds ONLY (step-* are excluded
+  // upstream — AD18), the verbatim type string, appended LAST (sixth-key pattern like
+  // contentChars). Every other row keeps a byte-identical five-key envelope. One function
+  // serves NDJSON + live push (§6.6), so pushed lines carry it by construction too.
+  const lifecycleLabel = category === "lifecycle" && (partType === "patch" || partType === "compaction" || partType === "file")
   return {
-    category: router.partCategory(partType, role),
+    category,
     ts: new Date(row.time_created).toISOString(),
     sourceRef: {
       kind: "dbId",
@@ -122,6 +140,7 @@ export function partEnvelope(
     },
     summary: partSummary(partType, parsed),
     payloadRef: { kind: "dbId", dbId: row.id, ...truncationFor(row.data, capBytes) },
+    ...(lifecycleLabel ? { partType } : {}), // LAST key — named sixth-key census updated in the same change
   }
 }
 
@@ -177,7 +196,20 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
     for (const part of parts) {
       const parsed = tryJson(part.data)
       const partType = typeof parsed?.type === "string" ? parsed.type : ""
+      // AD18: excluded part types never reach category routing — dropped at the JOIN, so under
+      // ANY config they produce zero rows (neither lifecycle nor a relocated Other). Read-side
+      // only; the DB rows remain. Remove a value from EXCLUDED_EVENT_TYPES to re-want it.
+      if (EXCLUDED_EVENT_TYPES.includes(partType)) continue
       const envelope = partEnvelope(part, router, childSet, capBytes)
+      // AD22 — the length is measured HERE, in the read join, from the COMPLETE p.data text
+      // this query already loads (the byte cap lives only inside partEnvelope for payload
+      // bodies — an under-counted head must never become a reported length; DEC-I honesty).
+      // Reasoning CATEGORY only (a config that claims the parts elsewhere gets no field);
+      // spread appends the new key LAST, preserving the base five-key order.
+      let rowEnvelope = envelope
+      if (envelope.category === "reasoning" && typeof parsed?.text === "string") {
+        rowEnvelope = { ...envelope, contentChars: parsed.text.length }
+      }
       // Task 4b: synthetic text parts defer to the nudges lane when the column exists;
       // without it they keep ordinary part mapping (degrade visibly, never silently).
       if (nudgesColumn !== undefined && partType === "text" && parsed?.synthetic === true) {
@@ -189,7 +221,7 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
         })
         continue
       }
-      rows.push({ ms: part.time_created, bucket: 0, sub: part.rowid, envelope })
+      rows.push({ ms: part.time_created, bucket: 0, sub: part.rowid, envelope: rowEnvelope })
     }
   } catch (error) {
     return { ok: false, code: "DB_UNREADABLE", message: error instanceof Error ? error.message : String(error) }

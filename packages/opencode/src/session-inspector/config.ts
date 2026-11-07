@@ -99,7 +99,20 @@ export function loadInspectorConfig(input: LoadInspectorConfigInput): ConfigResu
     return hardFailure(input, "CONFIG_INVALID_SCHEMA", `Schema validation failed:\n${formatIssues(validated.error)}`)
   }
 
-  return { ok: true, config: mergeSections(defaults, validated.data) }
+  const merged = mergeSections(defaults, validated.data)
+  // AD31: ui.colors ids must exist in the MERGED effective categories — a misspelled id is a
+  // hard config error naming the offender AND the valid ids (never silently ignored).
+  for (const id of Object.keys(merged.ui?.colors ?? {})) {
+    if (!merged.categories.some((c) => c.id === id)) {
+      return hardFailure(
+        input,
+        "CONFIG_INVALID_SCHEMA",
+        `ui.colors key "${id}" is not an existing category id. Valid ids: ${merged.categories.map((c) => c.id).join(", ")}`,
+      )
+    }
+  }
+
+  return { ok: true, config: merged }
 }
 
 // Section-replacement merge: an absent section keeps the default object as-is; a present section
@@ -112,5 +125,6 @@ function mergeSections(defaults: SessionInspectorConfig, override: InspectorUser
     paths: override.paths ?? defaults.paths,
     limits: override.limits ?? defaults.limits,
     emitters: override.emitters ?? defaults.emitters,
+    ui: override.ui ?? defaults.ui, // AD28: section-replacement, same discipline as every other section
   }
 }

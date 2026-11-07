@@ -26,8 +26,11 @@ describe("category mapper — §5.6 vocabulary under shipped defaults (AC2)", ()
     expect(router.partCategory("text", "assistant")).toBe("assistant-text")
     expect(router.partCategory("reasoning", "assistant")).toBe("reasoning")
     expect(router.partCategory("tool", "assistant")).toBe("tool-calls")
-    expect(router.partCategory("step-start", null)).toBe("lifecycle")
-    expect(router.partCategory("step-finish", null)).toBe("lifecycle")
+    // NAMED DELTA (AD18): the step-start/step-finish pins MOVED from "maps to lifecycle"
+    // to EXCLUDED-NEVER-CATEGORIZED — they are dropped at the JOIN BEFORE routing, so this
+    // mapper (config parts list stays AS-IS by ruling) simply never receives them:
+    // "excluded, never categorized" is pinned in timeline.test's ad18 suite (zero rows, ANY
+    // config). Mapper-level silence here is the contract, not an omission.
     expect(router.partCategory("patch", null)).toBe("lifecycle")
     expect(router.partCategory("compaction", null)).toBe("lifecycle")
     expect(router.partCategory("file", null)).toBe("lifecycle")

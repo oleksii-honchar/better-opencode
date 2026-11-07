@@ -60,16 +60,14 @@ export function gridTrackTemplate(n: number): string {
   return `repeat(${n}, ${GRID_TRACK_PX}px)`
 }
 
-// AD14 (owner card B/C): wrapped-header fit assist + row-hover band tokens.
-// HEADER_LINE_H_PX = the line rhythm (line-height 1.15 over the EXISTING 12 px
-// header font — the font itself is unchanged, only long labels wrap). HEADER_MAX_LINES
-// is the card's declared 2-line envelope; the ONE allowed degradation step is a
-// 90 % scale-down, after which unfixed labels SURFACE a flag (dataset.
-// siHeaderOversize) for the battery — never a silent return of the abbreviation.
+// AD17 (owner: "grid header should use single row - not different height - it's ok
+// to crop the titles"): headers are ONE uniform row for all lanes. The single-source
+// tokens below give every header the SAME height by construction (one font, one line
+// rhythm, one line tall); longer labels crop plain at the track edge (CSS overflow) —
+// no per-header fit machinery exists anymore (AD14's multi-line model retired with its
+// named-delta; the full names are carried by the column popup, AD13/AD14 mechanism).
 export const HEADER_FONT_PX = 12 // tokenizes the pre-existing .col h2 font size (single source)
 export const HEADER_LINE_H_PX = 14
-export const HEADER_MAX_LINES = 2
-export const HEADER_MIN_FONT_PCT = 90
 
 // Row-hover band (card C): rows are contiguous at the derived pitch, so the nearest
 // row from a Y offset is floor math on the grid's OWN rhythm. The edge tolerance is
@@ -77,9 +75,46 @@ export const HEADER_MIN_FONT_PCT = 90
 // it (returns -1: the band HIDES, per card it never guesses a row).
 export const ROW_HL_EDGE_TOL_PX = 24
 
-export function headerLineCount(heightPx: number, lineH: number): number {
-  return Math.max(0, Math.round(heightPx / lineH))
+// AD17 (owner: "do not use AMT abbr - use full words and also show full description
+// in popup"): DISPLAY-LAYER de-abbreviation. The keys of these maps are DATA ids —
+// nothing here rewrites a data key, category mapping, or id (join integrity is by
+// construction: existing columns()/testid/category machinery consumes only the mapped
+// string AT RENDER TIME). Overrides must stay minimal: exactly the lanes the owner named.
+export const LANE_DISPLAY_OVERRIDES: Record<string, string> = {
+  "amt-activity": "Agent Meta Tool Activity", // spells the abbreviation (unit-pinned surface)
 }
+// Tip-only description lines, worded from the shipped config/schema docs — no invented claims:
+export const LANE_TIP_DESCRIPTIONS: Record<string, string> = {
+  "amt-activity": "History lines emitted by the agent-meta-tool (agent.amt) history lane.",
+}
+export function laneDisplayLabel(catId: string, configuredLabel: string): string {
+  return LANE_DISPLAY_OVERRIDES[catId] ?? configuredLabel // passthrough everywhere else, byte-identical
+}
+
+// AD25 — column-explainer content (owner card 2026-11-05: "Legend button + column-
+// explainer overlay modal"). The card PINS these descriptions verbatim in intent —
+// each describes what a CELL in that column MEANS (not where the data comes from).
+// Rides beside the lane display definitions (card: "static registry beside the lane
+// definitions"). Names must be the EXACT header display names the page renders for
+// the shipped defaults — the drift lane in ui.test.ts byte-compares this table
+// against laneDisplayLabel(defaultCategories()): rename a header, forget the
+// registry ⇒ red. At runtime the modal lists every ACTIVE column in live config
+// order (user-renamed/added lanes fall back to the header's own label path).
+export const LEGEND_INTRO = "One row = one joined session event in time order; blocks are placed in the column matching the event type; hover a block for a quick preview card; click for the full details drawer."
+export const LEGEND_ENTRIES: Array<{ id: string; name: string; description: string }> = [
+  { id: "user-messages", name: "User Messages", description: "text the USER wrote to the agent (text parts, role user). One block = the agent received a user message at that moment." },
+  { id: "assistant-text", name: "Assistant Text", description: "the agent's visible reply text (text parts, role assistant). One block = the agent was writing its response to the user. NOT the model's private thoughts (that is Reasoning)." },
+  { id: "reasoning", name: "Reasoning", description: "the model's private thinking content (reasoning parts). Cell label shows its size in chars (0,Nk below 1k / Nk at 1k+). One block = the model produced a private thinking block at that moment." },
+  { id: "tool-calls", name: "Tool Calls", description: "a tool or shell command was invoked (tool parts + tools.log). Cell label shows the tool name (e.g. 'bash'). One block = one invocation at that moment." },
+  { id: "transitions", name: "Transitions", description: "persona decision-tree traversal events (persona.transition / TRN records): one agent moving between decision nodes." },
+  { id: "pipeline", name: "Pipeline", description: "session-pipeline lifecycle commands recorded in history.jsonl: started, handoff, completed, error." },
+  { id: "coach-judge", name: "Coach Judge", description: "coach judge evaluation events (plugin.judge): scoring/verdict records produced by the judge plugin." },
+  { id: "coach-activity", name: "Coach Activity", description: "agent-coach activity events (agent.coach): the coach agent's own recorded actions." },
+  { id: "amt-activity", name: "Agent Meta Tool Activity", description: "agent meta-tool usage events (agent.amt): meta tool invocations made by an agent." },
+  { id: "engine-nudges", name: "Engine Nudges", description: "engine injection nudges (plugin.nudge): deterministic reminders the engine pushed into an agent's context." },
+  { id: "lifecycle", name: "Lifecycle", description: "session lifecycle artifacts from message parts: patches, compaction, file operations. Cell label names the lifecycle event (patch/compaction/file). Note: step-start/step-finish join-steps are EXCLUDED from display — they are join plumbing, not lane events." },
+  { id: "other", name: "Other", description: "catch-all for anything not matching the lanes above." },
+]
 
 export function rowIndexNearestY(yRel: number, pitchPx: number, rowCount: number, edgeTolPx: number): number {
   if (rowCount <= 0) return -1
@@ -127,6 +162,13 @@ export function siCellTestId(catId: string, seq: number): string {
 
 export function escShouldCloseDrawer(key: string, drawerOpen: boolean): boolean {
   return key === "Escape" && drawerOpen
+}
+
+// AD25: the legend modal consumes the SAME close-affordance contract as the AD4
+// drawer (X + backdrop click + Escape). Separate core, identical semantics —
+// Escape closes only while the legend is open; anything else is a no-op.
+export function escShouldCloseLegend(key: string, legendOpen: boolean): boolean {
+  return key === "Escape" && legendOpen
 }
 
 // AD5 — resizable drawer (persona-graph #dragbar idiom mirrored: 7px col-resize
@@ -229,6 +271,57 @@ export const CELL_CHIP_INSET_PX = 2
 export const CELL_BLOCK_W_PX = GRID_TRACK_PX - 2 * CELL_CHIP_INSET_PX
 export const CELL_HIT_W_PX = CELL_BLOCK_W_PX
 export const CELL_HIT_H_PX = CELL_PITCH_PX
+// AD19 — owner (2026-11-05): show the tool name inside tool-calls cells, "small font size
+// to fit ~8-10px". 9 px is the served value; the owner band [8,10] is pinned by tests.
+export const CELL_LABEL_FONT_PX = 9
+// Label text vs brick, CONTRAST-CHOSEN per theme (evaluated 2026-11-05 on the tool-calls
+// brick #d97706/#fbbf24 via WCAG): black scores 6.59 light / 12.58 dark — both far past
+// the 3:1 floor; white fails dark (1.67). Re-verified from rendered pixels in the battery.
+export const CELL_LABEL_TEXT_LIGHT = "#000"
+export const CELL_LABEL_TEXT_DARK = "#000"
+
+// AD19 pure label core — the row's OWN payload text (the same contract the drawer's
+// callID link uses; fetchPayload(env.payloadRef)), nothing else. Chain: tool name →
+// first token of the line detail → the literal floor. NEVER empty; NEVER truncates —
+// the data layer carries the full name, cropping is CSS at render (AD17 discipline).
+export function cellToolLabel(payloadText: unknown): string {
+  if (typeof payloadText !== "string") return "tool"
+  const looksJson = /^[{[]/.test(payloadText.trim()) // byte-capped heads still START with the JSON brace
+  let parsed: any = null
+  try { parsed = JSON.parse(payloadText) } catch (_e) { parsed = null }
+  if (parsed && typeof parsed === "object") {
+    if (parsed.type === "tool" && typeof parsed.tool === "string" && parsed.tool.trim().length > 0) return parsed.tool
+    const detail = parsed.state && typeof parsed.state.detail === "string" ? parsed.state.detail : typeof parsed.detail === "string" ? parsed.detail : ""
+    const token = detail.trim().split(/\s+/).filter(Boolean)[0]
+    return token !== undefined ? token : "tool"
+  }
+  if (looksJson) {
+    // TRUNCATED JSON (the payload endpoint caps by bytes): the name stays FIELD-VISIBLE in the
+    // head — extract it, never leak raw JSON as a "token". Detail field first-token by the same
+    // field contract; then the floor. (Names must match for EVERY tool-calls cell — card AC.)
+    const toolField = payloadText.match(/"tool"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+    if (toolField && toolField[1].trim().length > 0) return toolField[1]
+    const detailField = payloadText.match(/"detail"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+    const detailToken = detailField ? detailField[1].trim().split(/\s+/).filter(Boolean)[0] : undefined
+    return detailToken !== undefined ? detailToken : "tool"
+  }
+  const token = payloadText.trim().split(/\s+/).filter(Boolean)[0]
+  return token !== undefined ? token : "tool"
+}
+
+// AD22 pure formatter — the JOIN-carried exact char count (TimelineEnvelope.contentChars)
+// rendered in the owner's size form. n >= 1000: Math.round(n/1000) + "k" (UNCHANGED by every
+// sub-1k ruling). AD24 (owner 2026-11-05, "below 1k show as 0,Nk") supersedes AD23's raw
+// digits: 0 <= n < 1000 → "0," + clamp(round(n/100), 0, 9) + "k" — comma decimal per the
+// owner's notation, ONE decimal, ROUNDED (consistent with the k-path at the boundary:
+// 50→"0,1k"); tenths are CLAMPED so >=950 renders "0,9k" — a second decimal never appears
+// and "1.0k" belongs to the integer path at n >= 1000. Non-numeric/negative floors to the
+// same honest zero "0,0k" (no "-5"/"NaN" markers).
+export function formatContentSize(n: unknown): string {
+  if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return "0,0k"
+  if (n < 1000) return "0," + Math.max(0, Math.min(9, Math.round(n / 100))) + "k"
+  return Math.round(n / 1000) + "k"
+}
 
 // Per-lane block colors — a deterministic lane→color mapping over vendored STATIC
 // hex constants (official palette values carried as data; no external CSS/JS, no
@@ -272,7 +365,91 @@ export const LANE_BLOCK_OVERFLOW: { light: string[]; dark: string[] } = {
 // ("user-messages") and canonical lane names ("userMessages") are the SAME lane.
 // Malformed input never throws — it falls into the overflow branch. Any theme value
 // that is not "dark" resolves to the light step (documented default).
+// AD31 page-injected global set ONCE by applyColorsConfig at boot (module-ambient here for
+// TS; erased at emit — the page defines the real var). Undefined server-side = palette truth.
+declare const LANE_COLOR_CFG: Record<string, { bg?: string; bgDark?: string; text?: string; textDark?: string }> | undefined
+
+export function deriveLabelColor(bgHex: string): string {
+  // AD35 OWNER LAW (standing ruling; supersedes AD31's law + ESCAPE): direction fixed from
+  // the bg's WCAG relative luminance — L < 0.45 → LIGHTER in-hue (HSL l +5% steps, h,s kept,
+  // clamped at 95), else DARKER (clamped at 5). Stop when contrast(text,bg) >= 4.5; if the
+  // chosen direction clamps first, that clamped in-hue extreme IS the result (never flip to
+  // the other direction; the ratio it achieves is reported honestly in docs/evidence).
+  // Pure, deterministic, self-contained (page-injectable). A result always exists (ladder).
+  const hex = String(bgHex).toLowerCase()
+  const toRgb = (h: string) => [0, 1, 2].map((i) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16) / 255)
+  const lin = (v: number) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
+  const lum = (h: string) => {
+    const c = toRgb(h).map(lin)
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+  }
+  const contrast = (a: string, b: string) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05)
+  // HSL round-trip preserving h and s exactly; only l steps ±5 (integer ladder).
+  const rgbArr = toRgb(hex)
+  const mx = Math.max(...rgbArr), mn = Math.min(...rgbArr)
+  const l0 = (mx + mn) / 2
+  const d = mx - mn
+  let h0 = 0
+  if (d > 0) {
+    if (mx === rgbArr[0]) h0 = 60 * (((rgbArr[1] - rgbArr[2]) / d) % 6)
+    else if (mx === rgbArr[1]) h0 = 60 * ((rgbArr[2] - rgbArr[0]) / d + 2)
+    else h0 = 60 * ((rgbArr[0] - rgbArr[1]) / d + 4)
+    if (h0 < 0) h0 += 360
+  }
+  const s0 = d === 0 ? 0 : d / (1 - Math.abs(2 * l0 - 1))
+  const fromHsl = (hh: number, ss: number, ll: number) => {
+    const c2 = (1 - Math.abs(2 * ll - 1)) * ss
+    const x = c2 * (1 - Math.abs(((hh / 60) % 2) - 1))
+    const m = ll - c2 / 2
+    const seg = hh < 60 ? [c2, x, 0] : hh < 120 ? [x, c2, 0] : hh < 180 ? [0, c2, x] : hh < 240 ? [0, x, c2] : hh < 300 ? [x, 0, c2] : [c2, 0, x]
+    return "#" + seg.map((v) => Math.round(Math.max(0, Math.min(1, v + m)) * 255).toString(16).padStart(2, "0")).join("")
+  }
+  // AD35 OWNER LAW (standing product ruling, supersedes the AD31 law INCLUDING its ESCAPE):
+  // direction is FIXED by WCAG relative luminance — L < 0.45 → LIGHTER in-hue, else DARKER.
+  // HSL lightness steps of 5%, CLAMPED at 95/5; stop at contrast >= 4.5, otherwise TERMINATE
+  // AT THE CLAMP and return that max-in-direction color (achieved ratio is reported honestly;
+  // the direction NEVER flips — "dark bg -> lighter text, period").
+  const raise = lum(hex) < 0.45
+  const clLo = 0.05, clHi = 0.95
+  let last = fromHsl(h0, s0, Math.max(clLo, Math.min(clHi, l0)))
+  for (let step = 5; step <= 100; step += 5) {
+    const ll = raise ? Math.min(clHi, l0 + step / 100) : Math.max(clLo, l0 - step / 100)
+    last = fromHsl(h0, s0, ll)
+    if (contrast(last, hex) >= 4.5) return last
+    if (raise ? ll >= clHi : ll <= clLo) break // clamp reached — law's terminal honest state
+  }
+  return last
+}
+
+// AD31: label text for a lane on a theme. EXPLICIT config text is used VERBATIM (owner's
+// judgment — no clamping; the evidence table still reports its real ratio); otherwise the
+// derivation law runs on the lane's EFFECTIVE bg (config bg when set, else palette — via the
+// SAME laneBlockColor, so one bg source per lane-theme).
+// AD34 (R2): per-theme order — theme override (textDark for dark / text for light) first,
+// then the shared key (text serves both; textDark never leaks to light), then "auto" = the
+// law on THIS theme's effective bg. An explicit "auto" keyword behaves like omission.
+export function laneLabelTextColor(laneKey: string, themeMode: "light" | "dark"): string {
+  var o = typeof LANE_COLOR_CFG !== "undefined" ? (LANE_COLOR_CFG as Record<string, { bg?: string; bgDark?: string; text?: string; textDark?: string }>)[laneKey] : undefined
+  if (o) {
+    if (themeMode === "dark" && o.textDark && o.textDark !== "auto") return o.textDark // theme override — verbatim
+    if (o.text && o.text !== "auto") return o.text // explicit hex — verbatim
+  }
+  return deriveLabelColor(laneBlockColor(laneKey, themeMode))
+}
+
 export function laneBlockColor(laneKey: string, themeMode: "light" | "dark"): string {
+  // AD31: config bg wins over the palette when set (applies to BOTH themes — documented
+  // ruling). AD34 (R2): the per-theme candidate the same ruling named as "future" is now
+  // built — theme override FIRST (bgDark for dark; bg is light's override and doubles as the
+  // shared key), then the shared bg, then the palette. bgDark never leaks to light.
+  // Server-side runtime has no LANE_COLOR_CFG (typeof-guarded) — palette truth for tests and
+  // any non-page consumer.
+  var cfg = typeof LANE_COLOR_CFG !== "undefined" ? (LANE_COLOR_CFG as Record<string, { bg?: string; bgDark?: string }>)[laneKey] : undefined
+  if (cfg) {
+    const themed = themeMode === "dark" ? cfg.bgDark : undefined
+    if (themed) return themed
+    if (cfg.bg) return cfg.bg
+  }
   const raw = laneKey === null || laneKey === undefined ? "" : String(laneKey)
   const norm = raw.toLowerCase().replace(/[-_.\s]/g, "")
   const base = LANE_BLOCK_BASE[norm]
@@ -509,11 +686,12 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
   header { box-sizing: border-box; height: 44px; padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: center; background: var(--bg); } /* AD6: fixed 44px band = the constant every 100vh - 44px / top: 44px in this sheet references */
   header h1 { font-size: 15px; margin: 0; }
   header #status { color: var(--dim); }
-  #themeToggle { margin-left: auto; width: 30px; height: 30px; padding: 0; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; flex: none; }
+  #themeToggle { width: 30px; height: 30px; padding: 0; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; flex: none; } /* AD25 NAMED DELTA: margin-left: auto MOVED to #legendButton (two auto margins split the free space and orphan the pair; the single auto margin now leads the right-hand group — the toggle's right-edge anchor is visually unchanged) */
   #themeToggle svg { width: 16px; height: 16px; display: block; margin: auto; }
   #themeToggle .i-moon { display: none; }                     /* dark (default): sun icon offers the flip */
   [data-theme="light"] #themeToggle .i-sun { display: none; } /* light: moon icon */
   [data-theme="light"] #themeToggle .i-moon { display: block; }
+  #legendButton { margin-left: auto; height: 30px; padding: 0 10px; font: inherit; font-size: 12px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; flex: none; } /* AD25: owns the right-group auto margin (see named delta above) — Legend sits LEFT of the toggle as its adjacent; same control tokens as the toggle (panel/line/ink/radius-8/height-30) = "styled consistently" */
   main { display: flex; height: calc(100vh - 44px); overflow: hidden; } /* AD6: fixed shell; children are the scroll contexts */
   #sidebar { width: var(--sidebar-w, 280px); border-right: 1px solid var(--line); padding: 10px; flex: none; overflow-y: auto; } /* AD6: full shell-height own scroller (stretch child; max-height trick retired) */
   #resizer { flex: none; width: 6px; margin: 0 -3px; cursor: col-resize; background: var(--line); opacity: 0.35; }
@@ -530,9 +708,14 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
   .tag { font-size: 10px; padding: 0 6px; border-radius: 8px; background: var(--badge); color: var(--accent); }
   .tag.folder { background: var(--folder-bg); color: var(--warn); }
   #stage { flex: 1; min-width: 0; overflow: auto; padding: 0 12px 12px; position: relative; } /* AD6: top gutter owned by the sticky livebar, not scrollable padding. AD14: positioning context for the in-scroll row band (absolute here = rides with rows, zero reposition code). */
-  #grid { display: grid; gap: 10px; --cell-mini: ${CELL_MINI_H_PX}px; --cell-gutter: ${CELL_GUTTER_PX}px; --cell-pitch: ${CELL_PITCH_PX}px; --cell-block-w: ${CELL_BLOCK_W_PX}px; --cell-block-h: ${CELL_BLOCK_H_PX}px; --cell-hit-w: ${CELL_HIT_W_PX}px; --cell-hit-h: ${CELL_HIT_H_PX}px; } /* AD6: items STRETCH (was align-items:start) so short columns keep their sticky headers bounded to full row height. AD7: the row PITCH lives here as the single source — AD11: pitch = box(--cell-mini)+gutter(--cell-gutter). AD12: the gutter is a FIXED constant (owner knob); --cell-pitch is the DERIVED rhythm, served for the chain — no independent value literals in the rules (L220). */
+  /* AD21 (owner 2026-11-05, "set #grid gap 4px"): LITERAL gap as asked — disambiguation
+     resolved CASE A (card-bound): #grid has column tracks only (gridTrackTemplate) and its
+     only children are the column divs; the row boxes live inside columns (margin-bottom
+     pitch chain). No row tracks exist, so the row-gap half of the shorthand is structurally
+     inert and CANNOT touch the owner-locked vertical rhythm (2px gutter / 16px pitch). */
+  #grid { display: grid; gap: 4px; --cell-mini: ${CELL_MINI_H_PX}px; --cell-gutter: ${CELL_GUTTER_PX}px; --cell-pitch: ${CELL_PITCH_PX}px; --cell-block-w: ${CELL_BLOCK_W_PX}px; --cell-block-h: ${CELL_BLOCK_H_PX}px; --cell-hit-w: ${CELL_HIT_W_PX}px; --cell-hit-h: ${CELL_HIT_H_PX}px; --cell-label-font: ${CELL_LABEL_FONT_PX}px; --cell-label-text-light: ${CELL_LABEL_TEXT_LIGHT}; --cell-label-text-dark: ${CELL_LABEL_TEXT_DARK}; } /* AD6: items STRETCH (was align-items:start) so short columns keep their sticky headers bounded to full row height. AD7: the row PITCH lives here as the single source — AD11: pitch = box(--cell-mini)+gutter(--cell-gutter). AD12: the gutter is a FIXED constant (owner knob); --cell-pitch is the DERIVED rhythm, served for the chain — no independent value literals in the rules (L220). */
   .col { position: relative; } /* AD14: offset-parent for the row band's Y math (band top = col + slot offsets — read from the row ELEMENTS themselves) */
-  .col h2 { font-size: ${HEADER_FONT_PX}px; line-height: ${HEADER_LINE_H_PX}px; margin: 0 0 6px; color: var(--dim); border-bottom: 1px solid var(--line); padding: 6px 0 4px; position: sticky; top: 44px; z-index: 5; background: var(--bg); white-space: normal; overflow-wrap: anywhere; } /* AD6: pins under the 44px livebar (top constant unchanged — nothing consumes header HEIGHT). AD14 NAMED SUPERSESSION (card B): the ellipsis model (nowrap + clip + text-overflow) is REMOVED — labels render FULL inside the 64 px track by wrapping to the declared line envelope (owner: "don't use abbr"); the header row grows to fit its wrapped lines. Full text ALSO rides si-col-tip on hover (AD13, extended in AD14). */
+  .col h2 { font-size: ${HEADER_FONT_PX}px; line-height: ${HEADER_LINE_H_PX}px; margin: 0 0 6px; color: var(--dim); border-bottom: 1px solid var(--line); padding: 6px 0 4px; position: sticky; top: 44px; z-index: 5; background: var(--bg); white-space: nowrap; overflow: hidden; } /* AD6: pins under the 44px livebar (top constant unchanged). AD17 NAMED SUPERSESSION (replaces the AD14 growing-wrap model): ONE uniform row — single line per header, PLAIN CROP at the track edge (no ellipsis machinery, per owner: "it's ok to crop the titles"). Equal heights are structural: every header shares these exact tokens and no per-header mutation exists. Full names ride si-col-tip for EVERY lane (AD13/AD14 surface). */
   /* AD10 trace mode (supersedes the AD7/AD9 mini-box visuals): a .cell is a
      TRANSPARENT row-pitch box — zero content, zero paint. The visible block is a
      ::after rounded rect painted from the per-column lane color (set once per
@@ -542,10 +725,20 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
      var(--cell-mini): the AD7 1:1 row spine is unchanged — AD11 only NARROWED the
      pitch (box=14, gutter=→ token; vertical hit = pitch, adjacent hit rects touch,
      never overlap). Zero px literals in these rules (L220). */
-  .cell { position: relative; cursor: pointer; pointer-events: none; height: var(--cell-mini, 14px); margin-bottom: var(--cell-gutter, 4px); }
+  .cell { position: relative; cursor: pointer; pointer-events: none; height: var(--cell-mini, 14px); margin-bottom: var(--cell-gutter, 4px); padding: 0; /* AD21 (owner "div.cell padding to 0"): explicit no-padding; computed was already 0 — the ::after inset crop model is untouched */ }
   .cell::before { content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: var(--cell-hit-w, 44px); height: var(--cell-hit-h, var(--cell-pitch)); pointer-events: auto; } /* the interactive extension — height CONSUMES the pitch chain (AD12: hit ≡ pitch ⇒ adjacent hit rects gap 0, never overlap); events retarget to the cell (DOM-zero) */
   .cell::after { content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: var(--cell-block-w, 24px); height: var(--cell-block-h, 14px); border-radius: 4px; background: var(--block-light, var(--dim)); } /* the arkanoid block: solid, rounded, centered, zero content */
   [data-theme="dark"] .cell::after { background: var(--block-dark, var(--block-light, var(--dim))); } /* theme flip = the existing [data-theme] token path ONLY — no JS recolor path exists */
+  /* AD19 — the ONLY in-cell content anywhere: the tool name inside TOOL-CALLS bricks (scoped
+     supersession of zero-content; every other lane never builds this node). Geometry mirrors
+     the ::after brick exactly (same anchor + width) so the crop boundary IS the brick:
+     nowrap + overflow hidden — CROP IS THE DESIGN (AD17 discipline), no ellipsis duty.
+     pointer-events none: pure decoration, the hit/Hover/drawer seams on the cell are untouched. */
+  /* AD20 (owner polish): padding-left 1px + font-weight normal are the ONLY two edits to this
+     rule. border-box STATES the present box model so the 1px lands INSIDE the existing box
+     (content-box would widen the node to 61px and shift its center — the card forbids that). */
+  .cell-label { box-sizing: border-box; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: var(--cell-block-w, 24px); padding-left: 1px; font-size: var(--cell-label-font, 9px); line-height: var(--cell-block-h, 14px); white-space: nowrap; overflow: hidden; text-align: left; pointer-events: none; z-index: 1; font-weight: normal; color: var(--cell-label-text, var(--cell-label-text-light, #000)); }
+  [data-theme="dark"] .cell-label { /* AD31: the per-lane token (set at column build from explicit/auto law) is authoritative; the #000 here is only a pre-boot NO-JS fallback default — same honest-fallback pattern as the AD30 band height. */ color: var(--cell-label-text-dark, #000); } /* theme flip via the SAME token path */
   .slot { height: var(--cell-mini, 14px); margin-bottom: var(--cell-gutter, 4px); } /* invisible row-keeper: same pitch, zero chrome — the 1:1 alignment survives at the new rhythm */
   /* AD8 — payload tree + mode switch. ALL colors are theme tokens (both themes, no literals). */
   .payload-bar { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
@@ -586,9 +779,32 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
   #hovercard .hc-prev { color: var(--ink); white-space: pre-wrap; word-break: break-word; margin-top: 6px; }
   #hovercard .hc-absent { color: var(--warn); margin-top: 2px; }
   #coltip { position: fixed; left: 0; top: 0; z-index: 45; pointer-events: none; visibility: hidden; background: var(--tooltip); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; white-space: nowrap; } /* AD13: the ONE reused header tooltip (full lane label; replaces the native title — named delta). z 45: above the sticky headers (5) and the cell card (40), still below the drawer (60). */
+  /* AD25 — column legend: SCREEN-level overlay (card: explicitly not an anchored popup).
+     z ladder: backdrop 65 / panel 70 sit ABOVE the existing ladder (coltip 45, hovercard 40,
+     drawer 60 — left untouched, re-pinned by tests). Open state = ONE body class; hidden by
+     default; colors ride existing theme tokens only (no new palette); the panel scrolls its
+     own content; swatches reuse the columns' --block-light/--block-dark var path (no JS repaint). */
+  #legendBackdrop { position: fixed; inset: 0; background: rgba(2, 6, 16, 0.55); z-index: 65; display: none; }
+  #legendModal { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(640px, 92vw); max-height: 82vh; display: none; flex-direction: column; overflow: hidden; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; z-index: 70; } /* AD26 (owner defect: scrollbar outside the rounded panel + scrolling header): PANEL is a clipping flex column — max-height cap and radius kept as AD24-shipped, overflow:hidden so NOTHING paints outside the curve. display:block→flex lives here AND the .legend-open rule below flips to flex. Scroll moved to #legendBody (inner scroller): its bar renders INSIDE the panel's padding, inset from the rounded edge. */
+  #legendBody { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; } /* THE scroller: min-height:0 lets a flex-column child scroll; overscroll contain keeps the panel from ever panning */
+  .legend-open #legendModal { display: flex; } /* was block (AD25) — the split needs the column layout */
+  .legend-open #legendBackdrop { display: block; }
+  /* (AD26: the open-state flip for #legendModal moved UP with the flex column layout — a later block rule here would defeat it) */
+  .legend-open #grid { pointer-events: none; } /* hover/drawer suppressed while the modal is open (card-sanctioned route) */
+  #legendModal .legend-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+  #legendModal .legend-head > span { font-weight: 600; font-size: 13px; }
+  #legendClose { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; background: var(--badge); color: var(--accent); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; padding: 0; }
+  #legendClose svg { width: 14px; height: 14px; }
+  #legendModal .legend-intro { color: var(--dim); font-size: 11px; margin: 0 0 10px; }
+  .legend-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 2px; border-top: 1px solid var(--line); }
+  .legend-swatch { width: var(--cell-block-w, 24px); height: var(--cell-block-h, 14px); border-radius: 4px; flex: none; margin-top: 3px; background: var(--block-light, var(--dim)); }
+  [data-theme="dark"] .legend-swatch { background: var(--block-dark, var(--block-light, var(--dim))); } /* theme flip = the .cell::after token path, same names */
+  #legendModal .legend-name { font-weight: 600; font-size: 12px; }
+  #legendModal .legend-desc { color: var(--dim); font-size: 11px; }
   #coltip.show { visibility: visible; }
-  #rowrect { position: absolute; left: 0; top: 0; width: 0; height: var(--cell-pitch, 16px); background: color-mix(in srgb, var(--dim) 10%, transparent); z-index: 0; pointer-events: none; visibility: hidden; border-radius: 3px; } /* AD14 row-hover band: ONE reused strip living in the stage scroll (absolute here = rides rows with zero reposition code); FIRST DOM child + z 0 = above the plain stage bg, below the positioned blocks; tint composed ONLY from the existing dim token — subtle in both themes; never blocks a block. */
-  #rowrect.show { visibility: visible; } /* AD14: the si-h2-tight fit hook is inline-style-driven (see applyHeaderFit) — deliberately NO empty CSS rule here (no-dead-CSS discipline); grepping the page for that class finds the JS surface only. */
+  #rowrect { position: absolute; left: 0; top: 0; width: 0; /* AD30: the height line below is now a FALLBACK-only pre-boot default — the show path overwrites band.style.height from ROW_BAND_PITCH (same variable as the top write); this var never inherits here (band is a sibling of #grid), which the old 16px default silently matched. */ height: var(--cell-pitch, 16px); background: color-mix(in srgb, var(--dim) 10%, transparent); z-index: 0; pointer-events: none; visibility: hidden; border-radius: 3px; } /* AD14 row-hover band: ONE reused strip living in the stage scroll (absolute here = rides rows with zero reposition code); FIRST DOM child + z 0 = above the plain stage bg, below the positioned blocks; tint composed ONLY from the existing dim token — subtle in both themes; never blocks a block. */
+  #rowrect.show { visibility: visible; }
+  .tip-desc { display: block; white-space: normal; max-width: 260px; color: var(--dim); font-size: 11px; margin-top: 2px; } /* AD17: optional second tip line, ONLY for lanes with a docs-sourced description; tokens only */
   #drawer { width: 0; flex: none; overflow: hidden; transition: width 120ms; max-height: calc(100vh - 44px); position: relative; z-index: 60; } /* AD7: border-left removed by owner instruction — the AD5 divider (#drawerresizer) is the seam now. AD9: explicit z above the hover card (40) — card is ALWAYS fully under the drawer. */
   #drawer .dclose { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; background: var(--badge); color: var(--accent); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; padding: 0; }
   #drawer .dclose svg { width: 14px; height: 14px; }
@@ -615,7 +831,9 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
 </style>
 </head>
 <body>
-<header data-testid="si-header"><h1>Session Inspector</h1><span id="status"></span><button id="themeToggle" data-testid="si-theme-toggle" type="button" aria-label="toggle light/dark theme"><svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="currentColor"/></svg></button></header>
+<header data-testid="si-header"><h1>Session Inspector</h1><span id="status"></span><button id="legendButton" data-testid="legend-button" type="button" aria-label="open the column legend">Legend</button><button id="themeToggle" data-testid="si-theme-toggle" type="button" aria-label="toggle light/dark theme"><svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="currentColor"/></svg></button></header>
+<div id="legendBackdrop" data-testid="legend-backdrop"></div>
+<div id="legendModal" data-testid="legend-modal" role="dialog" aria-label="column legend" aria-modal="true"><div class="legend-head"><span>Column Legend</span><button id="legendClose" data-testid="legend-close" type="button" aria-label="close legend"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div><div id="legendBody"><p class="legend-intro">${LEGEND_INTRO}</p><div id="legendRows"></div></div></div>
 <main>
   <aside id="sidebar" data-testid="si-sidebar">
     <div id="filterdock" data-testid="si-filter-dock"><input id="filter" data-testid="si-filter" type="search" placeholder="filter sessions (server-side LIKE)"></div>
@@ -668,10 +886,56 @@ function fmtTime(epochOrIso) {
 
 // -- config drives EVERYTHING about the grid (SC-2) ----------------------------
 var cfg = null;
+var CONFIG_RETRY_MS = 5000; // AD32: the ONE disclosed retry interval (deviation flagged: no pre-existing interval existed to reuse — livebar is EventSource; the card's effective rule "no second interval invention" holds: this is the first and only).
+var configRetryTimer = null;
 async function loadConfig() {
   var res = await fetch("/session-inspector/config");
+  if (!res.ok) {
+    // AD32 R1 (developer ruling): the SHELL is the operator surface — invalid config no
+    // longer leaves a dead page. R2: the DATA endpoints keep failing strict (§6.5/DEC-I
+    // untouched); this branch surfaces that 500 body verbatim — code + exact schema
+    // messages + path — and self-heals: poll checkConfigNow; on validity reload ONCE.
+    // No stale-value rendering: the shell stays config-independent (empty grid area).
+    var err = null;
+    try { err = await res.json(); } catch (_e) { err = null; }
+    var data = (err && err.data) || { code: "CONFIG_UNREADABLE", message: "HTTP " + res.status, path: "/session-inspector/config" };
+    showConfigError(data);
+    return false;
+  }
   cfg = await res.json();
   if (cfg.configWarning) status("warning: " + cfg.configWarning.code);
+  return true;
+}
+function showConfigError(data) {
+  var bar = document.createElement("div");
+  bar.id = "configBanner";
+  bar.setAttribute("data-testid", "si-config-error");
+  bar.style.cssText = "position:fixed;top:48px;left:16px;right:16px;z-index:80;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:13px"; // theme tokens = legible in BOTH themes
+  var head = document.createElement("div");
+  head.style.cssText = "font-weight:bold;margin-bottom:4px";
+  head.textContent = "Config invalid (" + String(data.code) + ") — fix the file — this page reloads automatically when it is valid again";
+  var msg = document.createElement("pre");
+  msg.style.cssText = "white-space:pre-wrap;margin:0 0 8px;font-size:12px;color:var(--dim)";
+  msg.textContent = String(data.message) + "\\npath: " + String(data.path); // emits "\n" for a REAL newline in the page string (verified via banner DOM read: no literal backslash rendered)
+  var retry = document.createElement("button");
+  retry.id = "configRetryBtn";
+  retry.setAttribute("data-testid", "si-config-error-retry");
+  retry.textContent = "Retry now";
+  retry.onclick = function () { checkConfigNow(); }; // manual immediate poll — same mechanism
+  bar.appendChild(head); bar.appendChild(msg); bar.appendChild(retry);
+  document.body.appendChild(bar);
+  if (!configRetryTimer) configRetryTimer = setInterval(checkConfigNow, CONFIG_RETRY_MS);
+}
+function checkConfigNow() {
+  fetch("/session-inspector/config").then(function (r) {
+    if (!r.ok) return; // still broken — keep waiting on the one interval
+    if (configRetryTimer) { clearInterval(configRetryTimer); configRetryTimer = null; }
+    var bar = document.getElementById("configBanner");
+    if (bar) bar.innerHTML = ""; // one-transition reload statement; the fresh page re-reads the fixed file
+    var head = bar ? bar.appendChild(document.createElement("div")) : document.body;
+    head.textContent = "Config valid — reloading…";
+    setTimeout(function () { location.reload(); }, 200);
+  }).catch(function (_e) { /* server unreachable — next poll retries */ });
 }
 function columns() {
   return cfg.categories.filter(function (c) { return c.enabled; }).sort(function (a, b) { return a.order - b.order; });
@@ -757,9 +1021,13 @@ function buildGrid() {
   columns().forEach(function (c, ci) {
     // AD13 (named delta): the native title attribute is REMOVED — the full label is
     // staved on the column node and served by the single reused si-col-tip surface.
-    var head = h("h2", { "data-testid": siColHeaderTestId(c.id), text: c.title });
+    // AD17: the header and tip carry the DISPLAY label (de-abbrev, data id untouched —
+    // testid and data-cat still consume the raw c.id); the optional description is staved
+    // for the tip only. The cropped paint never travels: full text rides the tip.
+    var head = h("h2", { "data-testid": siColHeaderTestId(c.id), text: laneDisplayLabel(c.id, c.title) });
     var col = h("div", { class: "col", "data-cat": c.id, "data-testid": siColTestId(c.id) }, head);
-    head._label = c.title; // FULL label for the tip — the elided paint never travels
+    head._label = laneDisplayLabel(c.id, c.title); // FULL display label for the tip — the cropped paint never travels
+    head._desc = LANE_TIP_DESCRIPTIONS[c.id] || ""; // tip-only description line, docs-worded, only where defined
     col.style.minHeight = "60px";
     col.dataset.cellHeight = String(hh); // config cell height stays observable on the column (AD2 surface)
     // AD10: the column's block color — both theme steps computed ONCE from the
@@ -767,10 +1035,13 @@ function buildGrid() {
     // flip (no repaint path exists). Renamed/unknown lanes resolve deterministically.
     col.style.setProperty("--block-light", laneBlockColor(c.id, "light"));
     col.style.setProperty("--block-dark", laneBlockColor(c.id, "dark"));
+    // AD31: per-lane label text (explicit verbatim | auto-derived against THIS lane's bg,
+    // per theme) — same token path the CSS label channel already reads.
+    col.style.setProperty("--cell-label-text-light", laneLabelTextColor(c.id, "light"));
+    col.style.setProperty("--cell-label-text-dark", laneLabelTextColor(c.id, "dark"));
     rankById[c.id] = ci; // config column order = documented tie-order rank
     colById[c.id] = col;
-    grid.appendChild(col);
-    applyHeaderFit(head); // AD14: ONE measured fit pass right after layout — declared step, oversize SURFACED, never silent clipping
+    grid.appendChild(col); // AD17: no per-header fit pass — headers get their look from shared rules only
   });
 }
 var shown = 0, hiddenByConfig = 0, dropped = 0;
@@ -799,6 +1070,35 @@ function appendCell(env) {
   for (var ci = 0; ci < colsAll.length; ci++) {
     var node = ci === key.colRank ? cell : h("div", { class: "slot", "data-ts": env.ts });
     colsAll[ci].insertBefore(node, colsAll[ci].children[idx + 1] || null);
+  }
+  // AD19 (scoped supersession of the zero-content rule — tool-calls ONLY): the tool name
+  // appears INSIDE the brick. Source = the row's OWN payload via the drawer's payload
+  // contract (fetchPayload(env.payloadRef)) — never a second data source. The core keeps
+  // the full name at the data layer; the CSS clip does the crop. Every other category
+  // never enters this branch (single gate, single call site — pinned by ad19 lanes).
+  // Placed AFTER the placement loop so the AD7-seamed head of this function stays byte-stable.
+  if (env.category === "tool-calls") {
+    var lab = h("span", { class: "cell-label" });
+    cell.appendChild(lab);
+    fetchPayload(env.payloadRef).then(function (body) {
+      // the drawer's OWN payload-text channel (objects → their JSON text; truncated rows
+      // stay raw text): still the row's own payload, zero second data source.
+      lab.textContent = cellToolLabel(body && body.payload != null ? payloadTextOf(body.payload) : "");
+    }).catch(function (_e) { /* payload unreadable: the block degrades visibly, like the drawer */ });
+  }
+  // AD22 (second gated label lane, reasoning ONLY): the content length as NNNk, fed by the
+  // JOIN-CARRIED exact count (env.contentChars) — a synchronous branch, deliberately NOT
+  // fetchPayload-based: the payload endpoint is byte-capped and forbidden as a length source
+  // (DEC-I). Same .cell-label channel (9px / weight normal / 1px padding / clip) — nothing restyled.
+  if (env.category === "reasoning") {
+    var rlab = h("span", { class: "cell-label" });
+    rlab.textContent = formatContentSize(env.contentChars);
+    cell.appendChild(rlab);
+  }
+  if (env.category === "lifecycle" && env.partType) { // AD27: the event kind, VERBATIM from the join field (AD22 data-path precedent); absent/unknown type → contentless brick, unchanged. Crop = same trailing-edge policy as tool names; full string lives in hover/drawer.
+    var lclab = h("span", { class: "cell-label" });
+    lclab.textContent = env.partType;
+    cell.appendChild(lclab);
   }
   shown++;
   // (AD10) the rAF clip-dot block was removed WITH the clip rule: a zero-content
@@ -989,7 +1289,48 @@ function closeDrawer() {
 // AD4: document-level Esc (semantic core is unit-pinned; additive, no re-render).
 document.addEventListener("keydown", function (ev) {
   if (escShouldCloseDrawer(ev.key, $("drawer").classList.contains("open"))) closeDrawer();
+  if (escShouldCloseLegend(ev.key, document.body.classList.contains("legend-open"))) closeLegend(); // AD25: same Escape contract as the drawer (AD4), through its own core
 });
+// AD25 — column legend. Rows come from the LIVE config columns (every active lane,
+// display order); names/descriptions are registry-fed, and a lane with no pinned entry
+// falls back to the header's own label path — it never goes blank. Swatch vars reuse
+// the columns' own pure color cores; opening hides floating surfaces and the body class
+// makes the grid inert while the modal is open.
+function legendEntry(catId) {
+  for (var i = 0; i < LEGEND_ENTRIES.length; i++) { if (LEGEND_ENTRIES[i].id === catId) return LEGEND_ENTRIES[i]; }
+  return null;
+}
+function buildLegendRows() {
+  var box = $("legendRows");
+  box.textContent = "";
+  columns().forEach(function (c) {
+    var e = legendEntry(c.id);
+    var row = h("div", { class: "legend-row", "data-legend-cat": c.id });
+    var sw = h("span", { class: "legend-swatch" }); // same cores, same var names as buildGrid's columns
+    sw.style.setProperty("--block-light", laneBlockColor(c.id, "light"));
+    sw.style.setProperty("--block-dark", laneBlockColor(c.id, "dark"));
+    var text = h("div", { class: "legend-text" });
+    text.appendChild(h("div", { class: "legend-name", text: e ? e.name : laneDisplayLabel(c.id, c.title) })); // registry first; unknown lane → the header's own path (single source)
+    text.appendChild(h("div", { class: "legend-desc", text: e ? e.description : "No pinned description for this column." }));
+    row.appendChild(sw); row.appendChild(text);
+    box.appendChild(row); // the modal container ONLY — the grid is never touched
+  });
+}
+function openLegend() {
+  buildLegendRows(); hideHoverCard(); hideColTip(); // no floating surface survives above/behind the modal
+  document.body.classList.add("legend-open");
+  $("legendBody").scrollTop = 0; // AD26 re-open-at-top: reset AFTER the open flip — assigning scrollTop on a display:none scroller is a silent no-op (live defect: reopen kept 136px)
+}
+function closeLegend() {
+  document.body.classList.remove("legend-open");
+}
+$("legendButton").addEventListener("click", openLegend);
+$("legendBackdrop").addEventListener("click", closeLegend); // backdrop click = close (AD4-family close contract: X + backdrop + Esc)
+$("legendClose").addEventListener("click", closeLegend);
+var legendHead = $("legendModal").querySelector(".legend-head");
+legendHead.addEventListener("wheel", function (ev) { // AD26 AC: header scrolls the list — the body is a SIBLING, no UA chain reaches it; explicit forward, consumes (nothing else can scroll here)
+  $("legendBody").scrollTop += ev.deltaY; ev.preventDefault();
+}, { passive: false });
 async function openDrawer(env) {
   var d = $("drawer");
   d.classList.add("open");
@@ -1107,7 +1448,15 @@ function showColTipFor(col) {
   var head = col && col.querySelector ? col.querySelector("h2") : null; // ANCHOR stays the column header (AD13 placement) — the TRIGGER was widened (AD14)
   if (!colTip) colTip = $("coltip");
   if (!colTip || !head || typeof head._label !== "string" || !head._label) return;
-  if (colTip.textContent !== head._label) colTip.textContent = head._label;
+  if (colTip.textContent !== head._label || (head._desc && !colTip.querySelector(".tip-desc"))) {
+    colTip.textContent = head._label; // label line = the full DISPLAY label (AD17: de-abbreviated)
+    if (head._desc) { // optional description line — ONLY for lanes that define one (tip-only, never the header)
+      var d = document.createElement("span");
+      d.className = "tip-desc";
+      d.textContent = head._desc;
+      colTip.appendChild(d);
+    }
+  }
   colTip.classList.add("show");
   colTip.setAttribute("aria-hidden", "false");
   var p = topPreferredTipPlacement(head.getBoundingClientRect(), { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }, colTip.getBoundingClientRect()); // AD16 (owner): tip prefers ABOVE the header; flips below only when the top lacks room
@@ -1122,16 +1471,9 @@ function hideColTip() {
 // AD14: the row-hover band + the ONE declared header-fit step. Both derive from the
 // grid's OWN render data: a column's children ARE the rows (.cell/.slot appended in
 // rowSlots order), so row index = child slot index and the band's Y reads from the
-// row ELEMENT itself — immune to any wrapped-header height drift. The band is
+// row ELEMENT itself — immune to any header height configuration. The band is
 // #rowrect: pointer-events none (never blocks a block), first-child + z 0 (under the
 // blocks, over the stage bg), height = the derived pitch.
-function applyHeaderFit(head) {
-  if (headerLineCount(head.getBoundingClientRect().height, HEADER_LINE_H_PX) <= HEADER_MAX_LINES) return; // inside the declared envelope
-  head.style.fontSize = Math.round(HEADER_FONT_PX * HEADER_MIN_FONT_PCT / 100) + "px"; // the ONE allowed step (card B)…
-  head.style.lineHeight = Math.round(HEADER_LINE_H_PX * HEADER_MIN_FONT_PCT / 100) + "px"; // …line rhythm scales with it
-  head.classList.add("si-h2-tight");
-  if (headerLineCount(head.getBoundingClientRect().height, Math.round(HEADER_LINE_H_PX * HEADER_MIN_FONT_PCT / 100)) > HEADER_MAX_LINES) head.dataset.siHeaderOversize = "1"; // NEVER SILENT: still over the envelope after the one step = flagged for the battery (F-code surface), never clipped back into an abbreviation
-}
 function showRowBandFor(idx) {
   var band = $("rowrect");
   if (!band) return;
@@ -1144,6 +1486,9 @@ function showRowBandFor(idx) {
   // AD16 (owner screenshot "band below the blocks"): the OLD row-box-TOP math is replaced by
   // CENTERING on the same rendered row box the renderer centers blocks in — same source, Δ ≤ 2 px.
   band.style.top = bandCenterTop(col.offsetTop + slot.offsetTop, slot.offsetHeight, ROW_BAND_PITCH) + "px";
+  // AD30 (AD29 flag 3b ruling): the SAME variable that centers the band also SIZES it — the CSS
+  // var(--cell-pitch) never inherits across the #grid sibling boundary (band is a #stage child).
+  band.style.height = ROW_BAND_PITCH + "px";
   band.classList.add("show");
 }
 function hideRowBand() {
@@ -1200,18 +1545,55 @@ ${decodeStoredWidth.toString()}
 // the uniform form; the fit path is gone and is NOT served.
 var GRID_TRACK_PX = ${GRID_TRACK_PX};
 ${gridTrackTemplate.toString()}
-// AD14 wrapped-header fit + row band — single-source as ever: these served values
-// ARE the unit-tested tokens; the served helpers ARE the tested pure cores.
+// AD14 row band + AD17 header/tip display layer — single-source as ever: these served
+// values ARE the unit-tested tokens; the served helpers ARE the tested pure cores.
 var HEADER_FONT_PX = ${HEADER_FONT_PX};
 var HEADER_LINE_H_PX = ${HEADER_LINE_H_PX};
-var HEADER_MAX_LINES = ${HEADER_MAX_LINES};
-var HEADER_MIN_FONT_PCT = ${HEADER_MIN_FONT_PCT};
 var ROW_HL_EDGE_TOL_PX = ${ROW_HL_EDGE_TOL_PX};
 var ROW_BAND_PITCH = ${CELL_PITCH_PX}; // the derived rhythm — the band consumes the chain, never a literal
-${headerLineCount.toString()}
+var LANE_DISPLAY_OVERRIDES = ${JSON.stringify(LANE_DISPLAY_OVERRIDES)};
+var LANE_TIP_DESCRIPTIONS = ${JSON.stringify(LANE_TIP_DESCRIPTIONS)};
+${laneDisplayLabel.toString()}
 ${rowIndexNearestY.toString()}
 ${bandCenterTop.toString()}
 ${topPreferredTipPlacement.toString()}
+// AD19 tool-cell label core — same injection discipline: the served copy IS the tested core.
+var CELL_LABEL_FONT_PX = ${CELL_LABEL_FONT_PX};
+// AD28 derivation constants for the config override (CODE constants — the AD12 law
+// re-derives from THESE, never from a literal; the apply function below is the only reader).
+var CELL_MINI_H_PX = ${CELL_MINI_H_PX};
+var CELL_GUTTER_PX = ${CELL_GUTTER_PX};
+var CELL_CHIP_INSET_PX = ${CELL_CHIP_INSET_PX};
+function applyGridConfig(cfg) {
+  // AD28 single override point (card): called ONCE in boot() after loadConfig, before any render.
+  // Absent/older/unreachable config ⇒ the injected constants ⇒ today's EXACT paint.
+  var g = (cfg && cfg.ui && cfg.ui.grid) || {};
+  var w = typeof g.columnWidthPx === "number" ? g.columnWidthPx : GRID_TRACK_PX;
+  var h = typeof g.cellHeightPx === "number" ? g.cellHeightPx : CELL_MINI_H_PX;
+  var fnt = typeof g.labelFontPx === "number" ? g.labelFontPx : CELL_LABEL_FONT_PX;
+  var st = $("grid").style; // tokens = the CSS chain's single entry (block/hit/label centering all follow vars)
+  st.setProperty("--cell-mini", h + "px");
+  st.setProperty("--cell-gutter", CELL_GUTTER_PX + "px");
+  st.setProperty("--cell-pitch", h + CELL_GUTTER_PX + "px"); // AD12 law: DERIVED from block + CODE gutter
+  st.setProperty("--cell-block-w", w - 2 * CELL_CHIP_INSET_PX + "px"); // the current width derivation
+  st.setProperty("--cell-block-h", h + "px");
+  st.setProperty("--cell-hit-w", w - 2 * CELL_CHIP_INSET_PX + "px"); // hit ≡ visible (AD16 model)
+  st.setProperty("--cell-hit-h", h + CELL_GUTTER_PX + "px"); // hit ≡ pitch (AD12 law)
+  st.setProperty("--cell-label-font", fnt + "px"); // cell-label channel ONLY (header fonts untouched)
+  GRID_TRACK_PX = w; // THE track source stays gridTrackTemplate — it reads this updated global
+  ROW_BAND_PITCH = h + CELL_GUTTER_PX; // band centering + row index follow the same derived rhythm
+  CELL_LABEL_FONT_PX = fnt;
+}
+var LANE_COLOR_CFG = {};
+function applyColorsConfig(cfg) {
+  // AD31: ONE call point, same apply-phase pattern as applyGridConfig — sets the per-lane
+  // color overrides consumed by laneBlockColor/laneLabelTextColor at render. Absent section
+  // = {} = all-auto: the derivation law applies to every built-in (the defect fix).
+  LANE_COLOR_CFG = (cfg && cfg.ui && cfg.ui.colors) || {};
+}
+${cellToolLabel.toString()}
+// AD22 content-size formatter — same discipline; input is the JOIN-carried exact count.
+${formatContentSize.toString()}
 
 // AD10 lane colors: the tested pure core and its vendored data, injected once.
 // (CSS custom properties for the per-column steps are set in buildGrid; the
@@ -1219,6 +1601,10 @@ ${topPreferredTipPlacement.toString()}
 var LANE_BLOCK_BASE = ${JSON.stringify(LANE_BLOCK_BASE)};
 var LANE_BLOCK_OVERFLOW = ${JSON.stringify(LANE_BLOCK_OVERFLOW)};
 ${laneBlockColor.toString()}
+// AD31: auto-readable label law + per-lane text resolver, injected next to the bg core they
+// build on (same served-copy-is-the-tested-core discipline; both are pure over their inputs).
+${deriveLabelColor.toString()}
+${laneLabelTextColor.toString()}
 
 // AD3 testid cores (same single-source injection; naming only — zero behavior).
 ${siRowTestId.toString()}
@@ -1239,6 +1625,10 @@ var POPOVER_PREVIEW_CAP = ${POPOVER_PREVIEW_CAP};
 ${computePopoverPlacement.toString()}
 ${hoverPreviewText.toString()}
 ${escShouldCloseDrawer.toString()}
+${escShouldCloseLegend.toString()}
+// AD25 content registry (module-side single source, ui.test.ts drift-tested against
+// laneDisplayLabel(defaultCategories())) — served as data, built at page build time:
+var LEGEND_ENTRIES = ${JSON.stringify(LEGEND_ENTRIES)};
 
 // AD5 drawer-resize cores (single source). Width rides the --drawer CSS var so
 // AD2's open-clamp composes with it; closed state is untouched (var only affects
@@ -1336,7 +1726,10 @@ $("filter").addEventListener("input", function (ev) {
   filterTimer = setTimeout(function () { loadSessions(ev.target.value.trim()); }, 250);
 });
 (async function boot() {
-  await loadConfig();
+  var cfgOk = await loadConfig();
+  if (!cfgOk) { status("config invalid — shell live, retrying"); return; } // AD32 R1: banner + self-heal poll own the page; NO partial render, NO dead boot
+  applyGridConfig(cfg); // AD28: geometry override BEFORE any grid/render path exists (token vars + derived globals)
+  applyColorsConfig(cfg); // AD31: color overrides — same boot point, renders read the map
   status("config loaded (" + columns().length + " configured columns)");
   await loadSessions("");
   loadScanExtra();

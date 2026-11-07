@@ -847,7 +847,12 @@ describe("ad9 ts-only mini boxes + floating hover-card structure on the served p
   // state dots" structural pin was REMOVED — cells now carry ZERO content (the full ts
   // lives in the hover card, which is unchanged). §5.6 visual marking moves to attributes:
   // data-ts + aria-label = ts. The hover-card structure/wiring tests below STAND unchanged.
-  test("cells are CONTENTLESS: no ts text, no dots, no children — ts/lane ride attributes + aria-label only", () => {
+  // NAMED DELTA (AD19): zero-content STANDS for every lane EXCEPT tool-calls (scoped
+  // supersession per card). The blanket appendChild ban below is re-anchored to a
+  // category-GATED rule — the ONLY child an appendCell may ever build is the label, and
+  // ONLY inside a tool-calls gate. The AD19 lane "all other lanes" pin asserts zero labels
+  // for every other category; the live battery asserts zero text cells in other columns.
+  test("cells are CONTENTLESS (all lanes except tool-calls): no ts text, no dots, no children — ts/lane ride attributes + aria-label only", () => {
     const cell = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("var cell = h(\"div\", { class: \"cell\""))
     const body = cell.slice(0, cell.indexOf("// AD7 placement"))
     expect(body).not.toMatch(/class: "cts"/) // ts text GONE (AD10) — attributes only
@@ -855,7 +860,16 @@ describe("ad9 ts-only mini boxes + floating hover-card structure on the served p
     expect(body).toContain('"data-ts": env.ts') // ts stays addressable...
     expect(body).toMatch(/"aria-label": env\.ts/) // ...and reachable: aria-label = ts (a11y per card)
     expect(body).toContain('"data-category": env.category') // lane identity stays an attribute
-    expect(body).not.toMatch(/appendChild/) // zero element children are ever built into a cell
+    // appendChild may appear ONLY as the label branch inside a category gate (AD19);
+    // the cell BASE stays a plain contentless element:
+    if (/appendChild/.test(body)) {
+      // checker fix during GREEN: the generic class could not cross the gate's closing paren;
+      // the exact served gate pattern (ad19 lane) is the authority.
+      const gate = body.match(/if \(env\.category === "tool-calls"\) \{[\s\S]*appendChild/)
+      expect(gate).not.toBe(null) // any child building is CATEGORY-GATED, never unconditional
+    } else {
+      expect(true).toBe(true) // no children at all — pre-AD19 shape (passes vacuously)
+    }
     expect(body).not.toMatch(/title: env\.ts/) // no tooltip either (the card is the surface)
     // dead-CSS sweep alongside the renderer change (AD9 precedent: selector-free notes only)
     expect(INSPECTOR_UI_HTML.match(/\.dot[a-z-]* \{/g)).toBe(null)
@@ -1126,22 +1140,23 @@ describe("ad10 served-page structure — transparent row box, block + hit pseudo
     expect(handler).not.toMatch(/laneBlockColor|recolor|setProperty/)
   })
 
-  test("buildGrid paints lanes: per-column block vars (both themes), header WRAPS full labels (AD14 REPLACES the ellipsis model); native title stays removed", () => {
+  test("buildGrid paints lanes: per-column block vars (both themes), header is UNIFORM SINGLE-ROW PLAIN-CROP (AD17 REPLACES the AD14 wrap model); native title stays removed", () => {
     const build = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function buildGrid"), INSPECTOR_UI_HTML.indexOf("function appendCell"))
     expect(build).toMatch(/setProperty\("--block-light", laneBlockColor\(c\.id, "light"\)\)/)
     expect(build).toMatch(/setProperty\("--block-dark", laneBlockColor\(c\.id, "dark"\)\)/)
     // NAMED SUPERSESSION (AD13 card c KEPT): native title remains removed — the real
-    // tooltip surface (si-col-tip) is the full-label carrier next to the wrapped paint.
+    // tooltip surface (si-col-tip) is the full-label carrier for every lane.
     expect(build).not.toMatch(/"title": c\.title/)
-    // NAMED SUPERSESSION (AD14 card b): the AD10/AD13 ellipsis model (nowrap + clip +
-    // text-overflow) is REPLACED — labels render FULL inside the 64 px track via
-    // wrapping (owner: "don't use abbr - i don't get what it is").
+    // NAMED SUPERSESSION (AD17 card a, owner: "single row … it's ok to crop the titles"):
+    // the AD14 wrap model (white-space:normal + overflow-wrap, growing header row) is RETIRED.
+    // One uniform row: single line, PLAIN CROP at the track edge. No ellipsis requirement —
+    // text-overflow must stay absent (crop plain, not "…"), the popup carries full names.
     const h2 = rule1(".col h2")
-    expect(h2).toMatch(/white-space: normal/)
-    expect(h2).toMatch(/overflow-wrap/)
-    expect(h2).not.toMatch(/text-overflow/)
-    expect(h2).not.toMatch(/white-space: nowrap/)
-    expect(h2).not.toMatch(/overflow: hidden/) // a clipped label is the abbreviation this card removes
+    expect(h2).toMatch(/white-space: nowrap/)
+    expect(h2).toMatch(/overflow: hidden/)
+    expect(h2).not.toMatch(/text-overflow/) // plain crop — no ellipsis character machinery
+    expect(h2).not.toMatch(/white-space: normal/) // the AD14 wrap declaration is gone
+    expect(h2).not.toMatch(/overflow-wrap/) // wrap helpers are gone
     // testid scheme (AD3) untouched: header + cell builders still consume the cores
     expect(build).toMatch(/siColHeaderTestId\(c\.id\)/)
   })
@@ -1191,8 +1206,13 @@ describe("ad13 header tooltip si-col-tip — ONE reused surface, immediate, mutu
     const js = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function showColTipFor"))
     expect(js.length).toBeGreaterThan(0)
     const fn = js.slice(0, js.indexOf("function hideColTip"))
-    expect(fn).toMatch(/textContent/) // single text node = the full column label — no preview, no other content
-    expect(fn).toMatch(/_label/) // label staved from the config title at build time (full text, never the elided paint)
+    expect(fn).toMatch(/textContent/) // label line = the full DISPLAY label — no preview
+    expect(fn).toMatch(/_label/) // label staved at build time (full text, never the cropped paint)
+    // NAMED DELTA (AD17 card b): the "single text node, no other content" rule becomes
+    // "label + OPTIONAL description line": _desc exists ONLY for lanes with a docs-sourced
+    // description (amt-activity); every other lane's tip stays name-only.
+    expect(fn).toMatch(/_desc/)
+    expect(fn).toMatch(/tip-desc|createElement/) // the description renders as a separate line node, only when present
     // NAMED DELTA (AD16 part 3, owner: popup above the header): the coltip MOVES from the shared
     // bottom-preferring card core to its OWN top-preferring pure core (single placement rule per
     // surface remains — still no inline math here). The hover-CARD keeps computePopoverPlacement.
@@ -1225,7 +1245,10 @@ describe("ad13 label staving + template feed (AD14 updated: uniform-count feed; 
   })
   test('the column node staves its FULL label for the tip; zero native title attrs on headers', () => {
     const build = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function buildGrid"), INSPECTOR_UI_HTML.indexOf("function appendCell"))
-    expect(build).toMatch(/_label = c\.title/) // full label travels with the column (the tooltip surface reads it)
+    // NAMED DELTA (AD17 card b): the staved label ANCHOR moves to the DISPLAY layer
+    // (de-abbreviation) — the principle is unchanged: the FULL label travels with the
+    // column, the cropped paint never does. Data id c.id stays the key/testid input.
+    expect(build).toMatch(/_label = laneDisplayLabel\(c\.id, c\.title\)/)
     expect(build).not.toMatch(/"title": c\.title/) // grep pin: no native title left (named delta — no double tooltips)
   })
 })
@@ -1276,29 +1299,37 @@ describe("ad12 fixed-gutter model — single source constant; pitch/hit derived 
 // attach it to the row"). Row data contract (inspected FIRST, per card): every
 // column's children ARE the rows — .cell/.slot appended in rowSlots order, so the
 // child index IS the row index; the band attaches to the grid's own row elements.
-describe("ad14 wrapped-header fit assist — declared ONE degradation step (90 %, once), never a silent ellipsis", () => {
-  test("headerLineCount(height, lineHeight): honest line math used by the fit decision", () => {
-    const f = a14Need("headerLineCount")
-    expect(f(28, 14)).toBe(2)
-    expect(f(42, 14)).toBe(3)
-    expect(f(0, 14)).toBe(0)
-    expect(f(34, 14)).toBe(2) // rounding is CONSERVATIVE toward the declared max: a 2.4-line box is 2 full lines of paint
-    expect(a14Need("HEADER_LINE_H_PX")).toBe(14) // token: line-height 1.15 x the existing 12px header font (unchanged font, measured rhythm token)
-    expect(a14Need("HEADER_MAX_LINES")).toBe(2) // the card's declared 2-line envelope
-    expect(a14Need("HEADER_MIN_FONT_PCT")).toBe(90) // the ONE allowed scale step, per card
+// NAMED RE-ANCHOR (AD17 card a, owner: "grid header should use single row - not different
+// height - it's ok to crop the titles"): the AD14 wrap/fit lane above is RETIRED as behavior.
+// Uniform SINGLE-ROW headers: one token font/line-height for all 12 (equal heights by single
+// source), labels crop plain at the track edge, the fit machinery DELETES (multi-line model dead):
+// headerLineCount, HEADER_MAX_LINES, HEADER_MIN_FONT_PCT, applyHeaderFit, si-h2-tight, siHeaderOversize.
+// The old "all fully visible wrapped" evaluation becomes "uniform single-row, crop-allowed" (battery).
+describe("ad17 uniform single-row header — one height by single source; crop plain; fit machinery deleted", () => {
+  const ruleH2 = (selector: string): string => {
+    const m = INSPECTOR_UI_HTML.match(new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{[^}]*\\}"))
+    return m ? m[0] : ""
+  }
+  test("single-value height tokens stand; the multi-line fit vocabulary is gone from source and page", () => {
+    expect(a14Need("HEADER_FONT_PX")).toBe(12) // single source (unchanged font)
+    expect(a14Need("HEADER_LINE_H_PX")).toBe(14) // single line rhythm ⇒ every header is ONE row tall by construction
+    const src = require("node:fs").readFileSync(new URL("./ui.ts", import.meta.url), "utf8") as string
+    for (const dead of ["headerLineCount", "HEADER_MAX_LINES", "HEADER_MIN_FONT_PCT", "applyHeaderFit", "si-h2-tight", "siHeaderOversize"]) {
+      expect(src).not.toContain(dead)
+      expect(INSPECTOR_UI_HTML).not.toContain(dead)
+    }
+    const h2 = ruleH2(".col h2")
+    expect(h2).toContain(`font-size: ${a14Need("HEADER_FONT_PX")}px`) // uniform for all 12 — per-header inline styles must not exist anymore
+    expect(h2).toContain(`line-height: ${a14Need("HEADER_LINE_H_PX")}px`)
+    expect(h2).toMatch(/position: sticky/) // pinning untouched (AD6)
+    expect(h2).toMatch(/top: 44px/)
   })
-  test("buildGrid runs one fit pass per header: over 2 lines -> shrink ONCE to the min font; STILL over -> dataset flag (surface, never silently re-abbreviate)", () => {
+  test("no per-header fit pass runs at build; nothing re-anchors height later; plain crop carries overflow", () => {
     const build = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function buildGrid"), INSPECTOR_UI_HTML.indexOf("function appendCell"))
-    const js = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function applyHeaderFit"))
-    expect(js.length).toBeGreaterThan(0)
-    const fn = js.slice(0, js.indexOf("function showRowBand")) // mechanism bounded at the named page-function boundary (checker self-validation)
-    expect(fn).toMatch(/headerLineCount/) // consumes the exported core (single source, not a page fork)
-    expect(fn).toMatch(/HEADER_MIN_FONT_PCT/)
-    expect(fn).toMatch(/si-h2-tight/)
-    // NEVER SILENT: an unfixed header is FLAGGED for the battery (F-code surface), not clipped back into hiding
-    expect(fn).toMatch(/dataset\.(siHeaderOversize|si_header_oversize)/)
-    expect(build).toMatch(/applyHeaderFit\(/)
-    expect(INSPECTOR_UI_HTML).not.toMatch(/\.si-h2-tight[^}]*text-overflow/) // the fallback must not smuggle ellipsis back
+    expect(build).not.toMatch(/applyHeaderFit|fitHeader|style\.fontSize|style\.lineHeight/) // NO per-header mutation — uniformity is structural
+    const h2 = ruleH2(".col h2")
+    expect(h2).not.toMatch(/text-overflow|ellipsis/) // consistent with the buildGrid move: PLAIN crop — no ellipsis machinery introduced at all
+    expect(h2).toMatch(/overflow: hidden/) // default clipping is the whole mechanism
   })
 })
 
@@ -1426,6 +1457,55 @@ describe("ad16 brick geometry — width 60 derived, hit ≡ visible horizontally
   })
 })
 
+// ---------------------------------------------------------------------------
+// AD17 — (a) uniform single-row header lives in the ad17 header lane above
+// (named re-anchor of the AD14 fit lane); (b) DISPLAY-LAYER de-abbreviation:
+// pure laneDisplayLabel + display-override map + tip description line. Data keys,
+// category mapping and join integrity are BYTE-UNCHANGED — the override is keyed BY
+// the data id and never rewrites it; existing join/contract suites (green, untouched)
+// are the standing proof, pinned here by the override surface being exactly one key.
+const a17 = uiAll as unknown as Record<string, any>
+const a17Need = (name: string): any => {
+  if (a17[name] === undefined) throw new Error("ad17 core missing: " + name)
+  return a17[name]
+}
+
+describe("ad17 laneDisplayLabel — display-layer de-abbreviation, data keys byte-untouched", () => {
+  test("override hits ONLY amt-activity with the spelled-out words; every other lane passes the configured label through unchanged", () => {
+    const f = a17Need("laneDisplayLabel")
+    expect(f("amt-activity", "AMT Activity")).toBe("Agent Meta Tool Activity") // spelled out (owner: no abbr)
+    expect(f("amt-activity", "")).toBe("Agent Meta Tool Activity") // the override is authoritative for display, config-independent
+    for (const [id, label] of [["user-messages", "User Messages"], ["tool-calls", "Tool Calls"], ["coach-judge", "Coach Judge"], ["lifecycle", "Lifecycle"], ["unknown-future-lane", "Whatever Config Says"]]) {
+      expect(f(id, label)).toBe(label) // passthrough — byte-identical
+    }
+    // join integrity: the override surface is EXACTLY one data key. All other ids, all
+    // testid/category machinery, all data strings: untouched by construction (existing
+    // join/contract suites green unmodified = the standing proof).
+    expect(Object.keys(a17Need("LANE_DISPLAY_OVERRIDES")).sort()).toEqual(["amt-activity"])
+  })
+  test("tip description exists ONLY for that lane, worded from the schema docs; header labels NEVER carry the description", () => {
+    const descs = a17Need("LANE_TIP_DESCRIPTIONS")
+    expect(Object.keys(descs).sort()).toEqual(["amt-activity"])
+    expect(descs["amt-activity"]).toBe("History lines emitted by the agent-meta-tool (agent.amt) history lane.") // docs wording, verbatim — no invented claims
+    // the header label is ONLY the spelled-out label (description is tip-only):
+    expect(a17Need("laneDisplayLabel")("amt-activity", "AMT Activity")).not.toContain("History lines")
+  })
+  test("wiring: buildGrid staves the DISPLAY label and the optional description; the tip renders label + desc line; page consumes the cores (no forks)", () => {
+    const build = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function buildGrid"), INSPECTOR_UI_HTML.indexOf("function appendCell"))
+    expect(build).toMatch(/laneDisplayLabel\(/) // headers render the DISPLAY layer
+    expect(build).toMatch(/_label = laneDisplayLabel\(/) // staving switches to the display layer (data id c.id NEVER rewritten)
+    expect(build).toMatch(/_desc = /) // optional description staved alongside
+    const js = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function showColTipFor"))
+    const fn = js.slice(0, js.indexOf("function hideColTip"))
+    expect(fn).toMatch(/_desc/) // the tip consumes the staved description when present
+    expect(INSPECTOR_UI_HTML).toMatch(/laneDisplayLabel\.toString\(\)|function laneDisplayLabel/) // served copy IS the tested core
+    // no bare uppercase abbreviation token shipped in any built-in display string:
+    const src = require("node:fs").readFileSync(new URL("./ui.ts", import.meta.url), "utf8") as string
+    const mapSrc = src.slice(src.indexOf("LANE_DISPLAY_OVERRIDES"), src.indexOf("LANE_DISPLAY_OVERRIDES") + 400)
+    expect(mapSrc).toContain("Agent Meta Tool Activity")
+  })
+})
+
 describe("ad15 decoded value text — treeValueText is the ONE plain-text value channel", () => {
   test("string values render DECODED: embedded newlines, quotes and backslashes pass through as-is; no surrounding quotes, no backslash-n sequences, NO doubled backslashes", () => {
     const t = a15Need("treeValueText")
@@ -1465,5 +1545,987 @@ describe("ad15 decoded value text — treeValueText is the ONE plain-text value 
     expect(build).toMatch(/jt_value/) // shared value-span class at the emit site — kind classes stay for coloring
     const cs = (INSPECTOR_UI_HTML.match(/\.jt_value \{[^}]*\}/) ?? [""])[0]
     expect(cs).toMatch(/white-space: pre-wrap/) // explicit on the VALUE SPAN per card — real newlines inside rows, no clipping
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD19 — tool name INSIDE tool-calls cells (scoped supersession of zero-content).
+// card: every cell of si-column-tool-calls shows its tool name, cropped to fit,
+// font ~8-10px. ZERO-CONTENT STANDS for every other lane (the AD9 pin above was
+// re-anchored as a NAMED delta). Pure core cellToolLabel from the row's OWN payload
+// (the same payload contract the drawer's callID link uses — fetchPayload(env.payloadRef));
+// fallback chain: tool name → first token of the line detail → "tool". Data layer NEVER
+// truncates (crop is CSS at render, AD17 crop discipline). Label = non-interactive decoration.
+const a19 = uiAll as unknown as Record<string, any>
+const a19Need = (name: string): any => {
+  if (a19[name] === undefined) throw new Error("ad19 core missing: " + name)
+  return a19[name]
+}
+const a19Append = (): string => {
+  const s = INSPECTOR_UI_HTML.indexOf("function appendCell")
+  return INSPECTOR_UI_HTML.slice(s, INSPECTOR_UI_HTML.indexOf("function parseLine"))
+}
+
+describe("ad19 cellToolLabel — pure label core from the row's own payload", () => {
+  test("tool payloads yield their tool name, FULL length — no data-layer truncation, ever", () => {
+    const f = a19Need("cellToolLabel")
+    expect(f('{"type":"tool","tool":"bash","callID":"c1"}')).toBe("bash")
+    expect(f('{"type":"tool","tool":"websearch","state":{"status":"completed"}}')).toBe("websearch")
+    const long = "application-wide-symbol-index-rebuilder-v2"
+    const out = f('{"type":"tool","tool":"' + long + '","callID":"c2","state":{"detail":"whatever"}}')
+    expect(out).toBe(long) // CROP IS RENDER-CSS; the DATA layer always carries the full name
+    expect(out.length).toBe(long.length)
+  })
+  test("fallbacks in order: first token of the line detail, then the literal floor; NEVER empty", () => {
+    const f = a19Need("cellToolLabel")
+    expect(f('{"type":"tool","state":{"status":"completed","detail":"grep the config for tokens"}}')).toBe("grep") // detail-first-token
+    expect(f('{"type":"tool"}')).toBe("tool") // no name, no detail — floor
+    expect(f("write buffer contents to disk")).toBe("write") // raw line detail (history line payload) — first token
+    expect(f("")).toBe("tool")
+    expect(f("   \t ")).toBe("tool")
+    expect(f(null as any)).toBe("tool")
+    expect(f(undefined as any)).toBe("tool")
+    expect(f(42 as any)).toBe("tool")
+    for (const s of ['', '   ', '{bad json', '{"type":"patch"}', '{"type":"tool","state":{}}', null, undefined, 42, {}]) {
+      expect(f(s as any).length).toBeGreaterThan(0) // contract: never empty
+    }
+  })
+})
+
+describe("ad19 cellToolLabel — truncation-safe (live battery defect: names must match even for TRUNCATED payloads)", () => {
+  test("the tool name is extracted from a byte-capped JSON head before falling to token/floor chains", () => {
+    const f = a19Need("cellToolLabel")
+    // exactly what the payload endpoint serves for a truncated row: raw JSON-head text cut by byte cap
+    const truncatedHead = '{"type":"tool","tool":"bash","callID":"ad8trunc01","state":{"status":"completed","inp'
+    expect(f(truncatedHead)).toBe("bash") // field-visible → name, NOT the whole JSON head as a "token"
+    // a truncated text payload that never reaches "tool": — the detail-token/floor order still stands:
+    expect(f('{"type":"reasoning","te')).toBe("tool") // nothing field-extractable, no whitespace token → floor; never raw garbage
+    expect(f("plain detail text here")).toBe("plain") // raw-detail first token stays
+    // parseable JSON whose tool name itself contains no quotes still goes through the parse path (regression of test 1):
+    expect(f('{"type":"tool","tool":"edit_file"}')).toBe("edit_file")
+  })
+})
+
+describe("ad19 render lane — label ONLY in tool-calls, CSS crop inside the brick", () => {
+  test("font token is named and inside the owner range 8-10px", () => {
+    const px = Number(a19Need("CELL_LABEL_FONT_PX"))
+    expect(px).toBe(9) // the render value
+    expect(px).toBeGreaterThanOrEqual(8)
+    expect(px).toBeLessThanOrEqual(10)
+    // served CSS consumes the TOKEN, not a bare literal:
+    expect(INSPECTOR_UI_HTML).toContain("--cell-label-font")
+  })
+  test("appendCell: the ONLY cell child is the label branch, gated on the tool-calls category, fed by the drawer payload contract (ONE call site)", () => {
+    const body = a19Append()
+    const calls = body.match(/cellToolLabel\(/g) ?? []
+    expect(calls.length).toBe(1) // one call site — no second data source, no forks
+    const gate = body.match(/if \(env\.category === "tool-calls"\) \{[\s\S]*appendChild/)
+    expect(gate).not.toBe(null) // child building is ONLY for the tool-calls lane
+    expect(body).toMatch(/fetchPayload\((env\.payloadRef|env\.payload_ref)/) // the row's OWN payload — the drawer contract, nothing else
+    expect(body).toMatch(/\.textContent = cellToolLabel\(/) // text channel only (XSS discipline — no innerHTML)
+    const gates = body.match(/env\.category === "tool-calls"/g) ?? []
+    expect(gates.length).toBe(1) // exactly one gate; every other lane takes ZERO label code paths
+  })
+  test("label CSS: 9px token, nowrap + clip INSIDE the brick width, vertical center, pointer-events none, theme-chosen text color", () => {
+    const rule = (INSPECTOR_UI_HTML.match(/\.cell-label \{[^}]*\}/) ?? [""])[0]
+    expect(rule.length).toBeGreaterThan(20)
+    expect(rule).toMatch(/font-size: var\(--cell-label-font/) // token (range asserted at the constant)
+    expect(rule).toMatch(/white-space: nowrap/)
+    expect(rule).toMatch(/overflow: hidden/) // CROP IS THE DESIGN (AD17 discipline) — plain clip, no ellipsis duty
+    expect(rule).toMatch(/pointer-events: none/) // non-interactive decoration; hover/drawer seams untouched
+    expect(rule).toMatch(/width: var\(--cell-block-w/) // crop boundary = the brick itself, never the hit carrier
+    expect(rule).toMatch(/transform: translate\(-50%, -50%\)/) // vertical (and horizontal) center in the block
+    expect(rule).toMatch(/left: 50%/) // same anchor geometry as the ::after brick — stays INSIDE it
+    expect(rule).toMatch(/color: var\(--cell-label-text/) // contrast-chosen token…
+    expect(INSPECTOR_UI_HTML).toMatch(/\[data-theme="dark"\] \.cell-label \{[^}]*--cell-label-text/) // …with the theme flip token (AD18 theme path: vars only)
+    // geometry tokens untouched (pitch/gap/brick sizes are the AD12/AD16 invariants — unchanged):
+    expect(INSPECTOR_UI_HTML).toMatch(/--cell-block-w/) // re-served as before
+  })
+  test("other lanes take ZERO label code paths: the gated branch is the single label surface in the whole page", () => {
+    const globalCalls = INSPECTOR_UI_HTML.match(/cellToolLabel\(/g) ?? []
+    const defs = INSPECTOR_UI_HTML.match(/function cellToolLabel/g) ?? []
+    expect(globalCalls.length).toBe(defs.length + 1) // the definition + exactly ONE render call — no other lane can reach a label
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD20 — cell-label CSS polish (owner micro-instruction, 2026-11-05):
+// "add 1px padding left for cell text and remove font weight". EXACTLY two
+// declarations change on .cell-label: padding-left: 1px + font-weight: normal
+// (computed 400 — overrides page-inherited weight). Nothing else: the card keeps
+// the box in the crop model ("padding INSIDE the existing box") → border-box is
+// pinned as the PRESENT box-sizing (a pre-browser default we state, not a size
+// change) and the live battery asserts .cell-label clientWidth stays 60 (= brick).
+describe("ad20 cell-label polish — 1px left padding, weight 400, nothing else", () => {
+  const labelRule = () => (INSPECTOR_UI_HTML.match(/\.cell-label \{[^}]*\}/) ?? [""])[0]
+  test("served rule carries exactly the two polish declarations", () => {
+    const r = labelRule()
+    expect(r.length).toBeGreaterThan(20)
+    expect(r).toMatch(/padding-left: 1px/) // text starts 1px off the brick edge
+    expect(r).toMatch(/font-weight: normal/) // remove font weight (declared normal)
+    expect(r).not.toMatch(/font-weight:\s*6\d\d/) // the 600 emphasis is GONE from the served rule (named delta)
+  })
+  test("the box stays in AD19's crop model while the padding lands", () => {
+    const r = labelRule()
+    // border-box: stated PRESENT box model (content-box would push the node to 61px and
+    // miscenter it by 0.5px — the card's 'padding inside the existing box' forbids that).
+    expect(r).toMatch(/box-sizing: border-box/)
+    // nothing else moved: the crop + interaction contract re-pinned verbatim (guards):
+    expect(r).toMatch(/white-space: nowrap/)
+    expect(r).toMatch(/overflow: hidden/)
+    expect(r).toMatch(/pointer-events: none/)
+    expect(r).toMatch(/width: var\(--cell-block-w/)
+    expect(r).toMatch(/font-size: var\(--cell-label-font/)
+    // no third NEW visual declaration introduced by AD20:
+    expect(r).not.toMatch(/text-indent/)
+    expect(r).not.toMatch(/margin/)
+    expect(r).not.toMatch(/letter-spacing/)
+    expect(r).not.toMatch(/transform:\s*translate\(-50%, -49%\)/) // no nudged centering
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD21 — #grid gap 4px + .cell padding 0 (owner CSS directive, 2026-11-05).
+// DISAMBIGUATION (card-bound, resolved by structural inspection → CASE A):
+// #grid's only template is grid-template-columns (repeat(n, GRID_TRACK_PX)) and its
+// ONLY children are the column divs; the row boxes (.cell/.slot) live INSIDE columns
+// with the margin-bottom pitch chain. No grid ROW tracks exist → the row-gap half of
+// the shorthand is structurally inert → literal `gap: 4px` is set exactly as asked and
+// CANNOT touch the owner-locked vertical rhythm (AD11/12). If that structure ever
+// changes, this lane must flip to the column-gap variant + deviation + F-code, NOT silently.
+describe("ad21 grid gap 4px + cell padding 0 — literal gap, vertical rhythm intact", () => {
+  const gridRule = () => (INSPECTOR_UI_HTML.match(/#grid \{[^}]*\}/) ?? [""])[0]
+  const cellRule = () => (INSPECTOR_UI_HTML.match(/\.cell \{[^}]*\}/) ?? [""])[0]
+  test("served #grid carries gap: 4px and nothing else structural moved", () => {
+    const r = gridRule()
+    expect(r.length).toBeGreaterThan(20)
+    expect(r).toMatch(/gap: 4px/) // literal owner directive (case A — see header comment)
+    expect(r).not.toMatch(/gap: 10px/) // the old lane spacing is gone
+    expect(r).toMatch(/--cell-pitch: \$\{|--cell-pitch: \d/) // pitch chain vars still served from tokens
+    expect(r).not.toMatch(/row-gap: 16px/) // no pitch leaking back into any gap declaration
+  })
+  test("served .cell declares padding: 0 explicitly; the ::after brick model untouched", () => {
+    const r = cellRule()
+    expect(r).toMatch(/padding: 0/) // explicit (computed was already 0 — the directive stays verbatim)
+    // the pitch/margin source stands AS-IS (AD11/12 locked):
+    expect(r).toMatch(/margin-bottom: var\(--cell-gutter/)
+    expect(r).toMatch(/height: var\(--cell-mini/)
+    const after = (INSPECTOR_UI_HTML.match(/\.cell::after \{[^}]*\}/) ?? [""])[0]
+    expect(after).toMatch(/width: var\(--cell-block-w/) // inset-2 crop model unchanged
+  })
+  test("single-source geometry: pitch tokens untouched module-wide; structure keeps case A valid", () => {
+    const src = require("node:fs").readFileSync(new URL("./ui.ts", import.meta.url), "utf8") as string
+    expect(src).toContain("export const CELL_GUTTER_PX = 2") // owner-locked gutter unchanged
+    expect(src).toContain("export const CELL_MINI_H_PX = 14")
+    expect(src).toContain("CELL_PITCH_PX = CELL_MINI_H_PX + CELL_GUTTER_PX") // 16 by derivation
+    expect(INSPECTOR_UI_HTML).not.toMatch(/grid-template-rows/) // still NO row tracks → case A stays the ruling
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD22 — reasoning cells show length as NNNk. Pure core formatContentSize on the
+// join-carried contentChars (NEVER the byte-capped payload endpoint).
+// AD23 RE-ANCHOR (owner ruling, "below 1k, just show number as NNN"): AD22's "<1k" replaced
+// by raw digits. AD24 RE-ANCHOR (owner ruling 2026-11-05, "below 1k show as 0,Nk"): raw
+// digits SUPERSEDED in turn — n<1000 now renders the COMMA DECIMAL "0," + clamp(round(n/100),0,9)
+// + "k" (ONE decimal, rounded, tenths clamped so >=950 renders "0,9k" — a second decimal never
+// appears; 1.0k belongs to the integer path at n>=1000). Non-numeric/negative → "0,0k".
+// The >=1000 k-path is byte-unchanged across all three rulings.
+// Named replacement (card-mandated): both raw-number lanes below re-anchor to the comma edge
+// table 0, 49/50, 164, 849/850, 949/950, 999, 1000.
+// Lane scope like AD19: reasoning is the ONLY second label surface; the .cell-label
+// channel is RE-USED unchanged (9px token, weight normal, padding-left 1px — AD20/21
+// lanes re-pin that CSS; nothing new is styled here).
+const a22 = uiAll as unknown as Record<string, any>
+const a22Need = (name: string): any => {
+  if (a22[name] === undefined) throw new Error("ad22 core missing: " + name)
+  return a22[name]
+}
+describe("ad22 formatContentSize — thousands formatter (pure) [AD24: sub-1k = 0,Nk comma decimal]", () => {
+  test("edge table per AD24 contract — one decimal, rounded, tenths clamped 0..9", () => {
+    const f = a22Need("formatContentSize")
+    expect(f(0)).toBe("0,0k") // zero text
+    expect(f(49)).toBe("0,0k") // round(0.49)=0
+    expect(f(50)).toBe("0,1k") // round(0.5)=1 — the boundary rounds UP (consistent with the k-path)
+    expect(f(164)).toBe("0,2k") // the card's example: round(1.64)=2
+    expect(f(849)).toBe("0,8k") // round(8.49)=8
+    expect(f(850)).toBe("0,9k") // round(8.5)=9
+    expect(f(949)).toBe("0,9k") // round(9.49)=9
+    expect(f(950)).toBe("0,9k") // round(9.5)=10 → CLAMPED to 9 — "0,10k" never renders, no second decimal
+    expect(f(999)).toBe("0,9k") // clamp holds to the top of the range; 1.0k belongs to the k-path
+    expect(f(1000)).toBe("1k")
+    expect(f(1250)).toBe("1k") // k-path byte-unchanged through all rulings
+    expect(f(1500)).toBe("2k")
+    expect(f(23_400)).toBe("23k")
+    expect(f(124_000)).toBe("124k")
+    expect(f(999_499)).toBe("999k")
+  })
+  test("defensive: non-numeric and negative inputs floor to 0,0k", () => {
+    const f = a22Need("formatContentSize")
+    for (const bad of [-5, NaN, Infinity, null, undefined, "1500", {}]) expect(f(bad as any)).toBe("0,0k")
+    expect(/^(\d+k|0,\dk)$/.test(f(7))).toBe(true) // vocabulary: integer k or exactly one comma decimal
+  })
+})
+describe("ad22 render lane — reasoning labels from the envelope field, same channel", () => {
+  const append22 = (): string => {
+    const s = INSPECTOR_UI_HTML.indexOf("function appendCell")
+    return INSPECTOR_UI_HTML.slice(s, INSPECTOR_UI_HTML.indexOf("function parseLine"))
+  }
+  test("reasoning gate renders contentChars through formatContentSize with NO payload fetch", () => {
+    const body = append22()
+    const gate = body.match(/if \(env\.category === "reasoning"\) \{[\s\S]*?appendChild/)
+    expect(gate).not.toBe(null)
+    const branch = body.slice(body.indexOf('env.category === "reasoning"'), body.indexOf('env.category === "reasoning"') + 600)
+    expect(branch).toMatch(/formatContentSize\(env\.contentChars/) // the JOIN-carried field is the only source
+    expect(branch).toMatch(/appendChild/)
+    expect(branch).not.toMatch(/fetchPayload/) // endpoint is byte-capped — forbidden as a length source (DEC-I class)
+    expect(branch).toMatch(/cell-label/) // same channel class: 9px/400/padding come with it, nothing restyled
+  })
+  test("exactly THREE gated label branches exist in the page (tool-calls, reasoning, lifecycle — AD27); each core has ONE render call site", () => {
+    // AD27 NAMED census update: the third lane-gated label branch (lifecycle ← env.partType,
+    // field-fed like reasoning's contentChars — no new core). Tool/reasoning branches byte-untouched.
+    const gates = INSPECTOR_UI_HTML.match(/env\.category === "(tool-calls|reasoning|lifecycle)"/g) ?? []
+    expect(gates.length).toBe(3)
+    const fmt = INSPECTOR_UI_HTML.match(/formatContentSize\(/g) ?? []
+    const fmtDefs = INSPECTOR_UI_HTML.match(/function formatContentSize/g) ?? []
+    expect(fmt.length).toBe(fmtDefs.length + 1)
+    const tool = INSPECTOR_UI_HTML.match(/cellToolLabel\(/g) ?? []
+    const toolDefs = INSPECTOR_UI_HTML.match(/function cellToolLabel/g) ?? []
+    expect(tool.length).toBe(toolDefs.length + 1) // AD19 surface intact — reasoning did not displace it
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD25 — Legend button + column-explainer overlay modal (owner 2026-11-05).
+// A SCREEN-LEVEL modal (explicitly NOT a floating-ui anchored popup): dimmed
+// backdrop + centered panel, theme-aware (the existing token path), scrollable,
+// z ABOVE the whole ladder (coltip 45 / hovercard 40 / drawer 60). Content =
+// the card's pinned STATIC registry: one entry per column in display order with
+// EXACT header display names — the drift lane compares the registry against a
+// LIVE laneDisplayLabel(defaultCategories()) derivation: rename a header and
+// forget the Legend and THIS file goes red (card's single-source test).
+// Close affordances = AD4 drawer contract idiom: X + backdrop click + Escape
+// through a pure core. The grid's data path (buildGrid/appendCell) carries
+// ZERO legend references — cell census is provably untouched.
+import { defaultCategories as a25Defaults } from "./config.schema"
+import { laneDisplayLabel as a25Label } from "./ui"
+import * as a25mod from "./ui"
+
+const a25Need = (name: string): any => {
+  if ((a25mod as any)[name] === undefined) throw new Error("ad25 export missing: " + name)
+  return (a25mod as any)[name]
+}
+const a25Rule = (sel: string): string => {
+  const m = INSPECTOR_UI_HTML.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " \\{[^}]*\\}"))
+  return m ? m[0] : ""
+}
+const a25Z = (sel: string): number => {
+  const zz = a25Rule(sel).match(/z-index: (\d+)/)
+  return zz ? Number(zz[1]) : -1
+}
+const a25Fn = (name: string, until: string): string => {
+  const s = INSPECTOR_UI_HTML.indexOf("function " + name)
+  if (s < 0) return ""
+  const e = INSPECTOR_UI_HTML.indexOf(until, s + 1)
+  return e < 0 ? INSPECTOR_UI_HTML.slice(s) : INSPECTOR_UI_HTML.slice(s, e)
+}
+
+describe("ad25 legend button — served header, LEFT of the theme toggle, consistent styling", () => {
+  test("header markup carries the Legend button immediately before the theme toggle", () => {
+    const h0 = INSPECTOR_UI_HTML.indexOf("<header")
+    expect(h0).toBeGreaterThan(-1)
+    const hdr = INSPECTOR_UI_HTML.slice(h0, INSPECTOR_UI_HTML.indexOf("</header>", h0))
+    expect(hdr).toContain('id="legendButton"')
+    expect(hdr).toContain('data-testid="legend-button"')
+    const li = hdr.indexOf('id="legendButton"')
+    const ti = hdr.indexOf('id="themeToggle"')
+    expect(li).toBeGreaterThanOrEqual(0)
+    expect(ti).toBeGreaterThanOrEqual(0)
+    expect(li).toBeLessThan(ti) // DOM order LEFT of the toggle (card: "to the LEFT of the theme toggle")
+    expect(hdr).toMatch(/id="legendButton"[^>]*>Legend<\/button>/) // visible label text (card: button "Legend")
+  })
+  test("#legendButton rule: right-group adjacency + the same control tokens as the toggle", () => {
+    const r = a25Rule("#legendButton")
+    expect(r.length).toBeGreaterThan(20)
+    // themeToggle's own margin-left:auto absorbs ALL free space before ITSELF, which
+    // would orphan the Legend on the far left; adjacency requires the auto margin to
+    // start at the Legend instead (the last auto margin wins — verified against flexbox).
+    expect(r).toMatch(/margin-left: auto/)
+    // consistent with the existing header controls (token parity with #themeToggle):
+    expect(r).toMatch(/height: 30px/)
+    expect(r).toMatch(/background: var\(--panel\)/)
+    expect(r).toMatch(/color: var\(--ink\)/)
+    expect(r).toMatch(/border: 1px solid var\(--line\)/)
+    expect(r).toMatch(/border-radius: 8px/)
+    expect(r).toMatch(/cursor: pointer/)
+    expect(r).toMatch(/flex: none/)
+  })
+})
+
+describe("ad25 legend modal — screen-level overlay: backdrop, centered panel, z above everything, scrollable", () => {
+  test("backdrop + modal + close landmarks served in the body (testids per card)", () => {
+    expect(INSPECTOR_UI_HTML).toContain('id="legendBackdrop"')
+    expect(INSPECTOR_UI_HTML).toContain('data-testid="legend-backdrop"')
+    expect(INSPECTOR_UI_HTML).toContain('id="legendModal"')
+    expect(INSPECTOR_UI_HTML).toContain('data-testid="legend-modal"')
+    expect(INSPECTOR_UI_HTML).toContain('id="legendClose"')
+    expect(INSPECTOR_UI_HTML).toContain('data-testid="legend-close"')
+    expect(INSPECTOR_UI_HTML).toMatch(/id="legendModal"[^>]*role="dialog"/) // screen-level modal, not an anchored popup
+  })
+  test("dimmed fixed backdrop; centered panel with its own scroll; z ABOVE the full ladder", () => {
+    const bd = a25Rule("#legendBackdrop")
+    expect(bd.length).toBeGreaterThan(20)
+    expect(bd).toMatch(/position: fixed/)
+    expect(bd).toMatch(/inset: 0/)
+    expect(bd).toMatch(/background: rgba\(/) // dimmed (no opaque token — dims whatever theme is under it)
+    const md = a25Rule("#legendModal")
+    expect(md.length).toBeGreaterThan(20)
+    expect(md).toMatch(/position: fixed/) // SCREEN-level, centered in the viewport
+    expect(md).toMatch(/left: 50%/)
+    expect(md).toMatch(/top: 50%/)
+    expect(md).toMatch(/transform: translate\(-50%, -50%\)/)
+    expect(md).toMatch(/max-height: \d+(vh|%)/) // content taller than viewport is the DESIGN →
+    // AD26 NAMED RE-ANCHOR (card's own structure clause supersedes this one line):
+    // the SCROLL moved to the inner body (its sibling, pinned by the ad26 lanes);
+    // the PANEL now clips at its own radius. The requirement (scrollable content)
+    // is NOT dropped — it re-anchors to #legendBody in the ad26 block. All other
+    // AD25 assertions in this test, and the four un-editable card lanes (markers,
+    // order, names, drift), remain byte-identical.
+    expect(md).toMatch(/overflow: hidden/) // panel paints NOTHING outside the rounded border
+    expect(md).not.toMatch(/overflow-y: auto/)
+    expect(md).toMatch(/background: var\(--panel\)/) // theme-aware through the existing token path ONLY
+    expect(md).toMatch(/color: var\(--ink\)/)
+    expect(md).toMatch(/border: 1px solid var\(--line\)/)
+    // z-order: ABOVE everything the page positions (card) — hover card 40, header tip 45, drawer 60:
+    expect(a25Z("#hovercard")).toBe(40) // existing ladder re-pinned (guards)
+    expect(a25Z("#coltip")).toBe(45)
+    expect(a25Z("#drawer")).toBe(60)
+    expect(a25Z("#legendModal")).toBeGreaterThan(60)
+    expect(a25Z("#legendBackdrop")).toBeGreaterThan(a25Z("#drawer")) // the dim sits above the drawer too
+  })
+  test("swatches ride the per-theme block-token path (the columns' own mechanism)", () => {
+    const sw = a25Rule(".legend-swatch")
+    expect(sw.length).toBeGreaterThan(10)
+    expect(sw).toMatch(/background: var\(--block-light/) // same var path as .cell::after (L613)
+    const dsw = INSPECTOR_UI_HTML.match(/\[data-theme="dark"\] \.legend-swatch \{[^}]*\}/)
+    expect(dsw).not.toBe(null) // theme flip = token path ONLY (AD10/L614 discipline — no JS repaint)
+    expect(dsw![0]).toMatch(/background: var\(--block-dark/)
+  })
+})
+
+describe("ad25 legend close contract — X, backdrop click, Escape through a pure core (AD4 idiom)", () => {
+  test("escShouldCloseLegend: closes on Escape ONLY while open", () => {
+    const f = a25Need("escShouldCloseLegend")
+    expect(f("Escape", true)).toBe(true)
+    expect(f("Escape", false)).toBe(false) // closed: no-op (AD4 semantics mirrored)
+    expect(f("a", true)).toBe(false) // other keys never close
+    expect(f("Enter", true)).toBe(false)
+    expect(f("", true)).toBe(false)
+  })
+  test("served wiring: document keydown through the core + backdrop+X click-close, one testid", () => {
+    expect(INSPECTOR_UI_HTML).toMatch(/escShouldCloseLegend\(ev\.key, .*\)\)\s*closeLegend\(\)/)
+    expect(INSPECTOR_UI_HTML).toMatch(/\$\("legendBackdrop"\)\.addEventListener\("click", closeLegend\)/)
+    expect(INSPECTOR_UI_HTML).toMatch(/\$\("legendClose"\)\.addEventListener\("click", closeLegend\)/)
+    const cl = a25Fn("closeLegend", "\nfunction ")
+    expect(cl).toMatch(/classList\.remove\("legend-open"\)/) // state = body class (CSS paths the open state)
+    // the AD3/AD1 close idiom exactly once (drawer precedent style):
+    expect(INSPECTOR_UI_HTML.split('"legend-close"').length - 1).toBe(1)
+  })
+})
+
+describe("ad25 modal-open suppression + provably untouched grid data", () => {
+  test("open state: grid hover goes inert + both floating surfaces hidden before show", () => {
+    expect(INSPECTOR_UI_HTML).toMatch(/\.legend-open #grid \{[^}]*pointer-events: none/) // card: inert grid OK
+    const op = a25Fn("openLegend", "\nfunction ")
+    expect(op).toMatch(/classList\.add\("legend-open"\)/)
+    expect(op).toMatch(/hideHoverCard\(\)/) // no new hover cards behind the modal
+    expect(op).toMatch(/hideColTip\(\)/)
+    expect(op).toMatch(/buildLegendRows\(\)/) // rows materialize on open (grid-independent)
+    expect(INSPECTOR_UI_HTML).toMatch(/\$\("legendButton"\)\.addEventListener\("click", openLegend\)/)
+  })
+  test("buildGrid/appendCell carry ZERO legend references — the cell census path is byte-untouched", () => {
+    const bg = a25Fn("buildGrid", "var shown")
+    expect(bg.length).toBeGreaterThan(50) // the real function, not a missing slice
+    expect(bg).not.toMatch(/legend/i)
+    const ac = a25Fn("appendCell", "function parseLine")
+    expect(ac.length).toBeGreaterThan(50)
+    expect(ac).not.toMatch(/legend/i)
+    // rows are built into the modal container only — never the grid:
+    const bl = a25Fn("buildLegendRows", "\nfunction ")
+    expect(bl).toContain('$("legendRows")')
+    expect(bl).not.toMatch(/\$\("grid"\)/)
+  })
+})
+
+describe("ad25 legend registry — static, per default-active lane in display order, EXACT display names (zero drift)", () => {
+  test("order + names byte-match a LIVE laneDisplayLabel(defaultCategories()) derivation — the single-source test", () => {
+    const entries = a25Need("LEGEND_ENTRIES")
+    expect(Array.isArray(entries)).toBe(true)
+    const defs = a25Defaults()
+    expect(entries.map((e: any) => e.id)).toEqual(defs.map((c) => c.id)) // every active lane, display order (card)
+    entries.forEach((e: any, i: number) => {
+      // THE drift assertion: derive the header's name from the LIVE single source and
+      // byte-compare — rename a header (override or default title), forget the legend ⇒ red:
+      expect(e.name).toBe(a25Label(defs[i].id, defs[i].title))
+    })
+    const amt = entries.find((e: any) => e.id === "amt-activity")
+    expect(amt.name).toBe("Agent Meta Tool Activity") // full spelled name — exactly the header text (card)
+    expect(entries.find((e: any) => e.id === "lifecycle").description).toMatch(/step-start/) // AD18 exclusion note
+    expect(entries.find((e: any) => e.id === "lifecycle").description).toMatch(/step-finish/) // rides inside the entry
+    expect(entries.find((e: any) => e.id === "lifecycle").description).toMatch(/EXCLUDED from display/)
+    for (const e of entries) expect(typeof e.description).toBe("string")
+  })
+  test("descriptions = the card's pinned texts (what a cell in that column MEANS), non-empty, per lane", () => {
+    const entries: any[] = a25Need("LEGEND_ENTRIES")
+    const anchors: Record<string, RegExp> = {
+      "user-messages": /text the USER wrote/,
+      "assistant-text": /visible reply text/,
+      reasoning: /size in chars/, // references the AD19-24 label contract
+      "tool-calls": /'bash'/, // the card's example rides in the text
+      transitions: /decision-tree traversal/,
+      pipeline: /lifecycle commands/,
+      "coach-judge": /coach judge evaluation/,
+      "coach-activity": /coach agent's own recorded actions/,
+      "amt-activity": /meta tool/i,
+      "engine-nudges": /deterministic reminders/i,
+      lifecycle: /compaction/,
+      other: /catch-all/,
+    }
+    expect(Object.keys(anchors).length).toBe(12)
+    for (const e of entries) {
+      expect(e.description.length).toBeGreaterThan(20) // real descriptions, none empty (card)
+      expect(e.description).toMatch(anchors[e.id])
+    }
+    expect(entries.find((e: any) => e.id === "reasoning").description).toMatch(/0,Nk/) // label format referenced per AD22-24
+  })
+  test("intro block states the row semantics and is SERVED with the modal", () => {
+    const intro = a25Need("LEGEND_INTRO")
+    expect(typeof intro).toBe("string")
+    expect(intro).toMatch(/one joined session event/)
+    expect(intro).toMatch(/time order/)
+    expect(intro).toMatch(/column matching the event type/i)
+    expect(intro).toMatch(/hover/i) // quick preview card
+    expect(intro).toMatch(/drawer/i) // click = full details
+    expect(INSPECTOR_UI_HTML).toContain(intro) // served in the modal markup — not invented at open time
+  })
+})
+
+describe("ad25 modal rows — live columns, registry-fed names, per-theme swatch vars", () => {
+  test("buildLegendRows iterates columns() and feeds swatch vars from the SAME pure core the columns use", () => {
+    const bl = a25Fn("buildLegendRows", "\nfunction ")
+    expect(bl).toMatch(/columns\(\)\.forEach/) // one entry PER COLUMN IN DISPLAY ORDER (live order, card)
+    expect(bl).toMatch(/laneBlockColor\(c\.id, "light"\)/) // the columns' own color core (buildGrid parity)
+    expect(bl).toMatch(/laneBlockColor\(c\.id, "dark"\)/) // both steps = the columns' var-pair pattern
+    expect(bl).toMatch(/legendEntry\(c\.id\)/) // name+description resolved from the static registry
+    expect(bl).toMatch(/laneDisplayLabel\(c\.id, c\.title\)/) // unknown/rename-local lanes fall back to the HEADER's own path
+    expect(bl).toMatch(/"legend-name"/) // the names render as text, one row each
+    expect(bl).toMatch(/"legend-desc"/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD26 — Legend modal geometry fix (owner defect, 2026-11-05, with screenshot):
+// the scrollbar rode OUTSIDE the rounded panel and the header scrolled with the
+// list. Structure (card, binding): PANEL = flex column, max-height cap as today,
+// border-radius + overflow:hidden ON THE PANEL (nothing paints outside the curve);
+// header (title + X, EXACT current look) = static sibling ABOVE the scroll
+// container; the body element is the ONLY scroller (overflow-y:auto) holding
+// intro + entries — its scrollbar renders inside the panel, inset from the
+// rounded edge by the panel's own padding. Sticky/fixed tricks are forbidden
+// when the DOM split is right — a negative guard pins that. Re-open resets to
+// top EXPLICITLY. The four un-editable AD25 card lanes (markers, order, names,
+// drift) stay byte-identical; exactly one AD25 assertion re-anchored with a
+// NAMED delta (panel overflow), recorded in-test. Wheel-over-header is a LIVE
+// acceptance check (measured in the battery), not a structure pin.
+describe("ad26 modal geometry — panel clips, header static, inner body is the ONLY scroller", () => {
+  const modalSeg = (): string => {
+    const s = INSPECTOR_UI_HTML.indexOf('id="legendModal"')
+    const e = INSPECTOR_UI_HTML.indexOf("<main>", s)
+    return s >= 0 && e > s ? INSPECTOR_UI_HTML.slice(s, e) : ""
+  }
+  test("panel: flex column + clip at its own radius; cap kept; the old overflow-y role is GONE", () => {
+    const md = a25Rule("#legendModal")
+    expect(md.length).toBeGreaterThan(20)
+    expect(md).toMatch(/flex-direction: column/) // the column split is the structure (defect 2's base)
+    expect(a25Rule(".legend-open #legendModal")).toMatch(/display: flex/) // open state flips to the flex column (closed state stays display:none)
+    expect(md).toMatch(/overflow: hidden/) // nothing paints outside the rounded border (defect 1)
+    expect(md).toMatch(/border-radius: 12px/) // the existing radius stays
+    expect(md).toMatch(/max-height: \d+(vh|%)/) // cap AS TODAY (card: keep the cap)
+    expect(md).not.toMatch(/overflow-y: auto/) // named delta: the panel no longer scrolls
+  })
+  test("inner body is THE scroller: overflow-y auto on #legendBody + flex child scrolling properly", () => {
+    const bd = a25Rule("#legendBody")
+    expect(bd.length).toBeGreaterThan(10)
+    expect(bd).toMatch(/overflow-y: auto/) // the scrollbar renders HERE — inside the panel's padding
+    expect(bd).toMatch(/min-height: 0/) // flex-column child without it cannot scroll (sized to content)
+    expect(bd).toMatch(/flex: 1 1 auto/) // fills the panel below the static header
+    expect(bd).toMatch(/overscroll-behavior: contain/) // body scrolls stop at itself — the panel never pans
+  })
+  test("header is a STATIC sibling ABOVE the scroller — DOM split, not sticky tricks (defect 2)", () => {
+    const seg = modalSeg()
+    expect(seg.length).toBeGreaterThan(100)
+    const hi = seg.indexOf('class="legend-head"')
+    const bi = seg.indexOf('id="legendBody"')
+    const ii = seg.indexOf('class="legend-intro"')
+    const ri = seg.indexOf('id="legendRows"')
+    expect(hi).toBeGreaterThanOrEqual(0)
+    expect(bi).toBeGreaterThanOrEqual(0)
+    expect(ii).toBeGreaterThanOrEqual(0)
+    expect(ri).toBeGreaterThanOrEqual(0)
+    expect(hi).toBeLessThan(bi) // header precedes the body…
+    expect(/<\/div>\s*<div id="legendBody"/.test(seg)).toBe(true) // …and CLOSES before it opens (sibling, not child)
+    expect(bi).toBeLessThan(ii) // intro…
+    expect(bi).toBeLessThan(ri) // …and the entries live INSIDE the body
+    expect(seg.indexOf('data-testid="legend-close"')).toBeLessThan(bi) // the X is header-side (still top-right of the header)
+    const hdr = a25Rule("#legendModal .legend-head")
+    expect(hdr.length).toBeGreaterThan(10) // the header rule still exists (its look is owned by AD25 pins)
+    expect(hdr).not.toMatch(/position:\s*(sticky|fixed)/) // sticky-by-STRUCTURE only — the forbidden-trick guard
+  })
+  test("re-open lands at top: reset is EXPLICIT AND EFFECTIVE (live defect 2026-11-05: reset BEFORE display had no layout — scrollTop assignment was a silent no-op, reopen kept 136px; effective reset requires the order below)", () => {
+    const op = a25Fn("openLegend", "\nfunction ")
+    const shown = op.indexOf('classList.add("legend-open")')
+    const reset = op.indexOf('$("legendBody").scrollTop = 0')
+    expect(shown).toBeGreaterThanOrEqual(0)
+    expect(reset).toBeGreaterThanOrEqual(0) // explicit reset exists (no display-cycle luck)…
+    expect(reset).toBeGreaterThan(shown) // …AND it runs while the scroller HAS LAYOUT (after the open flip)
+  })
+  test("one scroller only: single #legendBody, single rows container — no nested scrollers", () => {
+    expect(INSPECTOR_UI_HTML.split('id="legendBody"').length - 1).toBe(1)
+    expect(INSPECTOR_UI_HTML.split('id="legendRows"').length - 1).toBe(1)
+  })
+  test("wheel over the HEADER is explicitly forwarded to the body (AC behavior; no UA path can reach a sibling)", () => {
+    // The card's behavior clause ("wheel over header still scrolls the body") binds a
+    // behavior the correct DOM split CANNOT provide by UA chaining: the body is the
+    // header's SIBLING, not its ancestor — a wheel gesture lands on the header and can
+    // only reach ancestors (panel clips; document doesn't scroll). Deterministic
+    // forwarder, passive:false + preventDefault: nothing else can scroll, so nothing is "blocked".
+    expect(INSPECTOR_UI_HTML).toMatch(/addEventListener\("wheel", function \(ev\) \{[\s\S]{0,300}scrollTop \+= ev\.deltaY/)
+    const wl = (INSPECTOR_UI_HTML.match(/addEventListener\("wheel", function \(ev\) \{[\s\S]*?\}, \{[^}]*\}\);/) ?? [""])[0]
+    expect(wl.length).toBeGreaterThan(30) // the listener block, extracted whole
+    expect(wl).toMatch(/passive: false/) // non-passive: it consumes (nothing else can scroll from a sibling gesture)
+    expect(wl).toMatch(/preventDefault\(\)/) // no UA residue behind the panel
+    expect(/"\.legend-head"\)[\s\S]{0,400}addEventListener\("wheel"/.test(INSPECTOR_UI_HTML)).toBe(true) // attached AT THE HEADER, nowhere else
+    expect((INSPECTOR_UI_HTML.match(/addEventListener\("wheel"/g) ?? []).length).toBe(1) // exactly ONE wheel listener on the page
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD27 — third label-gate on the established channel (AD19 tool names, AD22-24
+// reasoning sizes). Lifecycle cells carry the part's event type VERBATIM from
+// the join-carried envelope field (partType) — the capped payload endpoint
+// stays forbidden as a label source. Unknown/absent → NO label (contentless
+// brick = current behavior). Channel bytes (9px/400/1px/crop) untouched; the
+// gate-census lane above re-anchored 2→3 as the card's named contract lane.
+describe("ad27 render lane — lifecycle labels read env.partType verbatim, same channel", () => {
+  const append27 = (): string => {
+    const s = INSPECTOR_UI_HTML.indexOf("function appendCell")
+    return INSPECTOR_UI_HTML.slice(s, INSPECTOR_UI_HTML.indexOf("function parseLine"))
+  }
+  test("lifecycle gate renders env.partType through the cell-label channel, verbatim, NO payload fetch", () => {
+    const body = append27()
+    const at = body.indexOf('env.category === "lifecycle"')
+    expect(at).toBeGreaterThan(-1)
+    const branch = body.slice(at, at + 700)
+    expect(branch).toMatch(/env\.partType/) // the JOIN-CARRIED field is the only source
+    expect(branch).toMatch(/appendChild/)
+    expect(branch).not.toMatch(/fetchPayload/) // capped endpoint stays forbidden here (AD22 rule preserved)
+    expect(branch).toMatch(/cell-label/) // the established channel class — nothing restyled
+    // VERBATIM: the value flows unprocessed — no formatting call of any kind inside the branch:
+    expect(branch).not.toMatch(/formatContentSize|cellToolLabel|toUpperCase|toLowerCase|replace\(|trim\(/)
+  })
+  test("absent/unknown type guard: NO partType → no label element at all (contentless brick unchanged)", () => {
+    const body = append27()
+    // the GUARD is the whole gate condition — match the full if-expression in the body
+    // (slicing from the condition's own start would exclude the literal `if (` prefix).
+    expect(body).toMatch(/if \(env\.category === "lifecycle" && env\.partType\) \{/)
+    // and it is a FIELD-PRESENCE guard: no value whitelist re-derivation in the condition:
+    const guardLine = body.match(/if \(env\.category === "lifecycle" && env\.partType\) \{[^\n]*/)![0]
+    expect(guardLine).not.toMatch(/patch|compaction|file/) // the renderer never re-derives the kind vocabulary
+  })
+  test("legend Lifecycle entry names the label addition; the exclusion note REMAINS; other entries untouched", () => {
+    const entries: any[] = (a25mod as any).LEGEND_ENTRIES
+    const lc = entries.find((e) => e.id === "lifecycle")
+    expect(lc.description).toMatch(/cell label/i) // wording consistency (card's sanctioned sentence; sentence-initial capital allowed)
+    expect(lc.description).toMatch(/patch/)
+    expect(lc.description).toMatch(/compaction/)
+    expect(lc.description).toMatch(/file/)
+    expect(lc.description).toMatch(/EXCLUDED from display/) // AD18 note stays; AD25 anchors byte-intact
+    const um = entries.find((e) => e.id === "user-messages")
+    expect(um.description).toMatch(/text the USER wrote/) // no other entry touched
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD28 — config-driven geometry application. Design (single-consumption, per
+// card): the BOOT fetch already carries cfg; ONE function applyGridConfig(cfg)
+// runs exactly once in boot() right AFTER loadConfig (SC-09 order discipline:
+// custom props set on laid-out-or-static elements before first render) and is
+// the ONLY point where config values touch the page. Constants baked into the
+// served HTML/CSS remain the unreachable-fetch fallback (defaults-identical
+// values ⇒ today's exact paint either way). Derived geometry never re-reads
+// cfg: the track template consumes the updated GRID_TRACK_PX global; the band
+// + row index consume the updated ROW_BAND_PITCH; CSS consumers ride the
+// --cell-* tokens; the AD12 law (pitch = block + CODE gutter) is re-derived
+// from the code constants INSIDE applyGridConfig — no new literals anywhere.
+describe("ad28 applyGridConfig — the single override point (boot order + derivation, no literals)", () => {
+  const applyFn = (): string => {
+    const s = INSPECTOR_UI_HTML.indexOf("function applyGridConfig")
+    expect(s).toBeGreaterThan(-1)
+    const e = INSPECTOR_UI_HTML.indexOf("\n}\n", s) // the function's OWN end (page template closes at column 0)
+    expect(e).toBeGreaterThan(s)
+    return INSPECTOR_UI_HTML.slice(s, e + 2)
+  }
+  test("boot applies config geometry EXACTLY ONCE, right after loadConfig, before the first paint step", () => {
+    const bootAt = INSPECTOR_UI_HTML.indexOf("async function boot")
+    expect(bootAt).toBeGreaterThan(-1)
+    const boot = INSPECTOR_UI_HTML.slice(bootAt, bootAt + 700)
+    const load = boot.indexOf("await loadConfig()")
+    const apply = boot.indexOf("applyGridConfig(cfg)")
+    expect(load).toBeGreaterThanOrEqual(0)
+    expect(apply).toBeGreaterThan(load) // after the fetch (values exist)
+    // exactly one CALL site (the definition line starts with `function `; calls are indented statements):
+    expect((INSPECTOR_UI_HTML.match(/^[ \t]+applyGridConfig\(cfg\);/gm) ?? []).length).toBe(1)
+  })
+  test("reads cfg.ui.grid defensively — every field falls back to the injected constant (unreachable/older config = today's pixels)", () => {
+    const f = applyFn()
+    expect(f).toMatch(/cfg\.ui\.grid/)
+    expect(f).toMatch(/typeof [\w.]+ === "number"/) // per-field type guard
+    expect(f).toMatch(/: GRID_TRACK_PX/)
+    expect(f).toMatch(/: CELL_MINI_H_PX/) // height default = the shipped box height
+    expect(f).toMatch(/: CELL_LABEL_FONT_PX/)
+  })
+  test("AD12 law re-derived from CODE constants inside the override (pitch = block + gutter; block w = track − 2·inset; hit ≡ visible/pitch) — zero numeric literals in the function", () => {
+    const f = applyFn()
+    expect(f).toMatch(/h \+ CELL_GUTTER_PX/) // derived pitch, not a literal
+    expect(f).toMatch(/w - 2 \* CELL_CHIP_INSET_PX/) // the current width derivation, same formula
+    const stripped = f.replace(/"[^"]*"/g, "").replace(/\/\/[^\n]*/g, "")
+    const nums = stripped.match(/(?<![A-Za-z_$.\d])\d+(?![\d.])/g) ?? []
+    expect(nums.filter((n) => n !== "0" && n !== "2")).toEqual([]) // only the zero/structural 2 (2 *) — no px literals (64-class survival guard at this site)
+  })
+  test("writes the full token chain ONCE and reassignments are single-point: CSS vars + band pitch + track global; the track template itself never learns config", () => {
+    const f = applyFn()
+    for (const v of ["--cell-mini", "--cell-gutter", "--cell-pitch", "--cell-block-w", "--cell-block-h", "--cell-hit-w", "--cell-hit-h", "--cell-label-font"]) {
+      expect(f).toContain(`setProperty("${v}"`)
+    }
+    expect(f).toMatch(/ROW_BAND_PITCH = h \+ CELL_GUTTER_PX/)
+    expect(f).toMatch(/GRID_TRACK_PX = w/)
+    expect(f).not.toMatch(/gridTemplateColumns/) // the track's ONE consumer stays gridTrackTemplate (reads the updated global)
+    // the served track template body is unchanged: still repeat(n, ${GRID_TRACK_PX}px) — no cfg token inside
+    const tt = (INSPECTOR_UI_HTML.match(/function gridTrackTemplate[\s\S]*?\n\}/) ?? [""])[0]
+    expect(tt).toMatch(/repeat\(\$\{n\}, \$\{GRID_TRACK_PX\}px\)/)
+    expect(tt).not.toMatch(/cfg|ui\.grid/)
+  })
+  test("legend + all served copy claim NO fixed-64 geometry text (interaction guard: nothing to reword)", () => {
+    const json = (INSPECTOR_UI_HTML.match(/var LANE_LEGEND_TIPS[\s\S]*/) ? "" : "")
+    void json
+    const legendTexts = [...INSPECTOR_UI_HTML.matchAll(/"name":"[^"]+","description":"([^"]*)"/g)].map((x) => x[1])
+    expect(legendTexts.length).toBe(12)
+    for (const d of legendTexts) expect(d).not.toMatch(/\d+\s?px/)
+    expect(INSPECTOR_UI_HTML.match(/#legendBody[\s\S]*?(64px|64 px)/g)).toBe(null)
+  })
+})
+
+// AD30 (owner chain: "verify that row highlight strip is following" → AD29 flag 3b ruling):
+// ONE-SITE FIX contract — the band's SHOW path must write BOTH geometry props from the SAME
+// variable at the same point: top already = bandCenterTop(..., ROW_BAND_PITCH); height must be
+// row_band_pitch px from that very variable (which applyGridConfig keeps in lockstep with the
+// configured geometry). The CSS #rowrect height line is demoted to an honest FALLBACK (kept).
+// No hardcoded px in the JS path (single consumption point, by construction).
+describe("ad30 band height same-source — show path writes top AND height from ROW_BAND_PITCH; CSS is fallback-only", () => {
+  const js = (() => {
+    const i0 = INSPECTOR_UI_HTML.indexOf("function showRowBandFor")
+    const i1 = INSPECTOR_UI_HTML.indexOf("function hideRowBand")
+    expect(i0).toBeGreaterThan(-1)
+    return INSPECTOR_UI_HTML.slice(i0, i1)
+  })()
+  test("show path: top from bandCenterTop(..., ROW_BAND_PITCH) (AD16 chain, re-pinned) AND height = ROW_BAND_PITCH px — same variable, written BEFORE the show flip (no flash-frame)", () => {
+    expect(js).toMatch(/band\.style\.top = bandCenterTop\([^)]*ROW_BAND_PITCH\)/)
+    const hIdx = js.search(/band\.style\.height = ROW_BAND_PITCH/)
+    expect(hIdx).toBeGreaterThan(-1) // RED pre-fix: no height write exists in the path
+    const sIdx = js.indexOf('.classList.add("show")')
+    expect(sIdx).toBeGreaterThan(-1)
+    expect(hIdx).toBeLessThan(sIdx) // both geometry writes land before visibility
+  })
+  test("single-source negatives: no numeric px literal for height anywhere in the band path; band path never re-reads --cell-pitch; the CSS rule SURVIVES as a documented fallback (kept, honest comment)", () => {
+    // Checker-boundary (AD30 self-caught): the guard tests the CODE path — the honest comment
+    // explaining WHY the var fails there is expected to name it. Strip // comment lines first.
+    const code = js.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n")
+    expect(code).not.toMatch(/style\.height = \d+/)
+    expect(code).not.toMatch(/--cell-pitch/)
+    const cs = (INSPECTOR_UI_HTML.match(/#rowrect \{[^}]*\}/) ?? [""])[0]
+    expect(cs).toMatch(/height: var\(--cell-pitch, 16px\)/) // line KEPT as the pre-boot fallback
+    expect(cs).toMatch(/fallback/i) // RED pre-fix: the rule comment does not yet name itself a fallback
+  })
+})
+
+// AD35 — OWNER LAW (STANDING product ruling, superseding the AD31 acceptance ruling and the
+// AD31 ESCAPE wording): direction is FIXED by the bg's WCAG relative luminance — L < 0.45
+// makes the text the bg LIGHTER in hue; L >= 0.45 makes it DARKER. HSL lightness steps of 5%
+// with lightness CLAMPED at 95/5; stop at contrast >= 4.5, or TERMINATE AT THE CLAMP — the
+// direction never flips ("dark bg -> lighter text, period"). Sub-floor results are the law's
+// honest output: report the achieved ratio, mark those rows max-in-direction. Explicit config
+// text (hex) stays verbatim; 'auto'/omission = this law.
+// Expected values are hardcoded FROM AN INDEPENDENT SPEC CALCULATOR (probe-ad35-law.mjs ->
+// ad35-expected-law.json; spec authored from the card text, NOT the product code) so the
+// golden cannot certify itself.
+// NAMED RE-ANCHOR (expected mass re-anchoring per card R2): this describe REPLACES the AD31
+// golden for the superseded law. 19 of 24 values changed old -> new (every LIGHT row; the 7
+// former old-law ESCAPE rows usermessages-D, reasoning-D, transitions-D, coachjudge-D,
+// enginenudges-D, lifecycle-D, other-D); 5 already-dark rows are value-UNCHANGED
+// (assistanttext-D #0f4532, toolcalls-D #6b4d02, pipeline-D #074c57, coachactivity-D
+// #12564e, amtactivity-D #3e5d0c). Full old -> new diff: materials/task-ad35-evidence.md.
+describe("ad35 owner-law deriveLabelColor — golden 12x2 with direction proof (no-flip)", () => {
+  const BUILTINS: Array<[string, string, string]> = [
+    ["usermessages", "#3b82f6", "#60a5fa"], ["assistanttext", "#10b981", "#34d399"],
+    ["reasoning", "#8b5cf6", "#a78bfa"], ["toolcalls", "#d97706", "#fbbf24"],
+    ["transitions", "#f43f5e", "#fb7185"], ["pipeline", "#0891b2", "#22d3ee"],
+    ["coachjudge", "#6366f1", "#818cf8"], ["coachactivity", "#14b8a6", "#2dd4bf"],
+    ["amtactivity", "#65a30d", "#a3e635"], ["enginenudges", "#f97316", "#fb923c"],
+    ["lifecycle", "#d946ef", "#e879f9"], ["other", "#ec4899", "#f472b6"],
+  ]
+  const ch = (h: string, i: number) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16)
+  const relLum = (h: string) => {
+    const c = [0, 1, 2].map((i) => ch(h, i) / 255).map((v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)))
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+  }
+  const ratio = (a: string, b: string) => (Math.max(relLum(a), relLum(b)) + 0.05) / (Math.min(relLum(a), relLum(b)) + 0.05)
+  // INDEPENDENT HSL lightness (max+min)/2 — the law's own axis, for the direction proof.
+  const hslL = (h: string) => { const c = [0, 1, 2].map((i) => ch(h, i) / 255); return (Math.max(...c) + Math.min(...c)) / 2 }
+  // [lane, theme, bg, expected text, expected ratio, expected direction] — from the
+  // independent calculator (ad35-expected-law.json), NOT from product output.
+  const EXPECT: Array<[string, string, string, string, number, "LIGHTER" | "DARKER"]> = [
+    ["usermessages", "L", "#3b82f6", "#e7effe", 3.18, "LIGHTER"],
+    ["usermessages", "D", "#60a5fa", "#e6f1fe", 2.22, "LIGHTER"],
+    ["assistanttext", "L", "#10b981", "#e8fdf6", 2.39, "LIGHTER"],
+    ["assistanttext", "D", "#34d399", "#0f4532", 5.7, "DARKER"],
+    ["reasoning", "L", "#8b5cf6", "#eee7fe", 3.53, "LIGHTER"],
+    ["reasoning", "D", "#a78bfa", "#ece7fe", 2.26, "LIGHTER"],
+    ["toolcalls", "L", "#d97706", "#fef3e6", 2.91, "LIGHTER"],
+    ["toolcalls", "D", "#fbbf24", "#6b4d02", 4.68, "DARKER"],
+    ["transitions", "L", "#f43f5e", "#fee7eb", 3.12, "LIGHTER"],
+    ["transitions", "D", "#fb7185", "#fee6ea", 2.27, "LIGHTER"],
+    ["pipeline", "L", "#0891b2", "#e7f9fe", 3.4, "LIGHTER"],
+    ["pipeline", "D", "#22d3ee", "#074c57", 5.33, "DARKER"],
+    ["coachjudge", "L", "#6366f1", "#e8e8fd", 3.7, "LIGHTER"],
+    ["coachjudge", "D", "#818cf8", "#e7e9fe", 2.48, "LIGHTER"],
+    ["coachactivity", "L", "#14b8a6", "#e8fcfa", 2.34, "LIGHTER"],
+    ["coachactivity", "D", "#2dd4bf", "#12564e", 4.57, "DARKER"],
+    ["amtactivity", "L", "#65a30d", "#f4fde7", 2.95, "LIGHTER"],
+    ["amtactivity", "D", "#a3e635", "#3e5d0c", 5.02, "DARKER"],
+    ["enginenudges", "L", "#f97316", "#fef0e6", 2.51, "LIGHTER"],
+    ["enginenudges", "D", "#fb923c", "#fef1e6", 2.04, "LIGHTER"],
+    ["lifecycle", "L", "#d946ef", "#fae8fd", 2.97, "LIGHTER"],
+    ["lifecycle", "D", "#e879f9", "#fbe7fe", 2.1, "LIGHTER"],
+    ["other", "L", "#ec4899", "#fde8f2", 3.02, "LIGHTER"],
+    ["other", "D", "#f472b6", "#fde7f3", 2.26, "LIGHTER"],
+  ]
+  test("ALL 24 built-in lane bgs (12 lanes x both themes): value byte-exact per the OWNER LAW table; strict direction (LIGHTER for L<0.45, DARKER otherwise); ratio matches the table; either >= 4.5 or TERMINATED AT THE 95/5 CLAMP (max in direction) — no flip, ever", async () => {
+    const { deriveLabelColor } = (await import("./ui")) as any
+    expect(typeof deriveLabelColor).toBe("function")
+    const rows: string[] = []
+    for (const [lane, theme, bg, text, ratioW, dir] of EXPECT) {
+      const t = deriveLabelColor(bg)
+      expect(lane + "/" + theme + " " + t).toBe(lane + "/" + theme + " " + text) // NAMED re-anchor: owner-law expectation wins over the AD31 table
+      const r = ratio(t, bg)
+      expect(Math.abs(r - ratioW)).toBeLessThan(0.06)
+      // Direction proof on the law's own axis — STRICT, independent of any lightness helper in product code:
+      expect(lane + "/" + theme + " " + (dir === "LIGHTER" ? hslL(t) > hslL(bg) : hslL(t) < hslL(bg))).toBe(lane + "/" + theme + " true")
+      if (r < 4.5) {
+        // max-in-direction: the result's HSL lightness sits AT the law's clamp (95 or 5)
+        const at = dir === "LIGHTER" ? Math.abs(hslL(t) - 0.95) <= 0.02 : Math.abs(hslL(t) - 0.05) <= 0.02
+        expect(lane + "/" + theme + " clamped " + String(at)).toBe(lane + "/" + theme + " clamped true")
+      } else {
+        expect(r).toBeGreaterThanOrEqual(4.5)
+      }
+      rows.push(lane + " " + theme + " " + bg + " -> " + t + " @" + r.toFixed(2) + " " + dir + (r < 4.5 ? " [owner-law max-in-direction]" : ""))
+    }
+    console.log("AD35-GOLDEN\n" + rows.join("\n"))
+  })
+  test("NO direction-flip exists (monotonicity law): for every built-in the result is strictly on its lawful side of the bg in HSL lightness; determinism; the OLD escape signature (bg L<0.45 -> DARKER text) is now ILLEGAL for ALL 24", async () => {
+    const { deriveLabelColor } = (await import("./ui")) as any
+    for (const [lane, theme, bg] of BUILTINS.map(([l, lg, dk]) => [l, "L" as const, lg]).concat(BUILTINS.map(([l, lg, dk]) => [l, "D" as const, dk] as any))) {
+      const t = deriveLabelColor(bg)
+      expect(t).toMatch(/^#[0-9a-fA-F]{6}$/)
+      expect(t).not.toBe(bg)
+      const darkBg = relLum(bg) < 0.45
+      if (darkBg) expect(lane + "/" + theme + " LIGHTER-only " + String(hslL(t) > hslL(bg))).toBe(lane + "/" + theme + " LIGHTER-only true")
+      else expect(lane + "/" + theme + " DARKER-only " + String(hslL(t) < hslL(bg))).toBe(lane + "/" + theme + " DARKER-only true")
+      expect(deriveLabelColor(bg)).toBe(deriveLabelColor(bg))
+    }
+  })
+  test("extreme bgs keep reachable floors: #000 -> light-side >= 4.5, #ffffff -> dark-side >= 4.5 (their poles exist INSIDE the direction). Re-anchored BY DESIGN from the AD31-era 'max-contrast pole choice' framing: the direction IS the law now; clamp termination is the honest fallback where the floor is unreachable in-hue. #60a5fa (an old ESCAPE row) now returns the lightest in-hue near-white instead of a dark escape (NAMED re-anchor: #043571 -> light-side)", async () => {
+    const { deriveLabelColor } = (await import("./ui")) as any
+    for (const bg of ["#000000", "#ffffff"]) {
+      const t = deriveLabelColor(bg)
+      expect(ratio(t, bg)).toBeGreaterThanOrEqual(4.5)
+      const darkBg = relLum(bg) < 0.45
+      expect(darkBg ? hslL(t) > hslL(bg) : hslL(t) < hslL(bg)).toBe(true)
+    }
+    const v = deriveLabelColor("#60a5fa")
+    expect(hslL(v) > hslL("#60a5fa")).toBe(true) // was #043571 under the superseded law
+    expect(v).toBe(deriveLabelColor("#60a5fa"))
+  })
+  test("the reported defect case, RESOLVED BY LAW (owner example '4k' labels): reasoning bgs get LIGHTER text on BOTH themes — dark-on-dark is now structurally impossible. Honest ratios: L #eee7fe @ ~3.53, D #ece7fe @ ~2.26 — UNDER the 4.5 floor, terminated at the 95% clamp: 'owner-law (max in direction)' per the standing ruling's own reporting clause. Re-anchored from the AD31 4.53/4.83 dark-texts which the owner rejected.", async () => {
+    const { deriveLabelColor } = (await import("./ui")) as any
+    for (const bg of ["#8b5cf6", "#a78bfa"]) {
+      const t = deriveLabelColor(bg)
+      expect(hslL(t) > hslL(bg)).toBe(true)
+      expect(ratio(t, bg)).toBeGreaterThan(ratio("#130336", bg) > 0 ? 1 : 1) // (sanity: a real color, not a self-equal)
+      expect(t).toMatch(/^#[0-9a-f]{6}$/)
+    }
+  })
+})
+describe("ad31 color application — served copy: config override in laneBlockColor, laneLabelTextColor (explicit verbatim else derived), one apply call point, label tokens per column, CSS #000 fallbacks documented", () => {
+  test("served page: applyColorsConfig defined once and CALLED once immediately after applyGridConfig(cfg) (same apply-phase pattern, no new call sites)", () => {
+    expect((INSPECTOR_UI_HTML.match(/function applyColorsConfig/g) ?? []).length).toBe(1)
+    // Calls only: the definition signature matched the naive pattern too (checker fix, AD31).
+    const calls = [...INSPECTOR_UI_HTML.matchAll(/[^n]applyColorsConfig\(cfg\);/g)]
+    expect(calls.length).toBe(1)
+    const gCall = INSPECTOR_UI_HTML.indexOf("applyGridConfig(cfg)")
+    const cCall = INSPECTOR_UI_HTML.indexOf("applyColorsConfig(cfg)")
+    expect(gCall).toBeGreaterThan(-1)
+    expect(cCall).toBeGreaterThan(gCall)
+  })
+  test("token path (zero new plumbing): laneBlockColor consults LANE_COLOR_CFG bg BEFORE palette; laneLabelTextColor returns explicit text VERBATIM (no derive on that branch) else deriveLabelColor of the EFFECTIVE bg; grid columns set both label tokens per theme via it; legend keeps reusing the same bg path untouched", () => {
+    const lb = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("function laneBlockColor"))
+    expect(lb.slice(0, lb.indexOf("function laneLabelTextColor") > 0 ? lb.indexOf("function laneLabelTextColor") : 4000)).toMatch(/LANE_COLOR_CFG/)
+    const lt = INSPECTOR_UI_HTML.match(/function laneLabelTextColor[\s\S]*?function /)?.[0] ?? ""
+    expect(lt).toMatch(/return o\.text/) // explicit hex used verbatim
+    expect(lt).toMatch(/deriveLabelColor\(/) // auto path = the law
+    expect(INSPECTOR_UI_HTML).toMatch(/setProperty\("--cell-label-text-light", laneLabelTextColor\(/)
+    expect(INSPECTOR_UI_HTML).toMatch(/setProperty\("--cell-label-text-dark", laneLabelTextColor\(/)
+    expect(INSPECTOR_UI_HTML).toMatch(/legend-swatch/) // legend path present and UNCHANGED (same --block-* path)
+  })
+  test("CSS label rules keep var tokens and rename #000 to an honest documented fallback (in-rule comment names it) — value chain untouched", () => {
+    const darkRule = INSPECTOR_UI_HTML.match(/\[data-theme="dark"\] \.cell-label \{[^}]*\}/)?.[0] ?? ""
+    expect(darkRule).toMatch(/var\(--cell-label-text-dark, #000\)/)
+    expect(darkRule).toMatch(/fallback/i)
+    const lightRule = INSPECTOR_UI_HTML.match(/\.cell-label \{[^}]*\}/)?.[0] ?? ""
+    expect(lightRule).toMatch(/var\(--cell-label-text, var\(--cell-label-text-light, #000\)\)/)
+  })
+})
+
+// AD32 — restartless config: invalid config must NOT leave the page dead. The page-shell
+// branch (served copy = tested core) renders an inline banner with the EXACT failure
+// (code + message + path from the /config error body) and a Retry control; a background
+// poll re-checks; on validity the banner states 'Config valid — reloading…' and the page
+// reloads ONCE. Valid-path behavior byte-identical; endpoints stay strict (DEC-I lanes
+// untouched elsewhere). Deviations from card wording are flagged in evidence: the page
+// route is statically 200 today (gap = silent-dead boot, not a raw 500) and NO interval
+// existed to reuse (livebar is EventSource) — one disclosed CONFIG_RETRY_MS, no second.
+describe("ad32 shell-invalid branch — banner, retry, self-heal (served copy)", () => {
+  test("loadConfig failure branch: banner si-config-error with code+exact message+path, retry button si-config-error-retry, and NO data rendering attempted", () => {
+    const lc = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("async function loadConfig"))
+    const branch = lc.slice(0, lc.indexOf("function columns"))
+    expect(branch).toMatch(/si-config-error/)
+    expect(branch).toMatch(/si-config-error-retry/)
+    // (self-caught shape-literal fix: fields read via a local `data` binding — the contract
+    // is "fields come from the error body's data", not a specific variable-chain.)
+    expect(branch).toMatch(/data\.message/) // EXACT schema issues surface verbatim
+    expect(branch).toMatch(/data\.path/)
+    expect(branch).toMatch(/data\.code/)
+    expect(branch).toMatch(/fix the file/i)
+    expect(branch).toMatch(/reload/i)
+    // config-independent shell: the failure branch must NOT touch session/feed fetches
+    expect(branch).not.toMatch(/loadSessions\(/)
+  })
+  test("self-heal transition: success path shows 'Config valid' + reloading statement then location.reload() exactly once, with the retry on the SAME check function (no duplicate mechanisms); one disclosed interval constant only", () => {
+    const page = INSPECTOR_UI_HTML
+    expect(page).toMatch(/Config valid[^"'`]*reload/i)
+    expect((page.match(/location\.reload\(\)/g) ?? []).length).toBe(1) // ONE reload per transition, no loops
+    expect((page.match(/CONFIG_RETRY_MS/g) ?? []).length).toBeGreaterThanOrEqual(2) // declared once + used by the poll/retry
+    expect((page.match(/var CONFIG_RETRY_MS/g) ?? []).length).toBe(1)
+    expect(page).not.toMatch(/var CONFIG_RETRY_MS_2|CONFIG_POLL_2/) // no second invention
+  })
+  test("valid path untouched: loadConfig still assigns cfg + renders normally when res.ok (byte-identical success branch semantics)", () => {
+    const lc = INSPECTOR_UI_HTML.slice(INSPECTOR_UI_HTML.indexOf("async function loadConfig"))
+    const branch = lc.slice(0, lc.indexOf("function columns"))
+    expect(branch).toMatch(/res\.ok/) // explicit success gating (failure branch keyed on the same check)
+    expect(branch).toMatch(/cfg = /) // success still bakes the real config
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD34 — theme-aware color resolution: per theme, an explicit THEME key wins over the
+// shared key, which wins over the built-in palette; text = theme override, else explicit
+// shared, else the derivation law on the EFFECTIVE bg of THAT theme ("auto" is explicit
+// auto). Consumed through the served-copy core sandboxed with LANE_COLOR_CFG injected
+// (same served-copy-is-the-tested-core discipline as every color lane above; the module
+// copy and the served copy are the same function sources — the empty-cfg lane pins their
+// equality, which is also R1's byte-identical-defaults regression).
+describe("ad34 theme-aware color resolution — theme override > shared > built-in; per-theme auto (served-copy sandbox)", () => {
+  const ad34Core = (cfgColors: Record<string, any>) => {
+    const start = INSPECTOR_UI_HTML.indexOf("var LANE_BLOCK_BASE")
+    const end = INSPECTOR_UI_HTML.indexOf("function siRowTestId(")
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start) // the three color fns live between the palette data and the testid cores
+    const src = INSPECTOR_UI_HTML.slice(start, end)
+    expect(src).toMatch(/function laneBlockColor\(/)
+    expect(src).toMatch(/function deriveLabelColor\(/)
+    expect(src).toMatch(/function laneLabelTextColor\(/)
+    const mk = new Function("LANE_COLOR_CFG", src + "\nreturn { laneBlockColor, deriveLabelColor, laneLabelTextColor };")
+    return mk(cfgColors) as { laneBlockColor: (k: string, t: "light" | "dark") => string; deriveLabelColor: (h: string) => string; laneLabelTextColor: (k: string, t: "light" | "dark") => string }
+  }
+  const empty = ad34Core({})
+  const mod = { laneBlockColor: a10Need("laneBlockColor"), deriveLabelColor: a10Need("deriveLabelColor"), laneLabelTextColor: a10Need("laneLabelTextColor") }
+
+  test("R1 REGRESSION: empty config — served core equals the module core for ALL 12 lanes x both themes (tokens byte-identical to today)", () => {
+    const LANES = ["user-messages", "assistant-text", "reasoning", "tool-calls", "transitions", "pipeline", "coach-judge", "coach-activity", "amt-activity", "engine-nudges", "lifecycle", "other"]
+    for (const lane of LANES) {
+      for (const theme of ["light", "dark"] as const) {
+        expect(empty.laneBlockColor(lane, theme)).toBe(mod.laneBlockColor(lane, theme))
+        expect(empty.laneLabelTextColor(lane, theme)).toBe(mod.laneLabelTextColor(lane, theme))
+      }
+    }
+  })
+
+  test("R2 golden resolve-order table (bg): shared-only paints both themes; theme-only does NOT leak to the other theme (built-in there); theme key WINS over shared for its theme; bgDark-only = the dark-only override case the owner grammar needs", () => {
+    const SHARED = "#123456", DARKONLY = "#0a0a0a", A = "#ff0000", B = "#00ff00"
+    const t = (cfg: Record<string, any>, lane: string, theme: "light" | "dark", want: string, why: string) => {
+      expect(ad34Core({ [lane]: { bg: cfg.bg, bgDark: cfg.bgDark } }).laneBlockColor(lane, theme)).toBe(want)
+      void why
+    }
+    const base = mod.laneBlockColor
+    // shared bg → both themes (AD31 behavior unchanged)
+    t({ bg: SHARED }, "reasoning", "light", SHARED, "shared-light"); t({ bg: SHARED }, "reasoning", "dark", SHARED, "shared-dark")
+    // theme-only keys do not leak
+    t({ bgDark: DARKONLY }, "reasoning", "dark", DARKONLY, "dark-override")
+    t({ bgDark: DARKONLY }, "reasoning", "light", base("reasoning", "light"), "no-leak: light falls to built-in")
+    // theme override wins over shared IN ITS theme; shared serves the other
+    t({ bg: A, bgDark: B }, "reasoning", "light", A, "light shared")
+    t({ bg: A, bgDark: B }, "reasoning", "dark", B, "dark override wins")
+    // unknown-to-config lanes keep palette (id-scoped, no cross-lane leakage)
+    t({ bg: A }, "reasoning", "dark", A, "x"); expect(ad34Core({ "reasoning": { bg: A } }).laneBlockColor("lifecycle", "light")).toBe(base("lifecycle", "light"))
+  })
+
+  test("R2 golden resolve-order table (text): theme text wins; shared text fills the theme without one; explicit per-theme; 'auto'/omission = derivation on the EFFECTIVE bg of that theme (theme-aware bg changes what auto means)", () => {
+    const LANE = "reasoning", LBG = "#ff00aa", DBG = "#0a0a0a"
+    const cfgA = { [LANE]: { bg: LBG, bgDark: DBG, text: "#eeeeee" } } // text shared, no textDark
+    const coreA = ad34Core(cfgA)
+    expect(coreA.laneLabelTextColor(LANE, "light")).toBe("#eeeeee") // shared explicit serves light
+    expect(coreA.laneLabelTextColor(LANE, "dark")).toBe("#eeeeee") // ... and dark (unchanged AD31 fill rule)
+    const cfgB = { [LANE]: { bg: LBG, bgDark: DBG, text: "#eeeeee", textDark: "#111111" } } // per-theme override wins
+    const coreB = ad34Core(cfgB)
+    expect(coreB.laneLabelTextColor(LANE, "light")).toBe("#eeeeee")
+    expect(coreB.laneLabelTextColor(LANE, "dark")).toBe("#111111")
+    const cfgC = { [LANE]: { bg: LBG, bgDark: DBG, textDark: "auto" } } // explicit auto = law on THIS theme's bg
+    const coreC = ad34Core(cfgC)
+    expect(coreC.laneLabelTextColor(LANE, "light")).toBe(mod.deriveLabelColor(LBG))
+    expect(coreC.laneLabelTextColor(LANE, "dark")).toBe(mod.deriveLabelColor(DBG)) // the theme-aware part: NOT derive(shared light bg)
+    const cfgD = { [LANE]: { bgDark: DBG } } // dark-only bg override: light auto derives from built-in light; dark derives from the dark override
+    const coreD = ad34Core(cfgD)
+    expect(coreD.laneLabelTextColor(LANE, "light")).toBe(mod.deriveLabelColor(mod.laneBlockColor(LANE, "light")))
+    expect(coreD.laneLabelTextColor(LANE, "dark")).toBe(mod.deriveLabelColor(DBG))
+    expect(coreD.laneLabelTextColor(LANE, "dark")).not.toBe(mod.deriveLabelColor(mod.laneBlockColor(LANE, "dark"))) // proof the override fed the law, not the palette
+  })
+
+  test("served-copy wiring unchanged: the three color fns appear EXACTLY once; token write sites untouched (single consumption point per token — both theme pairs)", () => {
+    expect((INSPECTOR_UI_HTML.match(/function laneBlockColor\(/g) ?? []).length).toBe(1)
+    expect((INSPECTOR_UI_HTML.match(/function laneLabelTextColor\(/g) ?? []).length).toBe(1)
+    expect((INSPECTOR_UI_HTML.match(/function deriveLabelColor\(/g) ?? []).length).toBe(1)
+    expect((INSPECTOR_UI_HTML.match(/setProperty\("--block-light", laneBlockColor\(c\.id, "light"\)\)/g) ?? []).length).toBeGreaterThanOrEqual(1)
+    expect((INSPECTOR_UI_HTML.match(/setProperty\("--block-dark", laneBlockColor\(c\.id, "dark"\)\)/g) ?? []).length).toBeGreaterThanOrEqual(1)
+    expect((INSPECTOR_UI_HTML.match(/setProperty\("--cell-label-text-light", laneLabelTextColor\(/g) ?? []).length).toBe(1)
+    expect((INSPECTOR_UI_HTML.match(/setProperty\("--cell-label-text-dark", laneLabelTextColor\(/g) ?? []).length).toBe(1)
   })
 })

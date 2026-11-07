@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import path from "path"
-import { buildTimeline } from "./timeline"
+import { buildTimeline, EXCLUDED_EVENT_TYPES, partEnvelope } from "./timeline"
+import { buildCategoryRouter } from "./category-mapper"
 import type { TimelineEnvelope } from "./timeline"
 import { resolvePayload } from "./payload"
 import { defaultInspectorConfig } from "./config.schema"
@@ -84,7 +85,12 @@ function timelineFixture(options: { noJudgeFile?: boolean; noHistory?: boolean }
     timeCreated: ms(T_TOOL),
     data: { type: "tool", tool: "bash", callID: "call_t4_enrich", state: { status: "completed", input: { command: "echo hi" }, output: "hi" } },
   })
-  insertPart(dbPath, { id: "prt_step", messageId: "msg_l", sessionId: VIEW, timeCreated: ms(T_STEP), data: { type: "step-start", snapshot: "abc123" } })
+  // NAMED DELTA (AD18): the lifecycle POSITIVE path re-anchors to a non-excluded kind (patch —
+  // card: "so the lifecycle positive path STAYS tested"). prt_step keeps its id (golden order stable).
+  insertPart(dbPath, { id: "prt_step", messageId: "msg_l", sessionId: VIEW, timeCreated: ms(T_STEP), data: { type: "patch", snapshot: "abc123" } })
+  // AD18 exclusion contract: these JOIN-STEPS exist in the DB but must surface NOWHERE in any column:
+  insertPart(dbPath, { id: "prt_excl_a", messageId: "msg_l", sessionId: VIEW, timeCreated: ms(T_STEP) + 1, data: { type: "step-start", snapshot: "def456" } })
+  insertPart(dbPath, { id: "prt_excl_b", messageId: "msg_l", sessionId: VIEW, timeCreated: ms(T_STEP) + 2, data: { type: "step-finish", reason: "model-stop" } })
   insertPart(dbPath, { id: "prt_unk_part", messageId: "msg_l", sessionId: VIEW, timeCreated: ms(T_UNKNOWN_PART), data: { type: "quantum-flux", payload: [1, 2, 3] } })
   insertPart(dbPath, { id: "prt_child", messageId: "msg_c", sessionId: CHILD_DB, timeCreated: ms("2026-11-03T10:00:12.500Z"), data: { type: "text", text: "child output" } })
   insertPart(dbPath, { id: "prt_orphan", messageId: "msg_o", sessionId: ORPHAN, timeCreated: ms(T_SUB_ORPHAN), data: { type: "text", text: "orphan output" } })
@@ -171,6 +177,56 @@ function run(fixture: Fixture, filters: { from?: string; to?: string; categories
   return result.envelopes
 }
 
+// AD18 (owner 2026-11-05: "remove from lifecycle col step-start and step-finish - they are
+// not informative at all") — JOIN-step exclusion BEFORE category routing: zero rows under ANY
+// category config (config-deletion was rejected: the unmatched-fallback would relocate the
+// noise to Other — the opposite of the ask). DB rows stay (read-side only; counts honest).
+describe("ad18 join-step exclusion — step-start/step-finish surface in NO column, under ANY config", () => {
+  const stepIds = (es: TimelineEnvelope[]) =>
+    es.filter((e) => e.sourceRef.kind === "dbId" && ["prt_excl_a", "prt_excl_b"].includes((e.sourceRef as { dbId: string }).dbId))
+  test("default config: zero step rows anywhere (lifecycle empty of them, OTHER never receives them)", () => {
+    const fixture = timelineFixture()
+    try {
+      const es = run(fixture)
+      expect(stepIds(es).length).toBe(0)
+      expect(es.some((e) => (e.sourceRef as { dbId?: string }).dbId === "prt_step")).toBe(true) // patch part unaffected — sibling kinds byte-unchanged
+    } finally {
+      fixture.cleanup()
+    }
+  })
+  test("ANY category config cannot resurrect them: lifecycle-deleted config AND a custom column claiming step parts both yield zero rows", () => {
+    const fixture = timelineFixture()
+    try {
+      const noLifecycle: SessionInspectorConfig = { ...fixture.config, categories: fixture.config.categories.filter((c) => c.id !== "lifecycle") }
+      const claimSteps: SessionInspectorConfig = {
+        ...fixture.config,
+        categories: [
+          ...fixture.config.categories,
+          { id: "steps-claimed", title: "Claimed", order: 20, sources: { parts: ["step-start", "step-finish"] }, enabled: true },
+        ],
+      }
+      for (const cfg of [noLifecycle, claimSteps]) {
+        const r = buildTimeline({ dbPath: fixture.dbPath, sessionId: VIEW, sessionPath: fixture.folder, io: nodeScanIO(), config: cfg, filters: {} })
+        if (!r.ok) throw new Error("timeline failed: " + r.code)
+        expect(stepIds(r.envelopes).length).toBe(0) // not Other in config-1, not steps-claimed in config-2
+      }
+    } finally {
+      fixture.cleanup()
+    }
+  })
+  test("EXCLUDED_EVENT_TYPES is a named, owner-commented constant (the toggle if ever re-wanted)", () => {
+    expect(EXCLUDED_EVENT_TYPES).toEqual(["step-start", "step-finish"])
+    const src = require("node:fs").readFileSync(new URL("./timeline.ts", import.meta.url), "utf8") as string
+    // Checker anchor fix (during GREEN): the owner comment PRECEDES the export, so the slice
+    // window is taken from the declaration backwards incl. the comment header. Pin intent —
+    // "the directive is recorded AT the constant" — unchanged.
+    const idx = src.indexOf("export const EXCLUDED_EVENT_TYPES")
+    const decl = src.slice(Math.max(0, idx - 500), idx + 300)
+    expect(decl).toMatch(/not informative/i) // owner directive recorded at the constant, per card
+    expect(decl).toMatch(/2026-11-05/)
+  })
+})
+
 describe("timeline join — ordering, interleaving, ties (AC1)", () => {
   test("golden stream order: ts asc; within-ms ties resolve DB-by-rowid then history-by-byte-order; corrupt line skipped without aborting", () => {
     const fixture = timelineFixture()
@@ -205,9 +261,21 @@ describe("timeline join — ordering, interleaving, ties (AC1)", () => {
       ])
       // orphan session's DB parts must NOT fold (history keys alone carry no db parts):
       expect(envelopes.some((e) => e.sourceRef.kind === "dbId" && e.sourceRef.dbId === "prt_orphan")).toBe(false)
-      // envelope shape: EXACTLY five keys per row, in order
+      // AD18 (owner: "not informative at all"): the step parts are IN the DB (counts honest,
+      // source untouched) and surface in NO column — not lifecycle, not other (evaluated here).
+      for (const gone of ["prt_excl_a", "prt_excl_b"]) {
+        expect(envelopes.some((e) => e.sourceRef.kind === "dbId" && e.sourceRef.dbId === gone)).toBe(false)
+      }
+      // envelope shape: EXACTLY five keys per row, in order.
+      // NAMED CONTRACT UPDATE (AD22): reasoning rows carry a SIXTH key contentChars, appended
+      // LAST; every other category keeps the strict five (the ad22 join lane pins both sides).
+      // NAMED CONTRACT UPDATE (AD27): lifecycle rows may carry a SIXTH key partType (the three
+      // visible kinds only) appended LAST — same sanctioned pattern; this golden stream contains
+      // no lifecycle part rows, so the else-branch stays strict here (the ad27 join lane pins
+      // the positive side against the real function).
       for (const e of envelopes) {
-        expect(Object.keys(e)).toEqual(["category", "ts", "sourceRef", "summary", "payloadRef"])
+        const base = ["category", "ts", "sourceRef", "summary", "payloadRef"]
+        expect(Object.keys(e)).toEqual(e.category === "reasoning" ? [...base, "contentChars"] : e.category === "lifecycle" ? [...base, "partType"] : base)
       }
       // every line is self-contained JSON with a valid ts
       for (const e of envelopes) expect(Number.isNaN(Date.parse(e.ts))).toBe(false)
@@ -224,7 +292,7 @@ describe("timeline join — ordering, interleaving, ties (AC1)", () => {
       expect(dbIds).toEqual(["prt_tool"])
       const lifecycleOnly = run(fixture, { categories: ["lifecycle"] })
       expect(lifecycleOnly.every((e) => e.category === "lifecycle")).toBe(true)
-      expect(lifecycleOnly.length).toBe(1)
+      expect(lifecycleOnly.length).toBe(1) // RE-ANCHORED (AD18): the ONE lifecycle row is the patch part — the positive path stays tested
       const bad = buildTimeline({
         dbPath: fixture.dbPath,
         sessionId: VIEW,
@@ -549,5 +617,104 @@ describe("engine-nudges synthetic fallback rows (Task 4b)", () => {
     } finally {
       fixture.cleanup()
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD22 — reasoning rows carry their EXACT content length, computed in the READ JOIN
+// (owner: NNNk labels; developer-bound: never measure from the byte-capped payload
+// endpoint). The join loads the uncapped p.data (no SQL substr anywhere) — verified —
+// so NO F-CODE is needed for capability. F-CODE (premise): the card claims zero-text
+// reasoning emits no cell; the PART channel has no such drop (only history lines do,
+// L217/267) — a zero-text reasoning part DOES emit and labels "<1k" ("0k" never).
+// Envelope extension = contentChars as the SIXTH (last) key on reasoning rows only;
+// the strict five-key census stays EXACT for every other row (named contract change).
+describe("ad22 join — reasoning envelopes carry contentChars = EXACT char count from the DB text", () => {
+  test("every reasoning row: contentChars equals the DB text length; no other row carries the field", () => {
+    const f = timelineFixture()
+    try {
+      // require() keeps this test-local DB read off the module's import surface; untyped on
+      // purpose — the shapes are asserted below via the envelope comparison itself.
+      const { Database } = require("bun:sqlite") as { Database: any }
+      const db = new Database(f.dbPath, { readonly: true })
+      const rows = db
+        .query(`SELECT p.id AS id, json_extract(p.data,'$.text') AS t FROM part p JOIN message m ON m.id=p.message_id WHERE p.session_id IN (?) AND json_extract(p.data,'$.type')='reasoning'`)
+        .all(VIEW) as Array<{ id: string; t: string | null }>
+      const truth = new Map<string, number>(rows.map((r: { id: string; t: string | null }) => [r.id, (r.t ?? "").length]))
+      db.close()
+      expect(truth.size).toBeGreaterThan(0) // fixture really has reasoning rows
+      const envs = run(f)
+      const reasoning = envs.filter((e) => e.category === "reasoning")
+      expect(reasoning.length).toBe(truth.size)
+      for (const e of reasoning) {
+        expect(e.sourceRef.kind).toBe("dbId")
+        const id = (e.sourceRef as { dbId: string }).dbId
+        expect((e as any).contentChars).toBe(truth.get(id))
+      }
+      for (const e of envs.filter((x) => x.category !== "reasoning")) {
+        expect("contentChars" in (e as any)).toBe(false) // field is scoped to the reasoning lane, strictly
+      }
+    } finally { f.cleanup() }
+  })
+  test("key order: base five keys in order; contentChars appended LAST on reasoning only", () => {
+    const f = timelineFixture()
+    try {
+      const envs = run(f)
+      const base = ["category", "ts", "sourceRef", "summary", "payloadRef"]
+      for (const e of envs) {
+        const keys = Object.keys(e)
+        // AD27 named exception (documented, same last-key pattern): lifecycle rows append
+        // partType LAST. This fixture DB has no lifecycle-part rows → branch inert here;
+        // the ad27 join lane pins the real order against partEnvelope directly.
+        if (e.category === "reasoning") expect(keys).toEqual([...base, "contentChars"])
+        else if (e.category === "lifecycle") expect(keys).toEqual([...base, "partType"])
+        else expect(keys).toEqual(base)
+      }
+    } finally { f.cleanup() }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD27 — lifecycle event-type field (owner: cells must SHOW the type). Declared
+// data path (AD22 precedent): partEnvelope already parses part.type and routes it
+// but does not carry it; here it emits the OPTIONAL field partType with the
+// verbatim type string for the THREE visible lifecycle kinds ONLY (patch,
+// compaction, file). Every other row keeps a byte-identical five-key envelope.
+// Same function serves NDJSON + live push (§6.6) — the JSON round-trip lane
+// below is the by-construction proof, not an endpoint copy. step-* rows are
+// excluded upstream at the join (AD18) and even a direct call stays field-free.
+describe("ad27 join — lifecycle envelopes carry partType (verbatim) for patch/compaction/file ONLY", () => {
+  const cfg = defaultInspectorConfig({ agentsRoot: "/tmp/ad27-a", logsDir: "/tmp/ad27-l" })
+  const router = buildCategoryRouter(cfg)
+  const envOf = (type: string, id = "prt_ad27") =>
+    partEnvelope(
+      { id, session_id: VIEW, time_created: Date.parse("2026-11-05T00:00:00.000Z"), data: JSON.stringify({ type, foo: "bar" }), rowid: 1, msg_data: null },
+      router,
+      new Set<string>(),
+      4096,
+    ) as any
+  test("the three visible kinds: verbatim type string, no beautification", () => {
+    for (const kind of ["patch", "compaction", "file"]) {
+      const e = envOf(kind)
+      expect(e.category).toBe("lifecycle") // routed per config default — the lane gate
+      expect(e.partType).toBe(kind) // the EXACT string ("patch" stays "patch")
+    }
+  })
+  test("scope-tight: every other row kind keeps a byte-identical five-key envelope", () => {
+    for (const [type, role] of [["text", "user"], ["text", "assistant"], ["reasoning", "assistant"], ["tool", "assistant"], ["step-start", null], ["step-finish", null], ["patch-not-a-kind", null]] as Array<[string, string | null]>) {
+      const e = partEnvelope(
+        { id: "prt_ad27x" + type, session_id: VIEW, time_created: Date.parse("2026-11-05T00:00:00.000Z"), data: JSON.stringify({ type }), rowid: 2, msg_data: role === null ? null : JSON.stringify({ role }) },
+        router,
+        new Set<string>(),
+        4096,
+      ) as any
+      expect("partType" in e).toBe(false)
+      expect(Object.keys(e)).toEqual(["category", "ts", "sourceRef", "summary", "payloadRef"])
+    }
+  })
+  test("key order on the positive row: base five, partType appended LAST; JSON round-trip (§6.6 one-function) carries it", () => {
+    const e = envOf("compaction") as any
+    expect(Object.keys(e)).toEqual(["category", "ts", "sourceRef", "summary", "payloadRef", "partType"])
+    expect(JSON.parse(JSON.stringify(e)).partType).toBe("compaction")
   })
 })
