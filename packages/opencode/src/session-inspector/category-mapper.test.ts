@@ -118,3 +118,31 @@ describe("category mapper — §5.6 vocabulary under shipped defaults (AC2)", ()
     expect(router.partCategory("tool", "assistant")).toBe("reasoning")
   })
 })
+
+
+// ---------------------------------------------------------------------------
+// AD38 (R1) — owner order 2026-11-07 after AD37 answered "what remains in Other":
+// "gate-blocked should go to 'Coach Activity'". Pure DEFAULTS routing: the lane set
+// and every other mapping stay byte-identical; the router reads config, so the ONLY
+// code change lives in config.schema.ts defaultCategories(). Defaults (not owner
+// file) because the owner file carries no categories section — adding one there
+// would force full 12-category array replacement (rejected; DEC-O).
+describe("ad38 defaults — gate-blocked is coach-owned noise", () => {
+  test("shipped defaults list gate-blocked in coach-activity sources (order = declaration order)", () => {
+    const config = defaultConfig()
+    const coach = config.categories.find((c) => c.id === "coach-activity")
+    expect(coach?.sources.historyEvents).toEqual(["agent.coach", "gate-blocked"])
+  })
+  test("router routes gate-blocked to coach-activity; NOTHING else moves (neighbor pins + catch-all + part arm)", () => {
+    const router = buildCategoryRouter(defaultConfig())
+    expect(router.historyEventCategory("gate-blocked")).toBe("coach-activity")
+    // neighbor lanes byte-identical:
+    expect(router.historyEventCategory("agent.coach")).toBe("coach-activity")
+    expect(router.historyEventCategory("agent.amt")).toBe("amt-activity")
+    expect(router.historyEventCategory("plugin.nudge")).toBe("engine-nudges")
+    expect(router.historyEventCategory("started")).toBe("pipeline")
+    // catch-all still catches what config does not name:
+    expect(router.historyEventCategory("some.future_event")).toBe("other")
+    expect(router.partCategory("quantum-flux", null)).toBe("other")
+  })
+})

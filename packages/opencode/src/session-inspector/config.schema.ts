@@ -190,7 +190,11 @@ export function defaultCategories(): InspectorCategory[] {
     category(5, "transitions", "Transitions", { historyEvents: ["persona.transition", "TRN"] }),
     category(6, "pipeline", "Pipeline", { historyEvents: ["started", "handoff", "completed", "error"] }),
     category(7, "coach-judge", "Coach Judge", { historyEvents: ["plugin.judge"] }),
-    category(8, "coach-activity", "Coach Activity", { historyEvents: ["agent.coach"] }),
+    // AD38 (owner order 2026-11-07, DEC-O): deterministic gate-block notices are coach-owned
+    // noise, not catch-all leftovers — added to this lane's sources (multi-event precedent
+    // above). Defaults, NOT the owner file: it carries no categories section and adding one
+    // would replace all twelve category arrays to change one list (rejected rationale, DEC-O).
+    category(8, "coach-activity", "Coach Activity", { historyEvents: ["agent.coach", "gate-blocked"] }),
     category(9, "amt-activity", "AMT Activity", { historyEvents: ["agent.amt"] }),
     category(10, "engine-nudges", "Engine Nudges", { historyEvents: ["plugin.nudge"] }),
     category(11, "lifecycle", "Lifecycle", { parts: ["step-start", "step-finish", "patch", "compaction", "file"] }),

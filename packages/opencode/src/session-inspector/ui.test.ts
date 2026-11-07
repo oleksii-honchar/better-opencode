@@ -1781,11 +1781,16 @@ describe("ad22 render lane — reasoning labels from the envelope field, same ch
     expect(branch).not.toMatch(/fetchPayload/) // endpoint is byte-capped — forbidden as a length source (DEC-I class)
     expect(branch).toMatch(/cell-label/) // same channel class: 9px/400/padding come with it, nothing restyled
   })
-  test("exactly THREE gated label branches exist in the page (tool-calls, reasoning, lifecycle — AD27); each core has ONE render call site", () => {
+  test("exactly FIVE gated label branches exist in the page (tool-calls, reasoning, lifecycle, engine-nudges, other — AD37); each core has ONE render call site", () => {
     // AD27 NAMED census update: the third lane-gated label branch (lifecycle ← env.partType,
     // field-fed like reasoning's contentChars — no new core). Tool/reasoning branches byte-untouched.
-    const gates = INSPECTOR_UI_HTML.match(/env\.category === "(tool-calls|reasoning|lifecycle)"/g) ?? []
-    expect(gates.length).toBe(3)
+    // AD36 NAMED census update (this census 3→4): the fourth field-fed label branch = engine-nudges
+    // ← env.nudgeKind (join-scoped field from the record's OWN header token — same discipline,
+    // no new core, no vocabulary in the renderer). Prior three branches stay byte-untouched.
+    // AD37 NAMED census update (this census 4→5): the fifth field-fed label branch = other
+    // ← env.historyEvent (record's own event string; same discipline, no new core, no vocabulary).
+    const gates = INSPECTOR_UI_HTML.match(/env\.category === "(tool-calls|reasoning|lifecycle|engine-nudges|other)"/g) ?? []
+    expect(gates.length).toBe(5)
     const fmt = INSPECTOR_UI_HTML.match(/formatContentSize\(/g) ?? []
     const fmtDefs = INSPECTOR_UI_HTML.match(/function formatContentSize/g) ?? []
     expect(fmt.length).toBe(fmtDefs.length + 1)
@@ -1985,7 +1990,10 @@ describe("ad25 legend registry — static, per default-active lane in display or
       transitions: /decision-tree traversal/,
       pipeline: /lifecycle commands/,
       "coach-judge": /coach judge evaluation/,
-      "coach-activity": /coach agent's own recorded actions/,
+      // AD38 NAMED pin stretch (owner order: gate-blocked joins this lane): the description must
+      // document BOTH sources honestly. Original clause kept verbatim (still true); the pin now
+      // also requires the gate-blocked source to be named. This is the only legend-pin change.
+      "coach-activity": /coach agent's own recorded actions[\s\S]*gate-blocked/,
       "amt-activity": /meta tool/i,
       "engine-nudges": /deterministic reminders/i,
       lifecycle: /compaction/,
@@ -2527,5 +2535,114 @@ describe("ad34 theme-aware color resolution — theme override > shared > built-
     expect((INSPECTOR_UI_HTML.match(/setProperty\("--block-dark", laneBlockColor\(c\.id, "dark"\)\)/g) ?? []).length).toBeGreaterThanOrEqual(1)
     expect((INSPECTOR_UI_HTML.match(/setProperty\("--cell-label-text-light", laneLabelTextColor\(/g) ?? []).length).toBe(1)
     expect((INSPECTOR_UI_HTML.match(/setProperty\("--cell-label-text-dark", laneLabelTextColor\(/g) ?? []).length).toBe(1)
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// AD36 C (render half) — Engine Nudges cells carry the nudge's OWN type string.
+// Phase-0 proof: the ONLY verbatim type string in a rendered nudge row is the
+// record's own header token ("Traversal Check:", "Rule Compliance:", "Progress
+// Check:", "Realign Check:", "Reference Check:", "Backtrack Check:" — census in
+// materials/task-ad36-evidence.md). The join ships it as env.nudgeKind (lowercased,
+// scoped to nudge rows). The renderer labels VERBATIM through the SAME
+// .cell-label channel — no vocabulary re-derivation, no formatting, no fetch.
+describe("ad36 render lane — engine-nudges labels read env.nudgeKind verbatim, same channel", () => {
+  const append36 = (): string => {
+    const s = INSPECTOR_UI_HTML.indexOf("function appendCell")
+    return INSPECTOR_UI_HTML.slice(s, INSPECTOR_UI_HTML.indexOf("function parseLine"))
+  }
+  test("engine-nudges gate renders env.nudgeKind through the cell-label channel, verbatim, NO payload fetch", () => {
+    const body = append36()
+    const at = body.indexOf('env.category === "engine-nudges"')
+    expect(at).toBeGreaterThan(-1) // RED today: no such branch exists at all
+    const branch = body.slice(at, at + 700)
+    expect(branch).toMatch(/env\.nudgeKind/) // the JOIN-CARRIED field is the only source
+    expect(branch).toMatch(/appendChild/)
+    expect(branch).not.toMatch(/fetchPayload/) // AD22 rule preserved for this lane too
+    expect(branch).toMatch(/cell-label/) // the established channel class — nothing restyled
+    // VERBATIM: value flows unprocessed — no formatting call inside the branch:
+    expect(branch).not.toMatch(/formatContentSize|cellToolLabel|toUpperCase|toLowerCase|replace\(|trim\(/)
+  })
+  test("absent-kind guard: NO nudgeKind (headerless synthetic) → no label element; condition is a FIELD-PRESENCE guard, no header vocabulary in it", () => {
+    const body = append36()
+    expect(body).toMatch(/if \(env\.category === "engine-nudges" && env\.nudgeKind\) \{/)
+    const guardLine = body.match(/if \(env\.category === "engine-nudges" && env\.nudgeKind\) \{[^\n]*/)![0]
+    expect(guardLine).not.toMatch(/traversal|realign|progress|rules|reference|backtrack/) // renderer never knows the vocabulary
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// AD37 R2 (render half, the 6th label instance) — 'Other' cells show the record's own
+// event string via env.historyEvent (AD37 field), VERBATIM on the same .cell-label
+// channel: same 9px/400/1px bytes, shared crop rule, AD35-derived tokens for the pink
+// brick (no new color math). No beautification in the renderer: the weird names come
+// through raw exactly as the record says them.
+describe("ad37 render lane — other cells read env.historyEvent verbatim, same channel", () => {
+  const append37 = (): string => {
+    const s = INSPECTOR_UI_HTML.indexOf("function appendCell")
+    return INSPECTOR_UI_HTML.slice(s, INSPECTOR_UI_HTML.indexOf("function parseLine"))
+  }
+  test("other gate renders env.historyEvent through the cell-label channel, verbatim, NO payload fetch", () => {
+    const body = append37()
+    const at = body.indexOf('env.category === "other"')
+    expect(at).toBeGreaterThan(-1) // RED today: no such branch exists
+    const branch = body.slice(at, at + 700)
+    expect(branch).toMatch(/env\.historyEvent/) // the JOIN-CARRIED field is the only source
+    expect(branch).toMatch(/appendChild/)
+    expect(branch).not.toMatch(/fetchPayload/) // AD22 rule holds for this lane too
+    expect(branch).toMatch(/cell-label/) // established channel — nothing restyled
+    // VERBATIM: no formatting call of any kind inside the branch:
+    expect(branch).not.toMatch(/formatContentSize|cellToolLabel|toUpperCase|toLowerCase|replace\(|trim\(/)
+  })
+  test("absent-field guard: part-feed rows (no historyEvent) get NO label element; field-presence guard, no event vocabulary in it", () => {
+    const body = append37()
+    expect(body).toMatch(/if \(env\.category === "other" && env\.historyEvent\) \{/)
+    const guardLine = body.match(/if \(env\.category === "other" && env\.historyEvent\) \{[^\n]*/)![0]
+    expect(guardLine).not.toMatch(/started|completed|gate|future/) // the renderer never knows any event vocabulary
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// AD39 — owner-supplied CSS (2026-11-07): "make visual separation for grid headers".
+// OWNER-LAW PRECEDENT (AD35): the supplied declaration bytes ARE the spec. This lane
+// pins that the five declarations are literally present in the SERVED `.col h2` rule
+// (module == served), in placement that makes the literal declaration win: they append
+// AFTER the existing `padding: 6px 0 4px` shorthand, so `padding-left: 2px` overrides
+// by cascade order. Nothing else in the rule is allowed to move — existing header
+// pins (top: 44px, font tokens, z-index) are pinned separately and must stay green.
+describe("ad39 owner-law — grid-header separation declarations, verbatim and live", () => {
+  // served-copy extraction, module-local: the response body IS INSPECTOR_UI_HTML (pinned at
+  // the top of this file), so the module string is the served string. Strip ${…} template
+  // holes to their static part before ":" so token pins stay literal, then read rule bodies.
+  const rulesOf = (html: string) => {
+    const raw = [...html.matchAll(/\.col h2\s*\{([^}]*)\}/g)].map((m) => m[1])
+    return raw.map((b) => b.replace(/\${[^}]*\}([^;{}]*)/g, (mm, after) => after.trimStart()))
+  }
+  test("the five owner declarations are present VERBATIM in the served .col h2 rule", () => {
+    const rules = rulesOf(INSPECTOR_UI_HTML)
+    expect(rules.length).toBeGreaterThan(0)
+    const body = rules[0]!
+    // THE OWNER'S FIVE — byte-exact declarations, nothing interpreted:
+    expect(body).toContain("border-left: 1px solid var(--line);")
+    expect(body).toContain("border-right: 1px solid var(--line);")
+    expect(body).toContain("border-bottom-left-radius: 4px;")
+    expect(body).toContain("border-bottom-right-radius: 4px;")
+    expect(body).toContain("padding-left: 2px;")
+  })
+  test("placement law: the five come AFTER the padding shorthand so the literal wins by order; the rule stays single-sourced (no second .col h2 anywhere) and existing header tokens survive intact", () => {
+    const rules = rulesOf(INSPECTOR_UI_HTML)
+    expect(rules.length).toBe(1) // the single source — no split/mirror rule
+    const body = rules[0]!
+    expect(body.indexOf("padding: 6px 0 4px;")).toBeGreaterThan(-1)
+    expect(body.indexOf("padding-left: 2px;")).toBeGreaterThan(body.indexOf("padding: 6px 0 4px;"))
+    // untouched existing tokens (same substrings the AD6/AD17 pins use):
+    expect(body).toContain("top: 44px;")
+    expect(body).toContain("position: sticky;")
+    expect(body).toContain("z-index: 5;")
+    expect(body).toContain("border-bottom: 1px solid var(--line);")
+    expect(body).toContain("background: var(--bg);")
   })
 })

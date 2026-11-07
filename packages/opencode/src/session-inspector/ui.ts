@@ -109,7 +109,7 @@ export const LEGEND_ENTRIES: Array<{ id: string; name: string; description: stri
   { id: "transitions", name: "Transitions", description: "persona decision-tree traversal events (persona.transition / TRN records): one agent moving between decision nodes." },
   { id: "pipeline", name: "Pipeline", description: "session-pipeline lifecycle commands recorded in history.jsonl: started, handoff, completed, error." },
   { id: "coach-judge", name: "Coach Judge", description: "coach judge evaluation events (plugin.judge): scoring/verdict records produced by the judge plugin." },
-  { id: "coach-activity", name: "Coach Activity", description: "agent-coach activity events (agent.coach): the coach agent's own recorded actions." },
+  { id: "coach-activity", name: "Coach Activity", description: "agent-coach activity events (agent.coach): the coach agent's own recorded actions; also deterministic gate-block notices enforced against agents in the session (gate-blocked, AD38)." },
   { id: "amt-activity", name: "Agent Meta Tool Activity", description: "agent meta-tool usage events (agent.amt): meta tool invocations made by an agent." },
   { id: "engine-nudges", name: "Engine Nudges", description: "engine injection nudges (plugin.nudge): deterministic reminders the engine pushed into an agent's context." },
   { id: "lifecycle", name: "Lifecycle", description: "session lifecycle artifacts from message parts: patches, compaction, file operations. Cell label names the lifecycle event (patch/compaction/file). Note: step-start/step-finish join-steps are EXCLUDED from display — they are join plumbing, not lane events." },
@@ -715,7 +715,7 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
      inert and CANNOT touch the owner-locked vertical rhythm (2px gutter / 16px pitch). */
   #grid { display: grid; gap: 4px; --cell-mini: ${CELL_MINI_H_PX}px; --cell-gutter: ${CELL_GUTTER_PX}px; --cell-pitch: ${CELL_PITCH_PX}px; --cell-block-w: ${CELL_BLOCK_W_PX}px; --cell-block-h: ${CELL_BLOCK_H_PX}px; --cell-hit-w: ${CELL_HIT_W_PX}px; --cell-hit-h: ${CELL_HIT_H_PX}px; --cell-label-font: ${CELL_LABEL_FONT_PX}px; --cell-label-text-light: ${CELL_LABEL_TEXT_LIGHT}; --cell-label-text-dark: ${CELL_LABEL_TEXT_DARK}; } /* AD6: items STRETCH (was align-items:start) so short columns keep their sticky headers bounded to full row height. AD7: the row PITCH lives here as the single source — AD11: pitch = box(--cell-mini)+gutter(--cell-gutter). AD12: the gutter is a FIXED constant (owner knob); --cell-pitch is the DERIVED rhythm, served for the chain — no independent value literals in the rules (L220). */
   .col { position: relative; } /* AD14: offset-parent for the row band's Y math (band top = col + slot offsets — read from the row ELEMENTS themselves) */
-  .col h2 { font-size: ${HEADER_FONT_PX}px; line-height: ${HEADER_LINE_H_PX}px; margin: 0 0 6px; color: var(--dim); border-bottom: 1px solid var(--line); padding: 6px 0 4px; position: sticky; top: 44px; z-index: 5; background: var(--bg); white-space: nowrap; overflow: hidden; } /* AD6: pins under the 44px livebar (top constant unchanged). AD17 NAMED SUPERSESSION (replaces the AD14 growing-wrap model): ONE uniform row — single line per header, PLAIN CROP at the track edge (no ellipsis machinery, per owner: "it's ok to crop the titles"). Equal heights are structural: every header shares these exact tokens and no per-header mutation exists. Full names ride si-col-tip for EVERY lane (AD13/AD14 surface). */
+  .col h2 { font-size: ${HEADER_FONT_PX}px; line-height: ${HEADER_LINE_H_PX}px; margin: 0 0 6px; color: var(--dim); border-bottom: 1px solid var(--line); padding: 6px 0 4px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; padding-left: 2px; position: sticky; top: 44px; z-index: 5; background: var(--bg); white-space: nowrap; overflow: hidden; } /* AD6: pins under the 44px livebar (top constant unchanged). AD17 NAMED SUPERSESSION (replaces the AD14 growing-wrap model): ONE uniform row — single line per header, PLAIN CROP at the track edge (no ellipsis machinery, per owner: "it's ok to crop the titles"). Equal heights are structural: every header shares these exact tokens and no per-header mutation exists. Full names ride si-col-tip for EVERY lane (AD13/AD14 surface). AD39 (owner instruction 2026-11-07, owner-supplied bytes verbatim — "make visual separation for grid headers"): border-left/right 1px solid var(--line) + bottom radii 4px + padding-left 2px, appended AFTER the padding shorthand so the literal declaration wins by order (owner-law: supplied bytes ARE the spec); nothing else in this rule moved, no new colors (var(--line) is the existing theme token). */
   /* AD10 trace mode (supersedes the AD7/AD9 mini-box visuals): a .cell is a
      TRANSPARENT row-pitch box — zero content, zero paint. The visible block is a
      ::after rounded rect painted from the per-column lane color (set once per
@@ -1099,6 +1099,16 @@ function appendCell(env) {
     var lclab = h("span", { class: "cell-label" });
     lclab.textContent = env.partType;
     cell.appendChild(lclab);
+  }
+  if (env.category === "engine-nudges" && env.nudgeKind) { // AD36: the nudge's OWN type string, VERBATIM from the record via the join field (lowercase happened at extraction, not here — the renderer holds NO vocabulary); headerless → bare brick (card). Same .cell-label channel + crop policy; full text in hover/drawer unchanged.
+    var nl = h("span", { class: "cell-label" });
+    nl.textContent = env.nudgeKind;
+    cell.appendChild(nl);
+  }
+  if (env.category === "other" && env.historyEvent) { // AD37: the record's OWN event string, verbatim (join-parsed line.event carried as historyEvent); part-feed rows have no event field → bare brick, never stringified garbage. Same .cell-label channel + crop rule; AD35 tokens already theme-correct for the pink brick — zero new color math; full value in hover/drawer unchanged.
+    var ol = h("span", { class: "cell-label" });
+    ol.textContent = env.historyEvent;
+    cell.appendChild(ol);
   }
   shown++;
   // (AD10) the rAF clip-dot block was removed WITH the clip rule: a zero-content

@@ -215,15 +215,22 @@ describe("ad18 join-step exclusion — step-start/step-finish surface in NO colu
     }
   })
   test("EXCLUDED_EVENT_TYPES is a named, owner-commented constant (the toggle if ever re-wanted)", () => {
-    expect(EXCLUDED_EVENT_TYPES).toEqual(["step-start", "step-finish"])
+    // AD36 NAMED re-anchor (value set, behavior unchanged): the card mandates this constant gain a
+    // SECOND NAMED ENTRY, 'nudge-delivered' (delivery receipts — Phase-0: pure tracking, no content).
+    // 'step-start'/'step-finish' semantics are byte-identical; the pin's INTENT (named, commented,
+    // single toggle) is asserted below and stays untouched.
+    expect(EXCLUDED_EVENT_TYPES).toEqual(["step-start", "step-finish", "nudge-delivered"])
     const src = require("node:fs").readFileSync(new URL("./timeline.ts", import.meta.url), "utf8") as string
     // Checker anchor fix (during GREEN): the owner comment PRECEDES the export, so the slice
     // window is taken from the declaration backwards incl. the comment header. Pin intent —
     // "the directive is recorded AT the constant" — unchanged.
+    // AD36 checker-window note: the constant now carries TWO entry-comments (AD18 + AD36), so the
+    // backward window widened 500→1200; both directives being present at the constant is now pinned.
     const idx = src.indexOf("export const EXCLUDED_EVENT_TYPES")
-    const decl = src.slice(Math.max(0, idx - 500), idx + 300)
+    const decl = src.slice(Math.max(0, idx - 1200), idx + 300)
     expect(decl).toMatch(/not informative/i) // owner directive recorded at the constant, per card
     expect(decl).toMatch(/2026-11-05/)
+    expect(decl).toMatch(/delivery receipt|DELIVERY RECEIPT/i) // AD36: second entry documented at the constant too
   })
 })
 
@@ -275,7 +282,16 @@ describe("timeline join — ordering, interleaving, ties (AC1)", () => {
       // the positive side against the real function).
       for (const e of envelopes) {
         const base = ["category", "ts", "sourceRef", "summary", "payloadRef"]
-        expect(Object.keys(e)).toEqual(e.category === "reasoning" ? [...base, "contentChars"] : e.category === "lifecycle" ? [...base, "partType"] : base)
+        // NAMED CONTRACT UPDATE (AD37): 'other' rows sourced from HISTORY lines carry a SIXTH
+        // key historyEvent (the record's own event string; the ad37 join lane pins both sides).
+        // This golden stream's line:other:7 IS such a row — its expected key set grows here and
+        // nowhere else. Part-feed rows (incl. fall-throughs like prt_unk_part) stay STRICT five.
+        expect(Object.keys(e)).toEqual(
+          e.category === "reasoning" ? [...base, "contentChars"]
+            : e.category === "lifecycle" ? [...base, "partType"]
+            : e.category === "other" && e.sourceRef.kind === "historyLine" ? [...base, "historyEvent"]
+            : base,
+        )
       }
       // every line is self-contained JSON with a valid ts
       for (const e of envelopes) expect(Number.isNaN(Date.parse(e.ts))).toBe(false)
@@ -666,8 +682,12 @@ describe("ad22 join — reasoning envelopes carry contentChars = EXACT char coun
         // AD27 named exception (documented, same last-key pattern): lifecycle rows append
         // partType LAST. This fixture DB has no lifecycle-part rows → branch inert here;
         // the ad27 join lane pins the real order against partEnvelope directly.
+        // AD37 named exception (same sanctioned last-key pattern): catch-all rows sourced from
+        // HISTORY lines append historyEvent LAST (this fixture's line:other:7 exercises it —
+        // the ad37 join lane pins both sides); part-feed fall-throughs stay STRICT five.
         if (e.category === "reasoning") expect(keys).toEqual([...base, "contentChars"])
         else if (e.category === "lifecycle") expect(keys).toEqual([...base, "partType"])
+        else if (e.category === "other" && e.sourceRef.kind === "historyLine") expect(keys).toEqual([...base, "historyEvent"])
         else expect(keys).toEqual(base)
       }
     } finally { f.cleanup() }
@@ -716,5 +736,238 @@ describe("ad27 join — lifecycle envelopes carry partType (verbatim) for patch/
     const e = envOf("compaction") as any
     expect(Object.keys(e)).toEqual(["category", "ts", "sourceRef", "summary", "payloadRef", "partType"])
     expect(JSON.parse(JSON.stringify(e)).partType).toBe("compaction")
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// AD36 — data-source honesty pass (Phase-0 evidence: real DB copy + view-folder
+// history.jsonl). THREE root causes, THREE lanes:
+//  A: the live SSE path (liveEnvelopeFor → partEnvelope) had NO exclusion guard —
+//     join filters step-*, live pushed them back. The owner watched a RUNNING session:
+//     that is the leak's mechanism (their session: 206/204 step parts, live view).
+//  B: nudge-delivered is a history.jsonl EVENT (details = pure delivery tracking:
+//     "kind=… node=…" — no nudge body, no duplication of nudge content, Phase-0
+//     proof) that the router catch-alls into 'other'. Second named EXCLUDED constant.
+//  C: engine-nudges fallback rows are synthetic text parts whose OWN text carries the
+//     nudge type verbatim ("<system-reminder>\n  Traversal Check:", "Rule Compliance:"…)
+//     — join-scoped nudgeKind field (AD27 pattern), renderer labels verbatim.
+describe("ad36 join: history-arm exclusions + scoped nudgeKind (real-shaped records)", () => {
+  const SB6 = "ses_ad36_view"
+  function ad36Fixture() {
+    const dirs = tempDirs()
+    const dbPath = path.join(dirs.configDir, "engine.db")
+    makeFixtureSessionDb(dbPath)
+    insertSession(dbPath, { id: SB6, title: "ad36 view", timeCreated: 1000, timeUpdated: 9000 })
+    insertMessage(dbPath, { id: "msg_u", sessionId: SB6, timeCreated: 1000, role: "user" })
+    insertMessage(dbPath, { id: "msg_a", sessionId: SB6, timeCreated: 8000, role: "assistant" })
+    // REAL-SHAPED nudge records (header token bytes verbatim from the live-store probe):
+    insertPart(dbPath, { id: "prt_nl_traversal", messageId: "msg_u", sessionId: SB6, timeCreated: 2000, data: { type: "text", text: "<system-reminder>\n  Traversal Check:\n  - You have a persona decision tree. Enter it before your next tool.\n  This is a deterministic reminder - no model call was made.\nContinue with your task.\n</system-reminder>", synthetic: true } })
+    insertPart(dbPath, { id: "prt_nl_rules", messageId: "msg_u", sessionId: SB6, timeCreated: 3000, data: { type: "text", synthetic: true, text: "<system-reminder><system-reminder>\n  Rule Compliance:\n  - Before other action, did you load agent-persona-base first?\n</system-reminder>" } })
+    // headerless synthetic (real attachment-pointer shape): NO type string exists in the record
+    insertPart(dbPath, { id: "prt_nl_bare", messageId: "msg_u", sessionId: SB6, timeCreated: 4000, data: { type: "text", synthetic: true, text: "Attached file: image-1.png — use \"opencode://attachment/036d75b1\" as the data argument for tools like extract_bytes" } })
+    // negative-scope row: lifecycle keeps its OWN six-key census; NEVER carries nudgeKind
+    insertPart(dbPath, { id: "prt_l6", messageId: "msg_a", sessionId: SB6, timeCreated: 8000, data: { type: "patch", snapshot: "s1" } })
+    const folder = path.join(dirs.agentsDir, "ad36", SB6)
+    writeSessionFolder(folder, { sessionId: SB6, noHistory: true })
+    const lines = [
+      // A: step-* NAMED on the history arm too (source-path honesty: whatever path it arrives by)
+      JSON.stringify({ ts: "2026-11-06T10:00:01.000Z", sessionId: SB6, agent: "engine", event: "step-start", details: null, nextAgent: null, phase: null, status: null }),
+      JSON.stringify({ ts: "2026-11-06T10:00:02.000Z", sessionId: SB6, agent: "engine", event: "step-finish", details: null, nextAgent: null, phase: null, status: null }),
+      // B: nudge-delivered receipts, verbatim real shape — must NOT land in 'other' (or anywhere)
+      JSON.stringify({ ts: "2026-11-06T10:00:03.000Z", sessionId: SB6, agent: "simple-session", event: "nudge-delivered", details: "kind=traversal-ladder node=file_c108d7053d7dbde977fb5b2e682e0784", nextAgent: null, phase: null, status: null }),
+      JSON.stringify({ ts: "2026-11-06T10:00:04.000Z", sessionId: SB6, agent: "simple-session", event: "nudge-delivered", details: "kind=category-progress node=file_x", nextAgent: null, phase: null, status: null }),
+      // unchanged neighbors: pipeline keeps its own vocabulary
+      historyLine({ ts: "2026-11-06T10:00:05.000Z", sessionId: SB6, agent: "developer", event: "started", nextAgent: "worker", phase: "implementation", status: null }),
+    ]
+    writeFileSync(path.join(folder, "history.jsonl"), lines.map((l) => l + "\n").join(""))
+    const base = defaultInspectorConfig({ agentsRoot: dirs.agentsDir, logsDir: dirs.logsDir })
+    const config: SessionInspectorConfig = { ...base, paths: { ...base.paths, dbMode: dbPath } }
+    return { dbPath, folder, cleanup: dirs.cleanup, config }
+  }
+  const run = (f: ReturnType<typeof ad36Fixture>): TimelineEnvelope[] => {
+    const r = buildTimeline({ dbPath: f.dbPath, sessionId: SB6, sessionPath: f.folder, io: nodeScanIO(), config: f.config, filters: {} })
+    if (!r.ok) throw new Error(`timeline failed: ${r.code} ${r.message}`)
+    return r.envelopes
+  }
+  test("A: step-start/step-finish lines on the HISTORY arm never render (any category) — display-exclusion holds whatever the source path", () => {
+    const f = ad36Fixture()
+    try {
+      const envs = run(f)
+      const stepish = envs.filter((e) => /step-(start|finish)/.test(JSON.stringify(e.sourceRef ?? "") + String(e.summary)))
+      expect(stepish).toEqual([])
+      // the 'started' neighbor still renders in pipeline (over-blocking guard)
+      const started = envs.filter((e) => e.category === "pipeline")
+      expect(started.length).toBe(1)
+      expect(started[0]!.summary).toContain("started")
+    } finally { f.cleanup() }
+  })
+  test("B: nudge-delivered receipts are absent from 'other' and everywhere; the rest of the column content is exactly what it was", () => {
+    const f = ad36Fixture()
+    try {
+      const envs = run(f)
+      const inOther = envs.filter((e) => e.category === "other")
+      expect(inOther).toEqual([]) // today: 2 receipts fall to catchAll — NAMED re-anchor of THAT behavior
+      const receipts = envs.filter((e) => JSON.stringify(e).includes("nudge-delivered"))
+      expect(receipts).toEqual([])
+    } finally { f.cleanup() }
+  })
+  test("C: nudge rows carry nudgeKind = the record's OWN header token verbatim-lowercased (join-scoped, LAST key); headerless synthetics stay strict five keys; lifecycle rows byte-unchanged (no nudgeKind ever)", () => {
+    const f = ad36Fixture()
+    try {
+      const envs = run(f)
+      const byId = (id: string) => envs.find((e) => e.sourceRef.kind === "dbId" && e.sourceRef.dbId === id) as any
+      const t = byId("prt_nl_traversal")
+      expect(t).toBeDefined()
+      expect(t.category).toBe("engine-nudges")
+      expect(t.nudgeKind).toBe("traversal check")
+      expect(Object.keys(t)).toEqual(["category", "ts", "sourceRef", "summary", "payloadRef", "nudgeKind"]) // LAST key (AD27 census order)
+      const rc = byId("prt_nl_rules")
+      expect(rc.nudgeKind).toBe("rule compliance")
+      const bare = byId("prt_nl_bare")
+      expect(bare.nudgeKind).toBeUndefined()
+      expect(Object.keys(bare)).toEqual(["category", "ts", "sourceRef", "summary", "payloadRef"]) // strict five KEPT for no-header records
+      const lc = byId("prt_l6")
+      expect(lc.nudgeKind).toBeUndefined() // scope: lifecycle rows NEVER carry the nudge field
+      expect(Object.keys(lc)).toEqual(["category", "ts", "sourceRef", "summary", "payloadRef", "partType"]) // AD27 census unchanged
+    } finally { f.cleanup() }
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// AD37 — 'Other' cells carry the record's OWN event string (owner: "for cells in
+// 'Other' write content.event to cell"). The join already parses line.event at the
+// history arm; this is the ESTABLISHED scoped-optional-field pattern (AD27 partType,
+// AD36 nudgeKind), new lane, value-anchored name: historyEvent (NOT category-anchored).
+// Scope is tight by CONSTRUCTION: the value exists only for history-arm records —
+// part feeds (both arms) and the live removed-marker have no event string → NO field.
+describe("ad37 join: catch-all 'other' rows carry their own history event string (verbatim, scoped)", () => {
+  const SB7 = "ses_ad37_view"
+  function ad37Fixture() {
+    const dirs = tempDirs()
+    const dbPath = path.join(dirs.configDir, "engine.db")
+    makeFixtureSessionDb(dbPath)
+    insertSession(dbPath, { id: SB7, title: "ad37 view", timeCreated: 1000, timeUpdated: 9000 })
+    insertMessage(dbPath, { id: "msg_u", sessionId: SB7, timeCreated: 1000, role: "user" })
+    insertMessage(dbPath, { id: "msg_a", sessionId: SB7, timeCreated: 8000, role: "assistant" })
+    // negatives across EVERY other row kind (a scoped field must not leak into any of them)
+    insertPart(dbPath, { id: "prt_txt7", messageId: "msg_a", sessionId: SB7, timeCreated: 8000, data: { type: "text", text: "ordinary assistant text" } })
+    insertPart(dbPath, { id: "prt_lifecycle7", messageId: "msg_a", sessionId: SB7, timeCreated: 8001, data: { type: "patch", snapshot: "s7" } }) // its own sixth key partType; NEVER historyEvent
+    insertPart(dbPath, { id: "prt_reason7", messageId: "msg_a", sessionId: SB7, timeCreated: 8002, data: { type: "reasoning", text: "r".repeat(12) } }) // sixth key contentChars; NEVER historyEvent
+    insertPart(dbPath, { id: "prt_nudge7", messageId: "msg_u", sessionId: SB7, timeCreated: 2000, data: { type: "text", synthetic: true, text: "<system-reminder>\n  Traversal Check:\n  - persona tree first.\n</system-reminder>" } }) // sixth key nudgeKind; NEVER historyEvent
+    // THE part-feed fall-through: data.type is NOT A STRING -> no identifier -> bare brick (never stringify 42)
+    insertPart(dbPath, { id: "prt_weird7", messageId: "msg_a", sessionId: SB7, timeCreated: 8003, data: { type: 42 } })
+    const folder = path.join(dirs.agentsDir, "ad37", SB7)
+    writeSessionFolder(folder, { sessionId: SB7, noHistory: true })
+    const lines = [
+      // ROUTED neighbor (must keep its strict five keys)
+      historyLine({ ts: "2026-11-07T10:00:00.000Z", sessionId: SB7, agent: "developer", event: "started", nextAgent: "worker", phase: "implementation", status: null }),
+      // fall-through: a DELIBERATELY WEIRD identifier — underscores/uppercase survive untouched (VERBATIM proof)
+      JSON.stringify({ ts: "2026-11-07T10:00:01.000Z", sessionId: SB7, agent: "who-knows", event: "zzz.WEIRD__Event-7", details: "keep me raw", nextAgent: null, phase: null, status: null }),
+      // second fall-through: plain name
+      JSON.stringify({ ts: "2026-11-07T10:00:02.000Z", sessionId: SB7, agent: "who-knows", event: "some.future_event", details: null, nextAgent: null, phase: null, status: null }),
+    ]
+    writeFileSync(path.join(folder, "history.jsonl"), lines.map((l) => l + "\n").join(""))
+    const base = defaultInspectorConfig({ agentsRoot: dirs.agentsDir, logsDir: dirs.logsDir })
+    const config: SessionInspectorConfig = { ...base, paths: { ...base.paths, dbMode: dbPath } }
+    return { dbPath, folder, cleanup: dirs.cleanup, config }
+  }
+  const run = (f: ReturnType<typeof ad37Fixture>): TimelineEnvelope[] => {
+    const r = buildTimeline({ dbPath: f.dbPath, sessionId: SB7, sessionPath: f.folder, io: nodeScanIO(), config: f.config, filters: {} })
+    if (!r.ok) throw new Error(`timeline failed: ${r.code} ${r.message}`)
+    return r.envelopes
+  }
+  test("fall-through history rows carry historyEvent == the record's own event string, VERBATIM (weird stays weird), LAST key after the base five", () => {
+    const f = ad37Fixture()
+    try {
+      const envs = run(f)
+      const base = ["category", "ts", "sourceRef", "summary", "payloadRef"]
+      const byRef = (ln: number) => envs.find((e) => e.sourceRef.kind === "historyLine" && e.sourceRef.line === ln) as any
+      const weird = byRef(2)
+      expect(weird.category).toBe("other") // established catchAll routing unchanged
+      expect(weird.historyEvent).toBe("zzz.WEIRD__Event-7") // exact bytes — NO beautification ANYWHERE in the join
+      expect(Object.keys(weird)).toEqual([...base, "historyEvent"]) // LAST key — named sixth-key census pattern
+      const plain = byRef(3)
+      expect(plain.historyEvent).toBe("some.future_event")
+    } finally { f.cleanup() }
+  })
+  test("scope-tight negatives: routed history rows, ALL part-feed kinds (incl. the data.type=42 part that falls through to other!) and every non-field row are BYTE-IDENTICAL five-key — parts have NO event string (bare brick, never stringified garbage)", () => {
+    const f = ad37Fixture()
+    try {
+      const envs = run(f)
+      const base = ["category", "ts", "sourceRef", "summary", "payloadRef"]
+      const byId = (id: string) => envs.find((e) => e.sourceRef.kind === "dbId" && e.sourceRef.dbId === id) as any
+      const started = envs.find((e) => e.category === "pipeline") as any
+      expect(Object.keys(started)).toEqual(base)
+      const txt = byId("prt_txt7")
+      expect(Object.keys(txt)).toEqual(base) // assistant-text: strict five, no leaked field
+      const lc = byId("prt_lifecycle7")
+      expect(Object.keys(lc)).toEqual([...base, "partType"]) // its OWN sixth key; no historyEvent ever
+      expect(lc.historyEvent).toBeUndefined()
+      const rz = byId("prt_reason7")
+      expect(Object.keys(rz)).toEqual([...base, "contentChars"])
+      expect(rz.historyEvent).toBeUndefined()
+      const nd = byId("prt_nudge7")
+      expect(Object.keys(nd)).toEqual([...base, "nudgeKind"])
+      expect(nd.historyEvent).toBeUndefined()
+      const partOther = byId("prt_weird7") // part feed that DOES fall through to other: no history identity exists for it
+      expect(partOther.category).toBe("other")
+      expect(partOther.historyEvent).toBeUndefined() // 42 is NEVER stringified into a label
+      expect(Object.keys(partOther)).toEqual(base) // bare brick
+    } finally { f.cleanup() }
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// AD38 (R3) — the end-to-end consequence, proven at the JOIN with zero join code:
+// a gate-blocked history line reroutes to coach-activity AND thereby falls out of
+// the AD37 catch-all scope (no historyEvent on a ROUTED row — scope is by category
+// at construction, so this is auto-proved, not new code). The rows that DO stay in
+// other keep carrying their field; every other kind is byte-identical.
+describe("ad38 join: gate-blocked reroutes to coach-activity and auto-drops the AD37 field", () => {
+  const SB8 = "ses_ad38_view"
+  function ad38Fixture() {
+    const dirs = tempDirs()
+    const dbPath = path.join(dirs.configDir, "engine.db")
+    makeFixtureSessionDb(dbPath)
+    insertSession(dbPath, { id: SB8, title: "ad38 view", timeCreated: 1000, timeUpdated: 9000 })
+    insertMessage(dbPath, { id: "msg_a", sessionId: SB8, timeCreated: 8000, role: "assistant" })
+    insertPart(dbPath, { id: "prt_txt8", messageId: "msg_a", sessionId: SB8, timeCreated: 8000, data: { type: "text", text: "ordinary assistant text" } })
+    const folder = path.join(dirs.agentsDir, "ad38", SB8)
+    writeSessionFolder(folder, { sessionId: SB8, noHistory: true })
+    const lines = [
+      JSON.stringify({ ts: "2026-11-07T10:00:00.000Z", sessionId: SB8, agent: "meta-tool", event: "gate-blocked", details: "TREE_NOT_ENTERED", nextAgent: null, phase: null, status: null }),
+      JSON.stringify({ ts: "2026-11-07T10:00:01.000Z", sessionId: SB8, agent: "coach", event: "agent.coach", details: null, nextAgent: null, phase: null, status: null }),
+      JSON.stringify({ ts: "2026-11-07T10:00:02.000Z", sessionId: SB8, agent: "who-knows", event: "some.future_event", details: null, nextAgent: null, phase: null, status: null }),
+    ]
+    writeFileSync(path.join(folder, "history.jsonl"), lines.map((l) => l + "\n").join(""))
+    const base = defaultInspectorConfig({ agentsRoot: dirs.agentsDir, logsDir: dirs.logsDir })
+    const config: SessionInspectorConfig = { ...base, paths: { ...base.paths, dbMode: dbPath } }
+    return { dbPath, folder, cleanup: dirs.cleanup, config }
+  }
+  test("gate-blocked row: category coach-activity, historyEvent ABSENT (routed rows are out of scope), strict five keys; the untouched future-event row STILL carries its field; neighbors byte-identical", () => {
+    const f = ad38Fixture()
+    try {
+      const r = buildTimeline({ dbPath: f.dbPath, sessionId: SB8, sessionPath: f.folder, io: nodeScanIO(), config: f.config, filters: {} })
+      if (!r.ok) throw new Error(`timeline failed: ${r.code} ${r.message}`)
+      const envs = r.envelopes
+      const base = ["category", "ts", "sourceRef", "summary", "payloadRef"]
+      const byLine = (ln: number) => envs.find((e) => e.sourceRef.kind === "historyLine" && e.sourceRef.line === ln) as any
+      const gb = byLine(1)
+      expect(gb.category).toBe("coach-activity")
+      expect(gb.historyEvent).toBeUndefined()
+      expect(Object.keys(gb)).toEqual(base)
+      const coach = byLine(2)
+      expect(coach.category).toBe("coach-activity")
+      expect(Object.keys(coach)).toEqual(base) // byte-identical to how coach rows always rendered
+      const surviving = byLine(3)
+      expect(surviving.category).toBe("other")
+      expect(surviving.historyEvent).toBe("some.future_event") // AD37 label path INTACT for what truly remains
+      expect(Object.keys(surviving)).toEqual([...base, "historyEvent"])
+      const txt = envs.find((e) => e.sourceRef.kind === "dbId" && (e.sourceRef as any).dbId === "prt_txt8") as any
+      expect(Object.keys(txt)).toEqual(base)
+    } finally { f.cleanup() }
   })
 })

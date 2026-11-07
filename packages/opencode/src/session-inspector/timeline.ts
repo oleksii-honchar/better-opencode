@@ -83,7 +83,26 @@ const byteLength = (text: string): number => Buffer.byteLength(text, "utf8")
 // they are dropped at the JOIN, BEFORE category routing (config-deletion was rejected: the
 // unmatched-fallback would merely relocate them to Other). Global by design — the list below
 // is the single toggle if the owner ever re-wants them. Read-side only: DB rows untouched.
-export const EXCLUDED_EVENT_TYPES: readonly string[] = ["step-start", "step-finish"]
+// AD36 (B) — SECOND NAMED ENTRY, same mechanism: `nudge-delivered` lines are Engine-Nudge
+// DELIVERY RECEIPTS (Phase-0 census, real copy): details carry only "kind=… node=…" —
+// pure delivery-tracking, they do NOT duplicate nudge content. The nudge CONTENT renders
+// via its own lane (the synthetic-part join, Task 4b) when applicable, so receiving the
+// receipt anywhere else would show bookkeeping as if it were content.
+export const EXCLUDED_EVENT_TYPES: readonly string[] = ["step-start", "step-finish", "nudge-delivered"]
+
+// AD36 (C) — the nudge TYPE STRING lives only inside the record itself: the reminder header
+// token, verbatim ("<system-reminder>\n  Traversal Check:", "Rule Compliance:", …). Boundary
+// is '>' or newline with ≤4 indent — PROVEN on the real copy: zero false heads across every
+// headerless synthetic row (compaction reminder, BOOTSTRAP_PACK, skill_content, attachment
+// pointers); a ^-anchored variant was REJECTED by that same probe. Field-presence only:
+// records without a header carry NO type and never invent one (card: "non-string → bare brick").
+const NUDGE_HEADER_RE = /(?:>|\n)[ \t]{0,4}([A-Z][A-Za-z .-]{2,42}?):/
+function nudgeKindFrom(text: unknown): string | undefined {
+  if (typeof text !== "string") return undefined
+  // headers live at the head of the reminder block; scanning the whole body risks mid-text prose
+  const m = NUDGE_HEADER_RE.exec(text.slice(0, 240))
+  return m ? m[1].trim().toLowerCase() : undefined
+}
 
 function truncationFor(raw: string, capBytes: number): TruncationFields {
   if (byteLength(raw) <= capBytes) return {}
@@ -213,11 +232,15 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
       // Task 4b: synthetic text parts defer to the nudges lane when the column exists;
       // without it they keep ordinary part mapping (degrade visibly, never silently).
       if (nudgesColumn !== undefined && partType === "text" && parsed?.synthetic === true) {
+        // AD36 (C), AD27 field pattern: scoped optional field on NUDGE ROWS ONLY, appended LAST
+        // when present; every other envelope stays byte-identical. Value = the record's own
+        // header token, lowercased, NOTHING re-derived (census lane updated as named change).
+        const nudgeKind = nudgeKindFrom(parsed?.text)
         syntheticCandidates.push({
           ms: part.time_created,
           rowid: part.rowid,
           partId: part.id,
-          envelope: { ...envelope, category: nudgesColumn.id },
+          envelope: { ...envelope, category: nudgesColumn.id, ...(nudgeKind !== undefined ? { nudgeKind } : {}) },
         })
         continue
       }
@@ -234,12 +257,20 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
     const historyText = input.io.read(path.join(input.sessionPath, "history.jsonl"))
     if (historyText !== undefined) {
       const transitionCat = router.historyEventCategory("persona.transition")
+      // AD37 (R1): 'other' is the catch-all — a history row that lands there has no lane to
+      // describe it, but ITS OWN record does. Field = line.event verbatim (no transformation),
+      // scoped to catch-all HISTORY rows ONLY: part feeds (both arms) and every routed row keep
+      // byte-identical envelopes; a non-string identifier simply gets NO field.
+      const catchAllId = router.catchAllId()
       const lines = historyText.split("\n")
       lines.forEach((raw, index) => {
         if (raw.length === 0) return
         const line = tryJson(raw)
         if (line === undefined) return // invalid (non-JSON) line: SKIP, stream continues (§6.4/AC5)
         if (typeof line.ts !== "string" || typeof line.event !== "string") return
+        // AD36 (A) — display-exclusion holds on ANY source path: the same named constant the DB
+        // arm applies governs the history arm too (the card's "whatever the source path").
+        if (EXCLUDED_EVENT_TYPES.includes(line.event)) return
         const ms = Date.parse(line.ts)
         if (Number.isNaN(ms)) return
         const subAgent = typeof line.subAgentSessionId === "string" ? line.subAgentSessionId : undefined
@@ -276,6 +307,7 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
           },
           summary: historySummary(line.event, detailsObject),
           payloadRef: { kind: "historyLine", file: "history.jsonl", line: index + 1, ...truncationFor(raw, capBytes) },
+          ...(category === catchAllId && typeof line.event === "string" ? { historyEvent: line.event } : {}), // LAST key — named sixth-key census (ad37 join lane pins both sides)
         }
         rows.push({ ms, bucket: 1, sub: index, envelope })
       })

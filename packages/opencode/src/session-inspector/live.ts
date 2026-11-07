@@ -18,7 +18,7 @@
 // (full rebuild from DB) covers it. DB stays the single rebuild source.
 
 import type { CategoryRouter } from "./category-mapper"
-import { partEnvelope } from "./timeline"
+import { EXCLUDED_EVENT_TYPES, partEnvelope } from "./timeline"
 import type { PartRowView, TimelineEnvelope } from "./timeline"
 
 export const SESSION_INSPECTOR_LIVE_PATH = "/session-inspector/session/:sessionID/live"
@@ -57,6 +57,18 @@ export function liveEnvelopeFor(event: LiveEventPayload, ctx: LiveContext): Time
     if (typeof part?.id !== "string") return null
     const row = ctx.rowLookup(part.id)
     if (row === undefined) return null // DB is the source; reload rebuilds — never render the event body
+    // AD36 (A) — THE LEAK'S LAYER: the join filtered step-* (AD18) but this live push path mapped
+    // every part type through the shared partEnvelope, so a live view streamed lifecycle step cells
+    // back in. The live path is a display path too: the same constant drops the same rows here.
+    // Read-side only; the DB rows are untouched.
+    let partType = ""
+    try {
+      const parsed = JSON.parse(row.data) as { type?: unknown } | null
+      if (parsed && typeof parsed.type === "string") partType = parsed.type
+    } catch {
+      // unparseable data: partEnvelope already renders it neutrally — no type to exclude on
+    }
+    if (EXCLUDED_EVENT_TYPES.includes(partType)) return null
     return partEnvelope(row, ctx.router, new Set(ctx.childIds), ctx.capBytes)
   }
 

@@ -134,3 +134,78 @@ describe("liveSseFrameBody + route surface", () => {
     expect(SESSION_INSPECTOR_LIVE_PATH.replace(/\/$/, "")).not.toBe("/session-inspector/session/:sessionID/timeline")
   })
 })
+
+
+// ---------------------------------------------------------------------------
+// AD36 A — THE LEAK'S MECHANISM: message.part.updated on the LIVE path mapped ANY
+// part type through the shared partEnvelope; the join's EXCLUDED_EVENT_TYPES guard
+// (timeline.ts:201-202) was never applied here. The owner watched a live session:
+// step cells streamed in DESPITE the join filter. The live path is a display path —
+// the same display-exclusion constant must drop the same rows here.
+describe("ad36 live path honors EXCLUDED_EVENT_TYPES (the streaming-arm fix)", () => {
+  const world = makeWorld()
+  const cfg = defaultInspectorConfig({ agentsRoot: world.dirs.agentsDir, logsDir: world.dirs.logsDir })
+  const router = buildCategoryRouter(cfg)
+  const stepStart = rowView("prt_ad36_ss", VIEW, T("2026-11-06T10:00:00Z"), { type: "step-start", snapshot: "sha-ad36" }, JSON.stringify({ role: "assistant" }), 91)
+  const stepFinish = rowView("prt_ad36_sf", VIEW, T("2026-11-06T10:00:05Z"), { type: "step-finish", reason: "stop", tokens: {}, cost: 0 }, JSON.stringify({ role: "assistant" }), 92)
+  const keepRow = rowView("prt_ad36_keep", VIEW, T("2026-11-06T10:00:06Z"), { type: "text", text: "ordinary streamed part" }, JSON.stringify({ role: "assistant" }), 93)
+  const ctx = {
+    sessionId: VIEW,
+    router,
+    capBytes: cfg.limits.payloadCapBytes,
+    rowLookup: (id: string) => (id === stepStart.id ? stepStart : id === stepFinish.id ? stepFinish : id === keepRow.id ? keepRow : undefined),
+    childIds: ["ses_live_child"] as readonly string[],
+  }
+  const busPart = (r: PartRowView) => {
+    const d = JSON.parse(r.data)
+    return { id: "evt_ad36_" + r.rowid, type: "message.part.updated", properties: { sessionID: VIEW, time: r.time_created, part: { id: r.id, messageID: "msg_l1", sessionID: VIEW, ...d } } }
+  }
+  test("step-start / step-finish PartUpdated produce NO envelope (they were exactly what streamed into lifecycle for the owner's live session)", () => {
+    expect(liveEnvelopeFor(busPart(stepStart), ctx)).toBeNull()
+    expect(liveEnvelopeFor(busPart(stepFinish), ctx)).toBeNull()
+  })
+  test("over-blocking guard: a non-excluded streamed part still maps through the shared envelope (byte-parity with the join is untouched)", () => {
+    const env = liveEnvelopeFor(busPart(keepRow), ctx)
+    expect(env).not.toBeNull()
+    expect(env!.category).toBe("assistant-text")
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// AD37 negative — the live path. historyEvent is HISTORY-ARM vocabulary: a streamed
+// part that catch-alls into 'other' has no history identity, so it must stay a strict
+// five-key bare brick (the card's "non-string identifiers -> no field" rule stated on
+// the second source path). Over-blocking guard included: an ordinary mapped part is
+// unaffected either way.
+describe("ad37 live path never fabricates historyEvent (part feeds have no event string)", () => {
+  const world = makeWorld()
+  const cfg = defaultInspectorConfig({ agentsRoot: world.dirs.agentsDir, logsDir: world.dirs.logsDir })
+  const router = buildCategoryRouter(cfg)
+  const unknownPart = rowView("prt_ad37_unk", VIEW, T("2026-11-07T10:00:00Z"), { type: "quantum-flux" }, JSON.stringify({ role: "assistant" }), 91)
+  const keepRow = rowView("prt_ad37_keep", VIEW, T("2026-11-07T10:00:06Z"), { type: "text", text: "ordinary streamed part" }, JSON.stringify({ role: "assistant" }), 92)
+  const ctx = {
+    sessionId: VIEW,
+    router,
+    capBytes: cfg.limits.payloadCapBytes,
+    rowLookup: (id: string) => (id === unknownPart.id ? unknownPart : id === keepRow.id ? keepRow : undefined),
+    childIds: ["ses_live_child"] as readonly string[],
+  }
+  const busPart = (r: PartRowView) => {
+    const d = JSON.parse(r.data)
+    return { id: "evt_ad37_" + r.rowid, type: "message.part.updated", properties: { sessionID: VIEW, time: r.time_created, part: { id: r.id, messageID: "msg_l1", sessionID: VIEW, ...d } } }
+  }
+  test("a streamed unknown part that falls to 'other' keeps the STRICT FIVE keys — no historyEvent on a part feed", () => {
+    const env = liveEnvelopeFor(busPart(unknownPart), ctx)
+    expect(env).not.toBeNull()
+    expect(env!.category).toBe("other")
+    expect(Object.keys(env!)).toEqual(["category", "ts", "sourceRef", "summary", "payloadRef"])
+    expect((env as any).historyEvent).toBeUndefined()
+  })
+  test("over-blocking guard: the mapped text part is byte-identical to the join envelope (no AD37 field anywhere)", () => {
+    const env = liveEnvelopeFor(busPart(keepRow), ctx)
+    expect(env!.category).toBe("assistant-text")
+    expect((env as any).historyEvent).toBeUndefined()
+    expect(Object.keys(env!)).toEqual(["category", "ts", "sourceRef", "summary", "payloadRef"])
+  })
+})
