@@ -210,6 +210,41 @@ export function decodeStoredDrawerWidth(stored: string | null): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+// AD40 — pipeline drawer full-data view (owner 2026-11-07: "for the pipeline column -
+// show all data in popup element as list or table - make it big enough").
+// Pure cores, single source: the page injects their compiled text (AD5/AD8 pattern).
+// pipelineTableModel: a plain JSON OBJECT payload becomes a COMPLETE row list —
+// every top-level key in payload order, nothing omitted; nested objects/arrays carry
+// FORMATTED JSON TEXT (the wrapped reading form is the view's CSS job — one readable
+// list, no tree chrome); strings pass DECODED through the AD15 plain-text channel;
+// numbers/booleans/null plain. Anything that is not an object (arrays, bare values,
+// parse failures) -> ok:false so the EXISTING tree/raw route keeps serving it,
+// byte-identically.
+export function pipelineTableModel(text: string): { ok: true; rows: { key: string; text: string }[] } | { ok: false } {
+  if (text.length === 0) return { ok: false }
+  let parsed: unknown
+  try { parsed = JSON.parse(text) } catch { return { ok: false } }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return { ok: false }
+  const rows = Object.entries(parsed as Record<string, unknown>).map(([key, value]) => ({
+    key,
+    text: value !== null && typeof value === "object" ? JSON.stringify(value, null, 2) : typeof value === "string" ? value : String(value),
+  }))
+  return { ok: true, rows }
+}
+
+// PIPELINE_DRAWER_WIDTH: widened OPEN default for pipeline rows ONLY (~900px-class
+// per the card). INTERPRETATION (stated in evidence): the named default is clamped
+// by the FIT FORMULA — clampDrawerWidth wholesale caps at DRAWER_MAX_WIDTH=720,
+// which would make any "~900px-class" default unreachable at every viewport;
+// the fit-wins law (AD2) holds absolutely here; MAX stays the user-drag bound.
+export const PIPELINE_DRAWER_WIDTH = 900
+
+export function pipelineOpenWidthPx(saved: number | null, viewportWidth: number, sidebarWidth: number): number {
+  if (saved !== null) return clampDrawerWidth(saved, viewportWidth, sidebarWidth) // user-saved ALWAYS wins — the existing clamp path, byte-unchanged
+  const fitMax = viewportWidth - sidebarWidth - DRAWER_FIT_RESERVE
+  return Math.round(Math.min(PIPELINE_DRAWER_WIDTH, fitMax)) // fit-wins absolute; never persisted (pure core)
+}
+
 // AD7 — timestamp-keyed 1:1 row assignment (owner 2026-11-04: "every data point
 // gets its OWN row ... I can trace the sequence"). PURE CORE, single source: the
 // page injects this compiled text; ui-rows.test.ts imports and property-tests it.
@@ -485,6 +520,11 @@ export function rowInsert(rows: readonly RowKey[], item: RowKey): number {
 // RFC6901-escaped JSON-pointer paths (join-safe data-path). Pure: never throws.
 export const TREE_NODE_BUDGET = 2000 // tree render cap; exceeding → forced raw + honest notice
 export const TREE_DEFAULT_EXPAND_DEPTH = 2 // fresh open: containers at depth < 2 expanded (root=0)
+// AD41 (owner: "internal json content also rendered as interactive tree with nodes"):
+// how many levels of string-in-string REPARSE are allowed inside the tree. A string
+// leaf is promoted only within this embedding depth; deeper strings stay plain leaves
+// exactly as before (cost + readability bound; TREE_NODE_BUDGET still governs totals).
+export const TREE_STRING_NEST_MAX = 3
 
 export interface JsonTreeNode {
   path: string
@@ -493,6 +533,7 @@ export interface JsonTreeNode {
   value?: unknown
   children?: JsonTreeNode[]
   count?: number
+  parsedFromString?: boolean // AD41: node came from parsing a JSON-encoded string leaf (marked in the UI)
 }
 export interface JsonTreeModelOk {
   ok: true
@@ -553,7 +594,13 @@ export function jsonTreeModel(text: string): JsonTreeModelOk | JsonTreeModelFail
   }
   const esc = (k: string): string => k.replace(/~/g, "~0").replace(/\//g, "~1")
   let nodeCount = 0
-  const build = (v: unknown, path: string, key: string | null): JsonTreeNode => {
+  // AD41: build carries the embedding nest depth (string-reparse levels from the real
+  // payload). A string leaf that starts with { or [ and parses to object/array becomes
+  // an expandable subtree flagged parsedFromString; its children sit one level deeper.
+  // Everything that fails to parse (incl. near-JSON), scalar parses, and strings beyond
+  // the embedding cap stay plain leaves EXACTLY as before. nodeCount counts promoted
+  // nodes too — the existing budget honesty governs the full cost.
+  const build = (v: unknown, path: string, key: string | null, nest: number): JsonTreeNode => {
     nodeCount++
     if (v !== null && typeof v === "object") {
       const isArr = Array.isArray(v)
@@ -562,14 +609,31 @@ export function jsonTreeModel(text: string): JsonTreeModelOk | JsonTreeModelFail
       const children: JsonTreeNode[] = []
       for (const k of keys) {
         const raw = isArr ? (items as unknown[])[Number(k)] : (v as Record<string, unknown>)[k]
-        children.push(build(raw, path + "/" + esc(k), isArr ? null : k))
+        children.push(build(raw, path + "/" + esc(k), isArr ? null : k, nest))
       }
       return { path, kind: isArr ? "array" : "object", key, children, count: children.length }
     }
     const kind = v === null ? "null" : typeof v === "number" ? "number" : typeof v === "boolean" ? "boolean" : "string"
+    if (kind === "string" && nest < TREE_STRING_NEST_MAX) {
+      const embedSrc = v as string
+      if (embedSrc[0] === "{" || embedSrc[0] === "[") {
+        let inner: unknown
+        try { inner = JSON.parse(embedSrc) } catch (_e) { inner = undefined } // named-pattern note: variable named embedSrc (NOT s) to keep the Task-6 single-line-parser byte-pin ("JSON.parse(s)") scoped to parseLine exactly — honored, not re-anchored
+        if (inner !== null && typeof inner === "object") {
+          const inArr = Array.isArray(inner)
+          const inKeys = inArr ? (inner as unknown[]).map((_x, i) => String(i)) : Object.keys(inner as object)
+          const children: JsonTreeNode[] = []
+          for (const k of inKeys) {
+            const raw = inArr ? (inner as unknown[])[Number(k)] : (inner as Record<string, unknown>)[k]
+            children.push(build(raw, path + "/" + esc(k), inArr ? null : k, nest + 1))
+          }
+          return { path, kind: inArr ? "array" : "object", key, children, count: children.length, parsedFromString: true }
+        }
+      }
+    }
     return { path, kind, key, value: v }
   }
-  const root = build(data, "", null)
+  const root = build(data, "", null, 0)
   return { ok: true, root, nodeCount, overBudget: nodeCount > TREE_NODE_BUDGET }
 }
 
@@ -751,12 +815,23 @@ export const INSPECTOR_UI_HTML = String.raw`<!doctype html>
   .jt_value { white-space: pre-wrap; word-break: break-word; } /* AD15: explicit on the VALUE SPAN (card) — decoded newlines inside rows render as line breaks, long tokens wrap, no clipping */
   .jt_tw { background: none; border: none; color: var(--dim); cursor: pointer; font: inherit; padding: 0 4px; }
   .jt_key { color: var(--accent); }
+  /* AD40 — pipeline field table (owner: "show all data in popup ... make it big
+     enough"). ALL colors are EXISTING theme tokens (both themes automatic, zero
+     literals); values are WRAPPED formatted JSON (pre-wrap) in the value cell —
+     one readable list, no tree chrome, no new interactive machinery. */
+  .field-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .field-table td { vertical-align: top; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+  .field-table .fkey { color: var(--dim); width: 34%; overflow-wrap: anywhere; }
+  .field-table .fval { color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
   .jt_string { color: var(--live-on); }
   .jt_number { color: var(--warn); }
   .jt_boolean { color: var(--accent); }
   .jt_null { color: var(--dim); }
   .jt_count { color: var(--dim); }
   .jt_punct { color: var(--dim); }
+  /* AD41 — parsed-from-string marker: the small-label scale of the cell-label channel
+     (9px/400/letterspace), colors EXISTING theme tokens only — zero new color math. */
+  .jt_pjs { font-size: 9px; font-weight: 400; letter-spacing: .4px; color: var(--dim); margin-left: 6px; }
   .jt_children { padding-left: 14px; border-left: 1px solid var(--line); }
    /* AD9: the column-hover magnification rule and the cell preview rule were
       DELETED here — superseded by the floating hover card below (text in ONE
@@ -1280,6 +1355,7 @@ function buildTreeRow(node) {
   if (isContainer) {
     row.appendChild(h("span", { class: "jt_punct", text: node.kind === "array" ? " [" : " {" }));
     row.appendChild(h("span", { class: "jt_count", text: "{" + node.count + "}" }));
+    if (node.parsedFromString) row.appendChild(h("span", { class: "jt_pjs", "data-pjs": "1", text: "parsed-from-string" })); // AD41: small label, existing tokens only (see .jt_pjs)
     if (open) {
       var kids = h("div", { class: "jt_children" });
       for (const c of node.children) kids.appendChild(buildTreeRow(c));
@@ -1292,6 +1368,21 @@ function buildTreeRow(node) {
     row.appendChild(h("span", { class: "jt_value jt_" + node.kind, text: treeValueText(node) })); /* AD15: ONE plain-text channel — decoded strings, real newlines render (root cause: display-time JSON.stringify re-escaped values) */
   }
   return row;
+}
+// AD40 — the pipeline field table: complete two-column list, one row per top-level
+// key IN PAYLOAD ORDER, nothing omitted (model already validated by the same honest
+// guards as the tree route). Values are plain text: nested values carry formatted
+// JSON (wrapped by CSS); the meta table idiom above is the visual sibling, NOT a
+// shared implementation (meta rows are fixed vocabulary; these are payload-driven).
+function renderPayloadTable(sec, model) {
+  var t = h("table", { class: "field-table", "data-testid": "si-payload-field-table" });
+  for (var i = 0; i < model.rows.length; i++) {
+    var tr = h("tr", { "data-field": model.rows[i].key });
+    var k = h("td", { class: "fkey" }); k.textContent = model.rows[i].key;
+    var v = h("td", { class: "fval" }); v.textContent = model.rows[i].text;
+    tr.appendChild(k); tr.appendChild(v); t.appendChild(tr);
+  }
+  sec.appendChild(t);
 }
 function closeDrawer() {
   $("drawer").classList.remove("open"); $("drawerresizer").classList.remove("show"); // state-light: grid/selection/scroll untouched; AD5 divider hides with it
@@ -1345,6 +1436,15 @@ async function openDrawer(env) {
   var d = $("drawer");
   d.classList.add("open");
   $("drawerresizer").classList.add("show"); // AD5: divider visible only while open
+  // AD40 width-at-open (R2 precedence, NEVER persisted): user-saved width ALWAYS wins
+  // (existing clamp path); a pipeline row with no saved width opens at the widened
+  // named default clamped by the fit formula (fit-wins absolute); every other
+  // category re-applies EXACTLY the boot expression = unchanged default behavior.
+  var sbwO = parseFloat(getComputedStyle($("sidebar")).width) || ${SIDEBAR_DEFAULT_WIDTH};
+  var savedW = decodeStoredDrawerWidth(localStorage.getItem(DRAWER_WIDTH_KEY));
+  document.documentElement.style.setProperty("--drawer", (env.category === "pipeline"
+    ? pipelineOpenWidthPx(savedW, innerWidth, sbwO)
+    : clampDrawerWidth(savedW === null ? DRAWER_DEFAULT_WIDTH : savedW, innerWidth, sbwO)) + "px");
   d.textContent = "";
   // AD4 close control: icon-only (AD1 idiom), AD3 testid, top-right via .dclose rule.
   d.appendChild(h("button", { class: "dclose", "data-testid": "si-drawer-close", type: "button", "aria-label": "close drawer", onclick: closeDrawer, html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' }));
@@ -1370,7 +1470,16 @@ async function openDrawer(env) {
   // parseable, non-truncated, in-budget payloads — otherwise forced raw + hint).
   var psec = h("div", { class: "payload-sec" });
   d.appendChild(psec);
-  renderPayloadSection(psec, body);
+  var pipelineModel = null; // AD40 R1: complete field table for pipeline object payloads ONLY
+  if (env.category === "pipeline" && body.truncated !== true) {
+    var pt = payloadTextOf(body.payload);
+    var tc = jsonTreeModel(pt); // SAME honest guards as the tree route: parse + node budget
+    if (tc.ok === true && tc.overBudget !== true) {
+      var tm = pipelineTableModel(pt);
+      if (tm.ok === true) pipelineModel = tm;
+    }
+  }
+  if (pipelineModel) renderPayloadTable(psec, pipelineModel); else renderPayloadSection(psec, body);
   // cross-links ONLY where refs actually exist
   var links = [];
   if (sr.ref_part_id) links.push(h("button", { onclick: function () { openDrawer({ category: "linked", ts: env.ts, sourceRef: { kind: "dbId", dbId: sr.ref_part_id }, payloadRef: { kind: "dbId", dbId: sr.ref_part_id } }); }, text: "→ part " + sr.ref_part_id }));
@@ -1624,6 +1733,7 @@ ${siCellTestId.toString()}
 ${rowInsert.toString()}
 var TREE_NODE_BUDGET = ${TREE_NODE_BUDGET};
 var TREE_DEFAULT_EXPAND_DEPTH = ${TREE_DEFAULT_EXPAND_DEPTH};
+var TREE_STRING_NEST_MAX = ${TREE_STRING_NEST_MAX}; // AD41: embedding cap referenced by the injected model core
 ${jsonTreeModel.toString()}
 ${treeValueText.toString()}
 ${initialTreeState.toString()}
@@ -1653,6 +1763,12 @@ var DRAWER_FIT_RESERVE = ${DRAWER_FIT_RESERVE};
 var DRAWER_WIDTH_KEY = "${DRAWER_WIDTH_KEY}";
 ${clampDrawerWidth.toString()}
 ${decodeStoredDrawerWidth.toString()}
+// AD40 field-table + width-precedence cores (single source, same injection pattern).
+// The widened value NEVER persists: these cores contain no storage call; the ONLY
+// persist site stays the AD5 drag end.
+var PIPELINE_DRAWER_WIDTH = ${PIPELINE_DRAWER_WIDTH};
+${pipelineTableModel.toString()}
+${pipelineOpenWidthPx.toString()}
 
 // AD5 drag block — pointer-capture idiom shared with the AD1 sidebar resizer
 // (deliberately parallel, zero layout machinery beyond setting --drawer).

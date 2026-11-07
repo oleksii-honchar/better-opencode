@@ -2646,3 +2646,167 @@ describe("ad39 owner-law — grid-header separation declarations, verbatim and l
     expect(body).toContain("background: var(--bg);")
   })
 })
+
+// ---------------------------------------------------------------------------
+// AD40 — owner (2026-11-07): "for the pipeline column - show all data in popup
+// element as list or table - make it big enough". Card shape: a pipeline-category
+// row whose payload parses to a plain JSON OBJECT renders its payload as a COMPLETE
+// two-column field table (every top-level key, payload order, nested values as
+// wrapped formatted JSON text in the value cell — one readable list, NO tree
+// chrome); the drawer opens at a widened NAMED default clamped by the EXISTING
+// fit formula (fit-wins, AD2, absolute) — a user-saved width (AD5) ALWAYS wins,
+// and the widened default NEVER persists. Every other category and every fallback
+// (truncated / not-parseable / over-budget) keeps the AD8 tree/raw behavior and
+// its honesty notes BYTE-IDENTICAL. Cores accessed via the namespace object (the
+// file's own AD8 idiom): an absent export REDs only these lanes, never the load.
+describe("ad40 pipeline payload field-table core", () => {
+  test("object payload -> complete ordered rows: every top-level key, payload order, nothing omitted", () => {
+    const input = JSON.stringify({ started: "2026-11-07T10:00:00Z", handoff: { from: "developer", to: "worker" }, steps: ["plan", "build"], attempts: 2, blocked: false, note: "plain string value" })
+    const r = (uiAll as any).pipelineTableModel(input)
+    expect(r).toBeDefined()
+    expect(r.ok).toBe(true)
+    expect(r.rows.map((x: any) => x.key)).toEqual(["started", "handoff", "steps", "attempts", "blocked", "note"])
+  })
+  test("values: strings decoded (AD15 one plain-text channel); numbers/booleans/null plain; nested objects/arrays are WRAPPED FORMATTED JSON in the value cell", () => {
+    const input = JSON.stringify({ s: "a \"quoted\" value", n: 1.5, b: false, nul: null, obj: { deep: [1, { x: "y" }] }, arr: [1, "two"] })
+    const rows = (uiAll as any).pipelineTableModel(input).rows
+    const v = (k: string) => rows.find((x: any) => x.key === k).text
+    expect(v("s")).toBe("a \"quoted\" value")
+    expect(v("n")).toBe("1.5")
+    expect(v("b")).toBe("false")
+    expect(v("nul")).toBe("null")
+    expect(v("obj")).toBe(JSON.stringify({ deep: [1, { x: "y" }] }, null, 2))
+    expect(v("arr")).toBe(JSON.stringify([1, "two"], null, 2))
+  })
+  test("empty object -> ok with ZERO rows (honest empty table, not a fallback)", () => {
+    const r = (uiAll as any).pipelineTableModel("{}")
+    expect(r.ok).toBe(true)
+    expect(r.rows.length).toBe(0)
+  })
+  test("non-objects and parse failures -> ok:false so the EXISTING tree/raw route serves them unchanged", () => {
+    for (const bad of ["[1,2,3]", "\"bare string\"", "42", "null", "not json at all", ""]) {
+      const r = (uiAll as any).pipelineTableModel(bad)
+      const rr = r ?? { ok: true } // an absent core must not crash silently into a pass
+      expect(rr.ok).toBe(false)
+    }
+  })
+})
+
+describe("ad40 pipeline drawer width precedence", () => {
+  test("named widened default exists, ~900px-class, above the standard default", () => {
+    const W = (uiAll as any).PIPELINE_DRAWER_WIDTH
+    expect(typeof W).toBe("number")
+    expect(Number.isFinite(W)).toBe(true)
+    expect(W).toBeGreaterThanOrEqual(800) // the card's "~900px-class": band-pinned, never a silent small value
+    expect(W).toBeLessThanOrEqual(960)
+    expect(W).toBeGreaterThan(uiAll.DRAWER_DEFAULT_WIDTH)
+  })
+  test("precedence: user-saved width ALWAYS wins through the EXISTING clamp; no saved -> widened default", () => {
+    expect((uiAll as any).pipelineOpenWidthPx(1000, 2000, 280)).toBe(uiAll.clampDrawerWidth(1000, 2000, 280))
+    expect((uiAll as any).pipelineOpenWidthPx(10, 2000, 280)).toBe(uiAll.clampDrawerWidth(10, 2000, 280))
+    expect((uiAll as any).pipelineOpenWidthPx(null, 2000, 280)).toBe((uiAll as any).PIPELINE_DRAWER_WIDTH)
+  })
+  test("fit-wins law absolute (AD2): narrow viewports clamp the widened default to fit; fit below the floor still wins; core never touches storage", () => {
+    const f = (uiAll as any).pipelineOpenWidthPx
+    expect(f(null, 600, 280)).toBe(600 - 280 - uiAll.DRAWER_FIT_RESERVE)
+    expect(f(null, 500, 280)).toBe(500 - 280 - uiAll.DRAWER_FIT_RESERVE) // fit floor < DRAWER_MIN: fit wins, as today
+    expect(f.toString()).not.toContain("localStorage")
+    expect(f.toString()).not.toContain("setItem")
+  })
+})
+
+describe("ad40 served routing — pipeline table + width-at-open; everything else byte-identical", () => {
+  test("pipeline object payloads route to the field table; opening sizes via the width-precedence core", () => {
+    expect(INSPECTOR_UI_HTML).toContain("env.category === \"pipeline\"")
+    expect(INSPECTOR_UI_HTML).toContain("pipelineTableModel(")
+    expect(INSPECTOR_UI_HTML).toContain("si-payload-field-table")
+    expect(INSPECTOR_UI_HTML).toContain("pipelineOpenWidthPx(")
+  })
+  test("the AD8 tree/raw machinery and every honesty note stay BYTE-IDENTICAL below the new route; the widened value NEVER persists (exactly one persist site — the AD5 drag end)", () => {
+    expect(INSPECTOR_UI_HTML).toContain("function renderPayloadSection(sec, body) {")
+    expect(INSPECTOR_UI_HTML).toContain("var forcedRaw = body.truncated === true || model.ok !== true || model.overBudget === true;")
+    // NOTE pinned in ASCII segments around the em-dash: injected cores reach the served
+    // copy through the transpiler's function.toString(), which re-encodes non-ASCII as \u2014
+    // — a pin spanning the dash would pin the PRINT form, not the note's identity.
+    expect(INSPECTOR_UI_HTML).toContain("not valid JSON (payload truncated at cap)")
+    expect(INSPECTOR_UI_HTML).toContain("raw view shown, full raw text below")
+    expect(INSPECTOR_UI_HTML).toContain("too many nodes for the tree view (over ")
+    const persists = (INSPECTOR_UI_HTML.match(/setItem\(DRAWER_WIDTH_KEY/g) || []).length
+    expect(persists).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AD41 — owner (2026-11-07, screenshot of the transitions drawer): "i need
+// internal json content also rendered as interactive tree with nodes".
+// Phase 0 (ready-made UI) resolved to EXTEND INTERNAL per the pre-authorized
+// standard (full options table + measured weights in materials/task-ad41-evidence.md).
+// Behaviors: a string leaf that JSON-parses to object/array becomes an EXPANDABLE
+// child subtree, visibly marked parsed-from-string; recursion through strings inside
+// parsed content up to a NAMED embedding cap (3); TREE_NODE_BUDGET keeps governing
+// total cost (over-budget including promoted nodes -> existing forced-raw honesty);
+// strings that merely LOOK JSON but fail, and scalar-parsing strings, stay plain;
+// the raw view and the field-table lane stay byte-identical (no promotion there).
+describe("ad41 json-in-string expansion — model core", () => {
+  const J = (v: unknown) => JSON.stringify(v)
+  test("a details-shaped stringified object becomes an expandable subtree marked parsedFromString", () => {
+    const m = (uiAll as any).jsonTreeModel(J({ details: J({ agent: "worker", phase: { deep: true } }) }))
+    expect(m.ok).toBe(true)
+    const det = m.root.children.find((c: any) => c.key === "details")
+    expect(det.kind).toBe("object")
+    expect(det.parsedFromString).toBe(true)
+    expect(det.count).toBe(2)
+    expect(det.children.map((c: any) => c.key)).toEqual(["agent", "phase"])
+    expect(det.children[1].kind).toBe("object") // real tree from the inner parse
+    expect(det.children[1].parsedFromString).toBeUndefined() // promotion marks the promoted node only
+    expect(det.path).toBeDefined() // join-safe data-path composition continues for the subtree (state works)
+  })
+  test("nested-stringified recursion honors the NAMED embedding cap; the named constant exists and is 3", () => {
+    expect((uiAll as any).TREE_STRING_NEST_MAX).toBe(3)
+    // chain built so the FOURTH string sits inside three promoted layers: it must stay a plain leaf
+    const sCap = J({ core: 1 })                       // the 4th string — at embed level 3: NO promotion
+    const three = J({ atCap: sCap })                  // 3rd string: promotes at level 2 -> its children sit at level 3
+    const two = J({ deeper: three })                  // 2nd string: promotes at level 1
+    const one = J({ inner: two })                     // 1st string: promotes at level 0
+    const m = (uiAll as any).jsonTreeModel(J({ details: one }))
+    const at = (path: string) => { let n = m.root; for (const k of path.split("/").filter(Boolean)) n = n.children.find((c: any) => c.key === k); return n }
+    expect(at("details").parsedFromString).toBe(true)          // level 1 promotion (the details string itself)
+    expect(at("details/inner").parsedFromString).toBe(true)    // level 2
+    expect(at("details/inner/deeper").parsedFromString).toBe(true) // level 3 — boundary promotes
+    const capped = at("details/inner/deeper/atCap")
+    expect(capped.kind).toBe("string") // level 4 string: cap holds, plain leaf exactly as today
+    expect(capped.value).toBe(sCap)
+    expect(capped.parsedFromString).toBeUndefined()
+  })
+  test("non-JSON, broken near-JSON, scalar-parsing, and empty strings are byte-identical plain leaves", () => {
+    const payload = { s: "plain text", near: J({ a: 1 }).slice(0, 5), num: "5", bool: "true", empty: "", nul: "" }
+    const m = (uiAll as any).jsonTreeModel(J(payload))
+    for (const c of m.root.children) {
+      expect(c.kind).toBe("string")
+      expect(c.parsedFromString).toBeUndefined()
+      expect(c.value).toBe((payload as any)[c.key!])
+    }
+  })
+  test("TREE_NODE_BUDGET keeps governing: promoted nodes count into the cap (over -> existing overBudget honesty; small stays under)", () => {
+    const big = J(Object.fromEntries(Array.from({ length: 2100 }, (_x, i) => ["k" + i, i])))
+    const over = (uiAll as any).jsonTreeModel(J({ details: big }))
+    expect(over.ok).toBe(true)
+    expect(over.nodeCount).toBeGreaterThan((uiAll as any).TREE_NODE_BUDGET)
+    expect(over.overBudget).toBe(true) // promoted subtree cost is what pushed it over
+    const small = (uiAll as any).jsonTreeModel(J({ details: J({ a: 1, b: 2 }) }))
+    expect(small.overBudget).toBe(false)
+  })
+})
+
+describe("ad41 builder + marker (served copy) + untouched lanes", () => {
+  test("the served builder renders an expandable branch with an ASCII parsed-from-string marker chip", () => {
+    expect(INSPECTOR_UI_HTML).toContain("parsedFromString") // model-side promotion flag exists on the wire
+    expect(INSPECTOR_UI_HTML).toContain("jt_pjs") // marker chip class (ASCII-stable)
+    expect(INSPECTOR_UI_HTML).toContain("parsed-from-string") // marker text (ASCII-stable, no non-ASCII spans)
+    expect(INSPECTOR_UI_HTML).toContain("data-pjs") // join-safe marker hook for tests/e2e
+  })
+  test("pre-pin (green by design): plain-string model output shape is untouched — no implicit extra keys anywhere", () => {
+    const m = (uiAll as any).jsonTreeModel('{"a":"hi"}')
+    expect(m.root.children[0]).toEqual({ path: "/a", kind: "string", key: "a", value: "hi" })
+  })
+})
