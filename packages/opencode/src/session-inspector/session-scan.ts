@@ -36,7 +36,10 @@ export interface ScanRecord {
   scaffoldIncomplete?: true
 }
 
-const SCAN_DEPTH_LIMIT = 4
+// AD42: the depth cap and the per-folder record builder are shared with the feed's
+// folder-name merge — ONE frontmatter/scan-record definition (the feed must emit
+// byte-exact scan-route shapes, and this walk now runs through the same builder).
+export const SCAN_DEPTH_LIMIT = 4
 
 // verbatim from reminders.ts sessionIDFromFrontmatter
 function sessionIdFromFrontmatter(text: string): string | undefined {
@@ -67,25 +70,34 @@ export function* scanSessionFolders(input: ScanInput): Generator<ScanRecord> {
   }
 }
 
+/**
+ * AD42 — ONE folder → its scan record, or undefined (no session.md / no sessionId).
+ * The scan walk below and the feed's folder-name merge both run through this:
+ * the merge must be able to emit EXACT scan-route record shapes without re-implementing
+ * (or drifting from) the frontmatter parsing and the scaffold-completeness law.
+ */
+export function scanRecordForFolder(io: ScanIO, dir: string): ScanRecord | undefined {
+  const markdown = io.read(path.join(dir, "session.md"))
+  if (markdown === undefined) return undefined
+  const sessionId = sessionIdFromFrontmatter(markdown)
+  if (sessionId === undefined) return undefined
+  const history = io.read(path.join(dir, "history.jsonl"))
+  const scaffoldComplete = history !== undefined && history.split("\n").some((line) => line.trim().length > 0)
+  // key insertion order = stable JSON field order on the wire
+  const record: ScanRecord = { sessionId, folderPath: dir, folderOnly: true }
+  const title = frontmatterField(markdown, "title")
+  if (title !== undefined) record.title = title
+  const timeCreated = frontmatterField(markdown, "timeCreated")
+  if (timeCreated !== undefined) record.timeCreated = timeCreated
+  if (!scaffoldComplete) record.scaffoldIncomplete = true
+  return record
+}
+
 function* walkDirectory(io: ScanIO, dir: string, depth: number): Generator<ScanRecord> {
   if (depth < 0) return
 
-  const markdown = io.read(path.join(dir, "session.md"))
-  if (markdown !== undefined) {
-    const sessionId = sessionIdFromFrontmatter(markdown)
-    if (sessionId !== undefined) {
-      const history = io.read(path.join(dir, "history.jsonl"))
-      const scaffoldComplete = history !== undefined && history.split("\n").some((line) => line.trim().length > 0)
-      // key insertion order = stable JSON field order on the wire
-      const record: ScanRecord = { sessionId, folderPath: dir, folderOnly: true }
-      const title = frontmatterField(markdown, "title")
-      if (title !== undefined) record.title = title
-      const timeCreated = frontmatterField(markdown, "timeCreated")
-      if (timeCreated !== undefined) record.timeCreated = timeCreated
-      if (!scaffoldComplete) record.scaffoldIncomplete = true
-      yield record
-    }
-  }
+  const record = scanRecordForFolder(io, dir)
+  if (record !== undefined) yield record
 
   if (depth === 0) return
   const entries = io.readDir(dir)

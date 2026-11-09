@@ -219,15 +219,21 @@ describe("ad18 join-step exclusion — step-start/step-finish surface in NO colu
     // SECOND NAMED ENTRY, 'nudge-delivered' (delivery receipts — Phase-0: pure tracking, no content).
     // 'step-start'/'step-finish' semantics are byte-identical; the pin's INTENT (named, commented,
     // single toggle) is asserted below and stays untouched.
-    expect(EXCLUDED_EVENT_TYPES).toEqual(["step-start", "step-finish", "nudge-delivered"])
+    // v14 (Design v1 traceability, design 261107): the AD36(B) nudge-delivered entry is
+    // SUPPRESSED into the lane system (labeled receipts, never invisibility) — only the
+    // join-plumbing step names stay excluded.
+    expect(EXCLUDED_EVENT_TYPES).toEqual(["step-start", "step-finish"])
     const src = require("node:fs").readFileSync(new URL("./timeline.ts", import.meta.url), "utf8") as string
     // Checker anchor fix (during GREEN): the owner comment PRECEDES the export, so the slice
     // window is taken from the declaration backwards incl. the comment header. Pin intent —
     // "the directive is recorded AT the constant" — unchanged.
     // AD36 checker-window note: the constant now carries TWO entry-comments (AD18 + AD36), so the
     // backward window widened 500→1200; both directives being present at the constant is now pinned.
+    // v14 note: the AD36 text gained a SUPERSEDED block ABOVE the constant (the third named
+    // change to cite at this site) — window widened 1200→2400 by the same recorded logic:
+    // every directive that governs the constant stays pinned, including the owner supersession.
     const idx = src.indexOf("export const EXCLUDED_EVENT_TYPES")
-    const decl = src.slice(Math.max(0, idx - 1200), idx + 300)
+    const decl = src.slice(Math.max(0, idx - 2400), idx + 300)
     expect(decl).toMatch(/not informative/i) // owner directive recorded at the constant, per card
     expect(decl).toMatch(/2026-11-05/)
     expect(decl).toMatch(/delivery receipt|DELIVERY RECEIPT/i) // AD36: second entry documented at the constant too
@@ -779,6 +785,11 @@ describe("ad36 join: history-arm exclusions + scoped nudgeKind (real-shaped reco
       JSON.stringify({ ts: "2026-11-06T10:00:04.000Z", sessionId: SB6, agent: "simple-session", event: "nudge-delivered", details: "kind=category-progress node=file_x", nextAgent: null, phase: null, status: null }),
       // unchanged neighbors: pipeline keeps its own vocabulary
       historyLine({ ts: "2026-11-06T10:00:05.000Z", sessionId: SB6, agent: "developer", event: "started", nextAgent: "worker", phase: "implementation", status: null }),
+      // v14 (Design v1 traceability): the NEW coach names — judge-family kv lines land in
+      // coach-judge; persona-boot joins transitions; neither is a catch-all leftover.
+      JSON.stringify({ ts: "2026-11-06T10:00:06.000Z", sessionId: SB6, agent: "simple-session", event: "judge-assess", details: "kind=traversal answer=none node=file_a1", nextAgent: null, phase: null, status: null }),
+      JSON.stringify({ ts: "2026-11-06T10:00:07.000Z", sessionId: SB6, agent: "simple-session", event: "judge-summary", details: "pos=file_a1 moves=3 path=a,b flags=turns_absorbed=9 unabsorbed=0 calls=2 digest=" + "x".repeat(500), nextAgent: null, phase: null, status: null }),
+      JSON.stringify({ ts: "2026-11-06T10:00:08.000Z", sessionId: SB6, agent: "session", event: "persona-boot", details: null, nextAgent: null, phase: null, status: null }),
     ]
     writeFileSync(path.join(folder, "history.jsonl"), lines.map((l) => l + "\n").join(""))
     const base = defaultInspectorConfig({ agentsRoot: dirs.agentsDir, logsDir: dirs.logsDir })
@@ -802,14 +813,41 @@ describe("ad36 join: history-arm exclusions + scoped nudgeKind (real-shaped reco
       expect(started[0]!.summary).toContain("started")
     } finally { f.cleanup() }
   })
-  test("B: nudge-delivered receipts are absent from 'other' and everywhere; the rest of the column content is exactly what it was", () => {
+  test("B (v14 contract): nudge-delivered receipts render in coach-activity with receipt wording — labeled bookkeeping, never 'other', never content; other lanes unchanged", () => {
     const f = ad36Fixture()
     try {
       const envs = run(f)
-      const inOther = envs.filter((e) => e.category === "other")
-      expect(inOther).toEqual([]) // today: 2 receipts fall to catchAll — NAMED re-anchor of THAT behavior
-      const receipts = envs.filter((e) => JSON.stringify(e).includes("nudge-delivered"))
-      expect(receipts).toEqual([])
+      expect(envs.filter((e) => e.category === "other")).toEqual([]) // the ORIGINAL over-block guard: nothing leaks to catch-all
+      const receipts = envs.filter((e) => e.category === "coach-activity")
+      expect(receipts.length).toBe(2)
+      // the summary states the record (kind/node tracking) — NO content bytes ride a receipt
+      expect(receipts.map((e) => e.summary).sort()).toEqual([
+        "received · kind=category-progress node=file_x",
+        "received · kind=traversal-ladder node=file_c108d7053d7dbde977fb5b2e682e0784",
+      ])
+      // the content lane is untouched by the receipts (Task 4b join renders nudge content separately; test C pins it)
+      for (const r of receipts) expect(JSON.stringify(r)).not.toContain("Traversal Check")
+      // over-exclusion guard: the pipeline neighbor keeps rendering exactly as before
+      expect(envs.filter((e) => e.category === "pipeline").length).toBe(1)
+    } finally { f.cleanup() }
+  })
+  test("D (v14): judge-assess/judge-summary classify to coach-judge with their record text (display-bounded); persona-boot classifies to transitions (no bank flag — it is not a traversal record)", () => {
+    const f = ad36Fixture()
+    try {
+      const envs = run(f)
+      const jd = envs.filter((e) => e.category === "coach-judge")
+      expect(jd.length).toBe(2)
+      const settle = jd.find((e) => e.summary === "kind=traversal answer=none node=file_a1")
+      expect(settle).toBeDefined()
+      const summ = jd.find((e) => e.summary.startsWith("pos=file_a1 moves=3"))
+      expect(summ).toBeDefined()
+      expect(summ!.summary.length).toBe(141) // 140-char display bound + ellipsis — the raw 500-x never reaches the UI
+      expect(summ!.summary.endsWith("…")).toBe(true)
+      const boot = envs.filter((e) => e.category === "transitions")
+      expect(boot.length).toBe(1)
+      expect(boot[0]!.summary).toBe("persona-boot")
+      expect((boot[0] as any).sourceRef.bankAuthoritative).toBeUndefined()
+      expect(envs.filter((e) => e.category === "other")).toEqual([])
     } finally { f.cleanup() }
   })
   test("C: nudge rows carry nudgeKind = the record's OWN header token verbatim-lowercased (join-scoped, LAST key); headerless synthetics stay strict five keys; lifecycle rows byte-unchanged (no nudgeKind ever)", () => {

@@ -131,7 +131,9 @@ describe("ad38 defaults — gate-blocked is coach-owned noise", () => {
   test("shipped defaults list gate-blocked in coach-activity sources (order = declaration order)", () => {
     const config = defaultConfig()
     const coach = config.categories.find((c) => c.id === "coach-activity")
-    expect(coach?.sources.historyEvents).toEqual(["agent.coach", "gate-blocked"])
+    // v14 (Design v1 traceability): nudge-delivered receipts joined this lane — still
+    // declaration order, still NOTHING else moved (the neighbor pins below hold unchanged).
+    expect(coach?.sources.historyEvents).toEqual(["agent.coach", "gate-blocked", "nudge-delivered"])
   })
   test("router routes gate-blocked to coach-activity; NOTHING else moves (neighbor pins + catch-all + part arm)", () => {
     const router = buildCategoryRouter(defaultConfig())

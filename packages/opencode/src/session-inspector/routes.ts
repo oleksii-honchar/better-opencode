@@ -15,7 +15,7 @@ import { buildCategoryRouter } from "./category-mapper"
 import { resolveInspectorDbPath, openInspectorDb } from "./db"
 import type { EngineDbInputs } from "./db"
 import { SESSION_INSPECTOR_CONFIG_ERROR_NAME } from "./errors"
-import { parseSessionsFeedQuery, sessionFeedRows } from "./session-feed"
+import { parseSessionsFeedQuery, sessionFeedRows, sessionFeedRowsMerged } from "./session-feed"
 import { buildTimeline } from "./timeline"
 import type { TimelineFilters, TimelineEnvelope, PartRowView } from "./timeline"
 import { parsePayloadRef, resolvePayload } from "./payload"
@@ -101,6 +101,9 @@ export function configHttpResponse(deps: ConfigEndpointDeps) {
 
 export interface SessionsEndpointDeps extends ConfigEndpointDeps {
   engine: EngineDbInputs
+  /** AD42: FS reader for the folder-name merge. Optional on purpose — the q-absent
+   * path never uses it, and pre-AD42 fixtures stay valid without re-anchoring. */
+  scanIo?: ScanIO
 }
 
 export function sessionsHttpResponse(params: URLSearchParams, deps: SessionsEndpointDeps) {
@@ -111,7 +114,18 @@ export function sessionsHttpResponse(params: URLSearchParams, deps: SessionsEndp
   if (!config.ok) return HttpServerResponse.jsonUnsafe(configErrorBody(config), { status: 500 })
 
   const dbPath = resolveInspectorDbPath({ dbMode: config.config.paths.dbMode, engine: deps.engine })
-  const rows = sessionFeedRows({ dbPath, q: query.value.q, limit: query.value.limit })
+  // AD42: q present + a configured agentsRoot + an FS reader ⇒ merged feed (folder-name
+  // path joins the DB path); every other case is the untouched plain-feed call site.
+  const rows =
+    query.value.q !== undefined && config.config.paths.agentsRoot.length > 0 && deps.scanIo !== undefined
+      ? sessionFeedRowsMerged({
+          dbPath,
+          q: query.value.q,
+          limit: query.value.limit,
+          agentsRoot: config.config.paths.agentsRoot,
+          io: deps.scanIo,
+        })
+      : sessionFeedRows({ dbPath, q: query.value.q, limit: query.value.limit })
   if (!rows.ok) {
     return HttpServerResponse.jsonUnsafe(
       {
@@ -417,7 +431,7 @@ export const productionResolveSessionPath = makeResolverSessionPath(nodeSpawnRes
 export const sessionInspectorRoutes = HttpRouter.use((router) =>
   Effect.gen(function* () {
     const configDeps = productionConfigDeps()
-    const sessionsDeps: SessionsEndpointDeps = { ...configDeps, engine: productionEngineDbInputs() }
+    const sessionsDeps: SessionsEndpointDeps = { ...configDeps, engine: productionEngineDbInputs(), scanIo: nodeScanIO }
     const scanDeps: ScanEndpointDeps = { configPath: configDeps.configPath, configIo: configDeps.io, baseDirs: configDeps.baseDirs, io: nodeScanIO }
     const viewDeps: SessionViewEndpointDeps = {
       ...configDeps,

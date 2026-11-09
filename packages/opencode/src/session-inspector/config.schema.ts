@@ -187,14 +187,18 @@ export function defaultCategories(): InspectorCategory[] {
     category(2, "assistant-text", "Assistant Text", { parts: ["text"], roles: ["assistant"] }),
     category(3, "reasoning", "Reasoning", { parts: ["reasoning"] }),
     category(4, "tool-calls", "Tool Calls", { parts: ["tool"], log: "tools.log" }),
-    category(5, "transitions", "Transitions", { historyEvents: ["persona.transition", "TRN"] }),
+    category(5, "transitions", "Transitions", { historyEvents: ["persona.transition", "TRN", "persona-boot"] }),
     category(6, "pipeline", "Pipeline", { historyEvents: ["started", "handoff", "completed", "error"] }),
-    category(7, "coach-judge", "Coach Judge", { historyEvents: ["plugin.judge"] }),
+    category(7, "coach-judge", "Coach Judge", {
+      historyEvents: ["plugin.judge", "judge-assess", "judge-summary"],
+    }), // v14 (Design v1 traceability): the coach settlement/summary lines are judge-family records — same lane, their own names
     // AD38 (owner order 2026-11-07, DEC-O): deterministic gate-block notices are coach-owned
     // noise, not catch-all leftovers — added to this lane's sources (multi-event precedent
     // above). Defaults, NOT the owner file: it carries no categories section and adding one
     // would replace all twelve category arrays to change one list (rejected rationale, DEC-O).
-    category(8, "coach-activity", "Coach Activity", { historyEvents: ["agent.coach", "gate-blocked"] }),
+    category(8, "coach-activity", "Coach Activity", {
+      historyEvents: ["agent.coach", "gate-blocked", "nudge-delivered"],
+    }), // v14 (Design v1 traceability, 2026-11-08) supersedes the AD36(B) join-exclusion: delivery receipts are labeled bookkeeping rows here (receipt wording in timeline.historySummary), never content
     category(9, "amt-activity", "AMT Activity", { historyEvents: ["agent.amt"] }),
     category(10, "engine-nudges", "Engine Nudges", { historyEvents: ["plugin.nudge"] }),
     category(11, "lifecycle", "Lifecycle", { parts: ["step-start", "step-finish", "patch", "compaction", "file"] }),

@@ -31,6 +31,11 @@ describe("loadInspectorConfig — defaults (no config file)", () => {
     const byId = new Map(config.categories.map((c) => [c.id, c]))
     expect(byId.get("transitions")?.sources.historyEvents).toContain("persona.transition")
     expect(byId.get("transitions")?.sources.historyEvents).toContain("TRN")
+    // v14 (Design v1 traceability, design 261107): the new names ship in the default
+    // vocabulary — same 12 lanes, same order (GOLDEN set unchanged), names only added.
+    expect(byId.get("transitions")?.sources.historyEvents).toContain("persona-boot")
+    expect(byId.get("coach-judge")?.sources.historyEvents).toEqual(["plugin.judge", "judge-assess", "judge-summary"])
+    expect(byId.get("coach-activity")?.sources.historyEvents).toEqual(["agent.coach", "gate-blocked", "nudge-delivered"])
     expect(byId.get("pipeline")?.sources.historyEvents).toEqual(["started", "handoff", "completed", "error"])
     expect(byId.get("other")?.catchAll).toBe(true)
     expect(config.paths.dbMode).toBe("engine-derived")

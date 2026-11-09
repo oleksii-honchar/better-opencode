@@ -1987,13 +1987,14 @@ describe("ad25 legend registry — static, per default-active lane in display or
       "assistant-text": /visible reply text/,
       reasoning: /size in chars/, // references the AD19-24 label contract
       "tool-calls": /'bash'/, // the card's example rides in the text
-      transitions: /decision-tree traversal/,
+      transitions: /decision-tree traversal[\s\S]*persona-boot/, // v14 widened: the lane names its second source
       pipeline: /lifecycle commands/,
-      "coach-judge": /coach judge evaluation/,
+      "coach-judge": /coach judge evaluation[\s\S]*judge-assess/, // v14 widened: traceability lines named
       // AD38 NAMED pin stretch (owner order: gate-blocked joins this lane): the description must
       // document BOTH sources honestly. Original clause kept verbatim (still true); the pin now
       // also requires the gate-blocked source to be named. This is the only legend-pin change.
-      "coach-activity": /coach agent's own recorded actions[\s\S]*gate-blocked/,
+      // (the "only change" note above was true for that order; v14 widened three anchors here)
+      "coach-activity": /coach agent's own recorded actions[\s\S]*gate-blocked[\s\S]*nudge-delivered/, // v14 widened: receipts named honestly
       "amt-activity": /meta tool/i,
       "engine-nudges": /deterministic reminders/i,
       lifecycle: /compaction/,

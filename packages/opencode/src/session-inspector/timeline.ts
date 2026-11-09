@@ -88,7 +88,14 @@ const byteLength = (text: string): number => Buffer.byteLength(text, "utf8")
 // pure delivery-tracking, they do NOT duplicate nudge content. The nudge CONTENT renders
 // via its own lane (the synthetic-part join, Task 4b) when applicable, so receiving the
 // receipt anywhere else would show bookkeeping as if it were content.
-export const EXCLUDED_EVENT_TYPES: readonly string[] = ["step-start", "step-finish", "nudge-delivered"]
+// SUPERSEDED (Design v1 traceability ruling, design 261107, 2026-11-08 — owner brief item C):
+// full traceability requires every RECORDED event to be VISIBLE. The original objection was
+// bookkeeping-shown-as-content; the honest fix is a LABELED receipt, not invisibility: the
+// line now routes through its configured lane (default: coach-activity) with explicit receipt
+// wording from historySummary's kv arm (no content bytes, no content lane touched, no
+// duplication by construction — receipts never carry ref_part_id; content rows never carry
+// receipt text). REGISTERED DEVIATION from AD36(B) with the owner ruling that superseded it.
+export const EXCLUDED_EVENT_TYPES: readonly string[] = ["step-start", "step-finish"]
 
 // AD36 (C) — the nudge TYPE STRING lives only inside the record itself: the reminder header
 // token, verbatim ("<system-reminder>\n  Traversal Check:", "Rule Compliance:", …). Boundary
@@ -305,7 +312,7 @@ export function buildTimeline(input: BuildTimelineInput): TimelineResult {
             ...(isNudge ? { attributed: true as const } : {}),
             ...lineage,
           },
-          summary: historySummary(line.event, detailsObject),
+          summary: historySummary(line.event, detailsObject, typeof line.details === "string" ? line.details : undefined),
           payloadRef: { kind: "historyLine", file: "history.jsonl", line: index + 1, ...truncationFor(raw, capBytes) },
           ...(category === catchAllId && typeof line.event === "string" ? { historyEvent: line.event } : {}), // LAST key — named sixth-key census (ad37 join lane pins both sides)
         }
@@ -399,12 +406,34 @@ function partSummary(partType: string, data: Record<string, unknown> | undefined
   }
 }
 
-function historySummary(event: string, details: Record<string, unknown> | undefined): string {
+function historySummary(
+  event: string,
+  details: Record<string, unknown> | undefined,
+  detailsRaw: string | undefined,
+): string {
   if ((event === "persona.transition" || event === "TRN") && details !== undefined) {
     // summary fields come from the JSON-PARSED details carrier (DEC-L), never the raw string
     const nodeId = typeof details.node_id === "string" ? details.node_id : "?"
     const target = typeof details.target_node === "string" ? details.target_node : "?"
     return `${nodeId} → ${target}`
+  }
+  // v14 (Design v1 traceability) — the receipt-shaped names. Their details are RAW "k=v …"
+  // strings (the history.mjs --message shape — never JSON), so they read from detailsRaw,
+  // the ONE place the truth exists. No new categories, no invented fields: the line says
+  // exactly what the record says. Unknown events keep the byte-identical event-name fallback.
+  if (event === "nudge-delivered" && detailsRaw !== undefined) {
+    const kind = /(?:^|\s)kind=(\S+)/.exec(detailsRaw)?.[1]
+    const node = /(?:^|\s)node=(\S+)/.exec(detailsRaw)?.[1]
+    // ONE separator after the verb — the kv fields keep the record's OWN spacing
+    const fields: string[] = []
+    if (kind !== undefined) fields.push(`kind=${kind}`)
+    if (node !== undefined) fields.push(`node=${node}`)
+    return fields.length === 0 ? "received" : `received · ${fields.join(" ")}`
+  }
+  if ((event === "judge-assess" || event === "judge-summary") && detailsRaw !== undefined) {
+    // verbatim kv text (the coach's own line IS the record); display-bounded like every summary
+    const cap = 140
+    return detailsRaw.length <= cap ? detailsRaw : detailsRaw.slice(0, cap) + "…"
   }
   return event
 }

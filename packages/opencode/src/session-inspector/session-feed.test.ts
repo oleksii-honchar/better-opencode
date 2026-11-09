@@ -5,8 +5,9 @@ import path from "path"
 import { HttpServerResponse } from "effect/unstable/http"
 import { openInspectorDb } from "./db"
 import { sessionsHttpResponse } from "./routes"
-import { sessionFeedRows, parseSessionsFeedQuery, SESSIONS_LIMIT_DEFAULT, SESSIONS_LIMIT_MAX } from "./session-feed"
-import { insertSession, makeFixtureSessionDb, readBytes, tempDirs } from "./session-inspector.test-utils"
+import { sessionFeedRows, sessionFeedRowsMerged, parseSessionsFeedQuery, SESSIONS_LIMIT_DEFAULT, SESSIONS_LIMIT_MAX } from "./session-feed"
+import type { ScanIO } from "./session-scan"
+import { insertSession, makeFixtureSessionDb, nodeScanIO, readBytes, tempDirs, writeSessionFolder } from "./session-inspector.test-utils"
 
 // Task 3 AC1/AC4 — sessions feed over the REAL engine schema (fixture built by
 // replaying the repo's own migration journal), read-only through Task 2's
@@ -183,6 +184,195 @@ describe("sessions feed — input validation is Zod-typed (Result-style)", () =>
       const badBody = (await badWeb.json()) as { name: string; data: { message: string } }
       expect(badBody.name).toBe("BadRequest")
       expect(badBody.data.message).toContain("limit")
+    } finally {
+      dirs.cleanup()
+    }
+  })
+})
+
+
+// AD42 — folder-name search merged into the feed (card: "Find sessions by folder name
+// when the session id is unknown"). Law: when q is present, agentsRoot folder NAMES are
+// matched first (same user-literal-escaping semantics as the SQL LIKE path); content
+// (session.md) is read for name-matched candidate dirs ONLY; the match resolves via that
+// folder's session.md frontmatter sessionId; the merged response carries the FULL DB row
+// when the session is in the engine DB (joins the unchanged comparator) and the exact
+// scan-route record shape otherwise (no invented fields); id-based dedup, DB form wins;
+// q absent → byte-identical existing behavior with ZERO filesystem touching.
+
+type MergedRow = Record<string, unknown>
+
+function fsReadCounter() {
+  const base = nodeScanIO()
+  const dirListings: string[] = []
+  const fileReads: string[] = []
+  const io: ScanIO = {
+    readDir: (dir) => {
+      dirListings.push(dir)
+      return base.readDir(dir)
+    },
+    read: (file) => {
+      fileReads.push(file)
+      return base.read(file)
+    },
+  }
+  return { io, dirListings, fileReads }
+}
+
+function mergedRows(input: { dbPath: string; q: string | undefined; agentsRoot: string; io: ScanIO }): MergedRow[] {
+  const result = sessionFeedRowsMerged(input)
+  if (!result.ok) throw new Error(`merged feed failed: ${result.message}`)
+  return result.rows as unknown as MergedRow[]
+}
+
+function plainFeed(dbPath: string, q: string | undefined): MergedRow[] {
+  const result = sessionFeedRows({ dbPath, q, limit: undefined })
+  if (!result.ok) throw new Error(`feed failed: ${result.message}`)
+  return result.rows as unknown as MergedRow[]
+}
+
+describe("sessions feed — folder-name search merge (AD42)", () => {
+  test("folder-name substring resolves via session.md frontmatter; the session appears in DB form", () => {
+    const { dirs, dbPath } = fixtureDb()
+    try {
+      // the owner's verbatim example folder name as the fixture
+      insertSession(dbPath, { id: "ses_byfolder", title: "Unrelated title", timeCreated: 100, timeUpdated: 900 })
+      insertSession(dbPath, { id: "ses_other", title: "Also unrelated", timeCreated: 1, timeUpdated: 1 })
+      writeSessionFolder(path.join(dirs.agentsDir, "00906918289366585344"), { sessionId: "ses_byfolder" })
+
+      const rows = mergedRows({ dbPath, q: "00906918", agentsRoot: dirs.agentsDir, io: nodeScanIO() })
+      expect(rows.map((r) => r.id)).toEqual(["ses_byfolder"])
+      expect(Object.keys(rows[0])).toEqual(["id", "title", "agent", "time_created", "time_updated", "parent_id", "cost"])
+    } finally {
+      dirs.cleanup()
+    }
+  })
+
+  test("folder-resolved DB rows join the unchanged ordering (time_updated DESC, id DESC)", () => {
+    const { dirs, dbPath } = fixtureDb()
+    try {
+      insertSession(dbPath, { id: "ses_title", title: "shared9 report", timeCreated: 1, timeUpdated: 3000 })
+      insertSession(dbPath, { id: "ses_folder2", title: "Unrelated fl2", timeCreated: 2, timeUpdated: 3000 })
+      insertSession(dbPath, { id: "ses_folder1", title: "Unrelated fl1", timeCreated: 3, timeUpdated: 2000 })
+      writeSessionFolder(path.join(dirs.agentsDir, "shared9dir"), { sessionId: "ses_folder1" })
+      writeSessionFolder(path.join(dirs.agentsDir, "shared9dir_two"), { sessionId: "ses_folder2" })
+
+      // q matches ONLY ses_title by title/id; the two folder-named sessions join via folder names.
+      const rows = mergedRows({ dbPath, q: "shared9", agentsRoot: dirs.agentsDir, io: nodeScanIO() })
+      // t=3000 tie broken by id DESC ("ses_title" > "ses_folder2"), then t=2000.
+      expect(rows.map((r) => r.id)).toEqual(["ses_title", "ses_folder2", "ses_folder1"])
+    } finally {
+      dirs.cleanup()
+    }
+  })
+
+  test("dedup law: a session matched by id AND folder name appears ONCE, DB form wins", () => {
+    const { dirs, dbPath } = fixtureDb()
+    try {
+      insertSession(dbPath, { id: "dup9ses", title: "no folder words here", timeCreated: 1, timeUpdated: 10 })
+      writeSessionFolder(path.join(dirs.agentsDir, "dup9_mirror"), { sessionId: "dup9ses" })
+
+      const counters = fsReadCounter()
+      const rows = mergedRows({ dbPath, q: "dup9", agentsRoot: dirs.agentsDir, io: counters.io })
+      // the folder lane must REALLY run (name matches — a stub that ignores folders would
+      // pass a bare "appears once" vacuously); with BOTH paths hitting, dedup keeps it single.
+      expect(counters.dirListings.length).toBeGreaterThan(0)
+      expect(rows.length).toBe(1)
+      expect(rows[0].id).toBe("dup9ses")
+      expect(Object.keys(rows[0])).toEqual(["id", "title", "agent", "time_created", "time_updated", "parent_id", "cost"])
+    } finally {
+      dirs.cleanup()
+    }
+  })
+
+  test("folder matcher obeys the SAME literal law as the SQL path: title-path and folder-path hits are identical (backslash forms included)", () => {
+    const { dirs, dbPath } = fixtureDb()
+    try {
+      // Names appear BOTH as DB titles (exercised by the shipped FEED_SQL LIKE path)
+      // and as folder names (the folder matcher). PARITY of the two id-sets per query
+      // IS the law — no invented escaping semantics.
+      const pairs: Array<[string, string]> = [
+        ["pct%9x", "ses_pct"],
+        ["pctX9x", "ses_decoy"],
+        ["u_9x", "ses_us"],
+        ["u\\Z9", "ses_bs"],
+      ]
+      for (const [name, id] of pairs) {
+        insertSession(dbPath, { id, title: name, timeCreated: 1, timeUpdated: 1 })
+        writeSessionFolder(path.join(dirs.agentsDir, name), { sessionId: id })
+      }
+
+      for (const q of ["pct%9", "u_9", "u\\_9", "u.9"]) {
+        // non-vacuity: the folder lane must really run (a folder-ignoring merge would
+        // pass a pure set-parity trivially).
+        const counters = fsReadCounter()
+        // same-ordered id sets from the title path vs the merged (title+folder) path:
+        // dedup (DB form wins) makes the merged set exactly the union — parity means
+        // the folder matcher never admits a name the LIKE path would reject, nor misses one it admits.
+        const titleOnly = plainFeed(dbPath, q).map((r) => r.id)
+        const merged = mergedRows({ dbPath, q, agentsRoot: dirs.agentsDir, io: counters.io }).map((r) => r.id)
+        expect(counters.dirListings.length).toBeGreaterThan(0)
+        expect(merged).toEqual(titleOnly)
+      }
+      // sanity that the fixture world is non-vacuous: the literal "." is not a wildcard,
+      // and "%" is not one either — the plain feed finds exactly the literal-in-title rows.
+      expect(plainFeed(dbPath, "pct%9").map((r) => r.id)).toEqual(["ses_pct"])
+      expect(plainFeed(dbPath, "u_9").map((r) => r.id)).toEqual(["ses_us"])
+    } finally {
+      dirs.cleanup()
+    }
+  })
+
+  test("no DB row → the exact scan-route record shape (no invented fields); empty history marks scaffoldIncomplete", () => {
+    const { dirs, dbPath } = fixtureDb()
+    try {
+      writeSessionFolder(path.join(dirs.agentsDir, "only9fld"), { sessionId: "ses_fsonly" })
+      writeSessionFolder(path.join(dirs.agentsDir, "part9fld"), { sessionId: "ses_fspart", history: "" })
+
+      const rows = mergedRows({ dbPath, q: "9fld", agentsRoot: dirs.agentsDir, io: nodeScanIO() })
+      expect(rows.length).toBe(2)
+      expect(Object.keys(rows[0])).toEqual(["sessionId", "folderPath", "folderOnly"])
+      expect(rows[0]).toEqual({
+        sessionId: "ses_fsonly",
+        folderPath: path.join(dirs.agentsDir, "only9fld"),
+        folderOnly: true,
+      })
+      expect(rows[1].sessionId).toBe("ses_fspart")
+      expect(rows[1].scaffoldIncomplete).toBe(true)
+    } finally {
+      dirs.cleanup()
+    }
+  })
+
+  test("NO q: byte-identical to the plain feed and the filesystem is never touched", () => {
+    const { dirs, dbPath } = fixtureDb()
+    try {
+      insertSession(dbPath, { id: "ses_a", title: "A", timeCreated: 1, timeUpdated: 2 })
+      writeSessionFolder(path.join(dirs.agentsDir, "00906918289366585344"), { sessionId: "ses_a" })
+
+      const counters = fsReadCounter()
+      const result = sessionFeedRowsMerged({ dbPath, q: undefined, limit: undefined, agentsRoot: dirs.agentsDir, io: counters.io })
+      if (!result.ok) throw new Error(`merged feed failed: ${result.message}`)
+      expect(result.rows as unknown as MergedRow[]).toEqual(plainFeed(dbPath, undefined))
+      expect(counters.dirListings.length).toBe(0)
+      expect(counters.fileReads.length).toBe(0)
+    } finally {
+      dirs.cleanup()
+    }
+  })
+
+  test("q present but NO folder-name match: body equals the plain feed, no folder content is ever read", () => {
+    const { dirs, dbPath } = fixtureDb()
+    try {
+      insertSession(dbPath, { id: "ses_keep", title: "keepme9 report", timeCreated: 1, timeUpdated: 9 })
+      writeSessionFolder(path.join(dirs.agentsDir, "zz_nofit_a"), { sessionId: "ses_nofit_a" })
+      writeSessionFolder(path.join(dirs.agentsDir, "zz_nofit_b"), { sessionId: "ses_nofit_b" })
+
+      const counters = fsReadCounter()
+      const rows = mergedRows({ dbPath, q: "keepme9", agentsRoot: dirs.agentsDir, io: counters.io })
+      expect(rows).toEqual(plainFeed(dbPath, "keepme9"))
+      expect(rows.map((r) => r.id)).toEqual(["ses_keep"])
+      expect(counters.fileReads.filter((f) => f.endsWith("session.md")).length).toBe(0)
     } finally {
       dirs.cleanup()
     }
