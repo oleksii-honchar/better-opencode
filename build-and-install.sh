@@ -177,6 +177,25 @@ ensure_shell_integration() {
   fi
 }
 
+# Atomic, signature-verified install (fleet hazard 2026-11-09, mmm1):
+# `cp` onto a RUNNING binary truncates the same inode — the result can carry a
+# broken code signature, and on Apple Silicon every subsequent exec is SIGKILLed
+# with zero output (a running old process masks it for weeks). Correct sequence:
+# write sibling tmp → ad-hoc re-sign → verify → atomic mv (old inode stays valid
+# for running processes). Fails loudly instead of installing an un-exec-able binary.
+install_forked_binary() {
+  local src="$1" dest="$2"
+  local tmp="${dest}.new.$$"
+  mkdir -p "$(dirname "$dest")"
+  cp "$src" "$tmp"
+  chmod +x "$tmp"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    codesign -s - --force "$tmp"
+    codesign -v "$tmp" || { echo "ERROR: re-signed binary fails signature verification: $tmp"; rm -f "$tmp"; exit 1; }
+  fi
+  mv -f "$tmp" "$dest"
+}
+
 # Handle unconfigure standalone (no build needed)
 if [ "$UNCONFIGURE_OPENCHAMBER" = true ]; then
   unconfigure_openchamber
@@ -190,9 +209,7 @@ if [ "$CONFIGURE_OPENCHAMBER" = true ]; then
   # no build has run, so the binary source may not exist).
   if [ "$EXPLICIT_INSTALL" = true ]; then
     echo "=== Installing forked binary to ~/bin/better-opencode ==="
-    mkdir -p "$HOME/bin"
-    cp "$BINARY_SOURCE" "$BETTER_OPENCODE_BIN"
-    chmod +x "$BETTER_OPENCODE_BIN"
+    install_forked_binary "$BINARY_SOURCE" "$BETTER_OPENCODE_BIN"
     echo "  Binary: $BETTER_OPENCODE_BIN"
   fi
   configure_openchamber "$BETTER_OPENCODE_BIN"
@@ -235,9 +252,7 @@ if [ "$ONLY_BUILD" = true ]; then
 fi
 
 echo "=== Installing forked binary to ~/bin/better-opencode ==="
-mkdir -p "$HOME/bin"
-cp "$BINARY_SOURCE" "$BETTER_OPENCODE_BIN"
-chmod +x "$BETTER_OPENCODE_BIN"
+install_forked_binary "$BINARY_SOURCE" "$BETTER_OPENCODE_BIN"
 
 # Verify the binary was actually installed
 if [ ! -f "$BETTER_OPENCODE_BIN" ]; then
